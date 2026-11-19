@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.40.2-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.41.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -166,7 +166,7 @@ claude plugin marketplace update zensu
 claude plugin update zensu@zensu
 ```
 
-Optional, for feature tracking: install zensu-cli 0.18.0 or later with
+Optional, for feature tracking: install zensu-cli 0.22.0 or later with
 `brew install --cask mkitconsulting/tap/zensu` (upgrade with
 `brew update && brew upgrade --cask mkitconsulting/tap/zensu`),
 `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows
@@ -449,7 +449,7 @@ through it:
 | `/zensu:implement` | **A knowledge-search query** made of the feature title and key terms; linked test and source file paths; **the documentation it writes, as whole Markdown pages** (step 6); a free-text revision summary; status updates |
 | `/zensu:docs` | **The documentation it writes, as whole Markdown pages** in its default wiki mode; with `--repo-file`, the path of the file it writes into your repository instead |
 | `/zensu:security-review` | Classification attributes, the security tests it links, **a free-text findings summary** and approval conditions |
-| `/zensu:pulse` | HEAD SHA, branch, **the absolute path of your project root**, an optional product id and, at the end, the paths of the tracked files that differ from the start commit, those that other authors' commits brought in only after you confirm them, and **of the untracked, non-ignored files created or changed during the session** |
+| `/zensu:pulse` | HEAD SHA, branch, **the absolute path of your project root**, an optional product id and, at the end, the paths of the tracked files that differ from the start commit and **of the untracked, non-ignored files created or changed during the session**. It asks you first when the session ends in another worktree than the one it started in, when the start commit left the history or when a commit since then names another author; changes you bring in under your own address or without a commit, such as a squash merge, are sent without that question. A session can also end without any path |
 | `/zensu:pilot` | Feature status changes and release-gate checks |
 | `/zensu:work` | Stage events, heartbeats, questions and follow-ups for its work order |
 | Automatic work capture, any implementation task | The goal's title (at most 160 characters), its key and a criteria version or SHA-256 digest; the commit SHA of each new clean commit for that goal. Never transcripts, prompts, diffs, file lists, credentials or token usage |
@@ -528,8 +528,9 @@ driver additionally need `playwright-cli` on `PATH`
 (`npm install -g @playwright/cli@0.1.24`, the version the browser consent gate
 was measured against; `brew install playwright-cli` is unpinned).
 
-Feature tracking and AI-work capture need zensu-cli 0.18.0 or later: older
-releases cannot declare a goal's feature, so AI-work capture fails.
+Feature tracking needs zensu-cli 0.22.0 or later: older releases cannot read
+free text from a file, so skill calls that send documents, descriptions,
+findings or JSON to Zensu fail.
 `zensu --version` shows the installed release, and the session banner and
 `/zensu:doctor` warn about an older one without blocking anything.
 

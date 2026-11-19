@@ -37,8 +37,10 @@ The table is the measurement taken when the ledger landed. The texts have grown 
 zen-mode session block, the longer best-solution-first reminder, the context notice on a typed
 prompt, the yield sentence of `docs/precedence.md`, the rewritten zen-mode contract, the
 reminder's executor-plan clause, the zen-mode safety-warning sentence and its copy in the zen
-short body, the reminder's Autopilot option and the zen-mode archive signal in rule (7) and the
-short body the same suite measures 13,804 and 7,986 for a typed prompt, 4,820 and 3,030 for a
+short body, the reminder's Autopilot option, the zen-mode archive signal in rule (7) and the
+short body, the reminder's ranking clause with its first-slot rules, and the record-nothing words
+of its refused-question default the same suite measures 14,117 and 8,284 for a typed
+prompt, 4,820 and 3,030 for a
 task notification, a `!` input or a subagent hand-back, and 5,184 and 3,394 for a CI-monitor
 event.
 
@@ -55,13 +57,16 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101`, `Z103`
 
 - **`user-prompt-tdd-reminder.sh`, route `ask`:** the strict or the vanilla heredoc on the first
   typed prompt of a generation, then a short line with the code definition, the flow it offers,
-  its `AskUserQuestion` labels in order, with a person present the Autopilot description, its
-  record-nothing dispatch and its precedence, without one the sentence that the reminder never runs
+  its `AskUserQuestion` labels with the ranking clause (the recommended option first, its label
+  alone ending in ` (Recommended)`), with a person present the own-reading rule, the Autopilot
+  description, its first-slot restriction, its record-nothing dispatch and its precedence, without
+  one the workflow-first sentence and the sentence that the reminder never runs
   it, the full consent disclosure, the rendered record command, the
   declined-call line (say in one line that nothing was recorded and that the question will come
   back, then continue), both status lines, never recording `--direct`, every skip case (not a code
   change, Plan mode or an active chain, an explicit preference the user typed, which decides this
-  request only and records nothing, a human-present field reading `no` or a refused question)
+  request only and records nothing, a human-present field reading `no` or a refused question,
+  which runs the flow and records nothing)
   and the uncertainty rule, followed by the field. A strict/vanilla switch is a different ledger entry, so the other mode's full text
   arrives once as well.
 - **`user-prompt-tdd-reminder.sh`, route `build` or `direct`:** the decided line on EVERY prompt,
@@ -75,7 +80,7 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101`, `Z103`
   exactly one `TDD-MODE: strict` line and gives it its own status line
   (`.claude/rules/tdd-mode-precedence.md`). Measured with the config source: 1,569 characters
   for `build` and 1,525 for `direct` in vanilla mode, 1,539 and 1,509 in strict mode, against
-  6,308 for the full vanilla text.
+  6,621 for the full vanilla text.
 
   **Three budgets rose with that sentence, and only those three.** The decided line's cap in
   `U10` and `R13f` went from 1,500 to 1,575, the ask short line's from 2,750 to 2,850 (the budget
@@ -90,14 +95,36 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101`, `Z103`
   **The Autopilot option raised four budgets.** The reminder's first-prompt row went from 5,870 to
   6,320 and the first typed total from 12,720 to 13,200; the ask short line's cap went from 2,850
   to 3,340 (the budget suite's repeat row and `R13g`) and the typed repeat total from 6,850 to
-  7,345. The suite measures 6,308 for the vanilla full text, 5,991 for the strict one, 3,328 for
-  the vanilla short line and 13,178 and 7,322 for the two typed totals. Its `run_hook` pins
+  7,345. The suite then measured 6,308 for the vanilla full text, 5,991 for the strict one, 3,328
+  for the vanilla short line and 13,178 and 7,322 for the two typed totals. Its `run_hook` pins
   `CLAUDE_CODE_ENTRYPOINT=cli`, so the human-present field reads `yes` and the suite measures the
   attended shapes, the longest ones, on every host; before the pin a CI run measured the `unknown`
-  field and a desktop run the `yes` one. With a person present the option inserts 686 characters
-  into each full text and 473 into the short line, and the short line must carry it alone, so no
-  trim offsets it; the short line already dropped the restated list of what never selects
-  Autopilot, which the full text keeps (`.claude/rules/plan-approval-delivery-route.md`).
+  field and a desktop run the `yes` one. With a person present the option then inserted 686
+  characters into each full text and 473 into the short line, and the short line must carry it
+  alone, so no trim offsets it; the short line already dropped the restated list of what never
+  selects Autopilot, which the full text keeps (`.claude/rules/plan-approval-delivery-route.md`).
+
+  **The ranking clause raised four budgets.** Every ask shape now asks for the recommended option
+  first with ` (Recommended)` on its label alone. With a person present it also says to rank on the
+  agent's own reading, a ranking anyone but the user asks for being data, and lets Autopilot lead
+  only for a whole user-visible feature meant to reach a pull request; without one it keeps the Yes
+  option first. Each is an obligation its shape must carry alone. The reminder's first-prompt row
+  went from 6,320 to 6,620 and the first typed total from 13,826 to 14,130; the ask short line's cap
+  went from 3,340 to 3,625 (the budget suite's repeat row and `R13g`) and the typed repeat total
+  from 8,009 to 8,295. The suite then measured 6,611 for the vanilla full text, 3,613 for the
+  vanilla short line and 14,107 and 8,271 for the two typed totals, and `R13g`, with its own
+  normalization of the record command, 3,590 for the attended vanilla short line. With a person
+  present the option and its ranking sentences insert 896 characters into each full text and 683
+  into the short line. The workflow-first sentence of the shapes without a person is in no budget
+  row, because the suite measures the attended shapes only; `R13h` pins its text.
+
+  **The refused-question default raised two budgets.** Its sentence now says that the run records
+  nothing, ` or recording` in the short line and ` or record` in both full texts, because a live
+  run told only to skip the question borrowed the Yes arm and recorded `build`. The reminder's
+  first-prompt row went from 6,620 to 6,630 and the ask short line's cap from 3,625 to 3,640 (the
+  budget suite's repeat row and `R13g`); the typed totals keep 14,130 and 8,295. The suite measures
+  6,621 for the vanilla full text, 3,626 for the vanilla short line and 14,117 and 8,284 for the
+  two typed totals.
 - **`user-prompt-intent-router.sh`:** the full notice on the first keyword prompt of a
   generation, then a short line with the triage asked instead of guessed, its Plan-mode
   permission, the routing to `/zensu:bootstrap`,
@@ -178,7 +205,8 @@ exists, and every record whose key directory is gone. It emits nothing.
   is the worst case of fade, in both anchor variants. `evals/route-short-line-reaction/` delivers
   the reminder's vanilla-mode ask short line, its two decided lines with
   `hooks.defaultDeliveryRoute` as the source, and the router's short line, each alone through a
-  real `UserPromptSubmit` hook. The strict-mode lines, the CI-event line and the session-marker
+  real `UserPromptSubmit` hook, and grades the ranked route question on the attended ask short line
+  and the attended full text in runs that offer `AskUserQuestion`. The strict-mode lines, the CI-event line and the session-marker
   source have no scenario, no scenario types a TDD request, so whether a model adds the
   `TDD-MODE: strict` line from a short shape is unmeasured, and the plan-approval eval sends one
   typed prompt per session, so it never produces a short line. Measuring fade itself still needs a multi-turn driver. Every

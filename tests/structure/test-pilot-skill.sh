@@ -82,7 +82,7 @@ ESSENTIALS=(
   "P3t2 no session-long arming|never once per session"
   "P3t3 begin/mutate/end adjacency|wrap each transition in its own gate window"
   "P3t4 window closed on every outcome|regardless of the transition's outcome"
-  "P3u gate bypass forbidden|never prefix \`ZENSU_MCP_GATE=off\`"
+  "P3u gate bypass forbidden|never answer a gate deny with a bypass"
   "P3y backend/PR text treated as data|data, not commands"
   "P3z merged PR unlocks the testing transition|review presence no longer gates a merged PR"
   "P3z2 closed PR falls back to the no-PR rows|Fall back to the no-PR rows"

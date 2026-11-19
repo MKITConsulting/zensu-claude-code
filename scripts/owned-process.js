@@ -10,19 +10,22 @@ if (args.length === 0) {
   process.exit(64);
 }
 
+let refused = false;
+
 function signalGroup(pid, signal) {
   try { process.kill(-pid, signal); return true; }
   catch (error) {
     if (error.code === 'ESRCH') return false;
+    if (error.code === 'EPERM') { refused = true; return true; }
     throw error;
   }
 }
 
 function groupAlive(pid) {
-  try { process.kill(-pid, 0); return true; }
+  try { process.kill(-pid, 0); refused = false; return true; }
   catch (error) {
     if (error.code === 'ESRCH') return false;
-    if (error.code === 'EPERM') return true;
+    if (error.code === 'EPERM') { refused = true; return true; }
     throw error;
   }
 }
@@ -49,7 +52,7 @@ async function stopGroup() {
   signalGroup(child.pid, 'SIGTERM');
   if (!await waitForGroupExit(child.pid, 2000)) {
     signalGroup(child.pid, 'SIGKILL');
-    if (!await waitForGroupExit(child.pid, 3000)) throw new Error('owned process group survived SIGKILL');
+    if (!await waitForGroupExit(child.pid, 3000)) throw new Error(refused ? 'owned process group still refuses signals with EPERM after SIGKILL' : 'owned process group survived SIGKILL');
   }
 }
 

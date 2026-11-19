@@ -411,7 +411,7 @@ both_have "D14 autopilot option states its planning gate and forge-CLI cost" \
   'authenticated forge CLI (gh or glab), without which the Zensu workflow is the route'
 both_have "D15 pilot option states its zensu-CLI and tracked-feature prerequisite" \
   'MUST state the prerequisite' 'ALREADY tracked in Zensu'
-D15B_COST="its description MUST state the cost — the turn waits for the review chain and, by default, a full-suite run (/zensu:full-suite can leave it to the PR pipeline) and a live check of each acceptance criterion (evidence.fullSuiteGate, evidence.acceptanceGate)."
+D15B_COST="its description MUST state the cost — the turn waits for the review chain and, by default, a full-suite run (/zensu:full-suite can leave it to the PR pipeline) and a live check of each acceptance criterion."
 D15B_BAD=""
 [ "$BRANCHES_DISTINCT" = yes ] || D15B_BAD=" [not graded: D9pre failed]"
 for d15b_name in OUT OUT_STRICT; do
@@ -421,8 +421,9 @@ for d15b_name in OUT OUT_STRICT; do
   d15b_opt="${d15b_opt%%"(3) conducts the TRACKED FEATURE"*}"
   case "$d15b_opt" in (*"$D15B_COST"*) ;; (*) D15B_BAD="$D15B_BAD [$d15b_name option (2) lacks the cost statement]" ;; esac
   case "$d15b_ctx" in (*"no prerequisites"*) D15B_BAD="$D15B_BAD [$d15b_name still says no prerequisites]" ;; esac
+  case "$d15b_ctx" in (*evidence.fullSuiteGate*|*evidence.acceptanceGate*) D15B_BAD="$D15B_BAD [$d15b_name names an evidence gate key]" ;; esac
 done
-[ -z "$D15B_BAD" ] && check "D15b the Zensu-workflow option states its cost in both branches: the held turn, the full-suite run with /zensu:full-suite as the CI alternative and the live acceptance check with both config keys, and no branch calls it prerequisite-free" PASS \
+[ -z "$D15B_BAD" ] && check "D15b the Zensu-workflow option states its cost in both branches: the held turn, the full-suite run with /zensu:full-suite as the CI alternative and the live acceptance check, no branch names an evidence gate key, and no branch calls it prerequisite-free" PASS \
   || check "D15b Zensu-workflow option cost:$D15B_BAD" FAIL
 D15D_ARM="one asking for TDD, like these, ensures the specification carries exactly one line 'TDD-MODE: strict' and uses the status line 'Executing via /zensu:build (strict TDD requested)'"
 D15D_BAD=""
@@ -1133,7 +1134,7 @@ fi
 # in both hooks; these three rows keep the plan-hook contract visible from the
 # suite named for the hook. Both branches are graded through both_have, so a
 # one-sided edit of the (S) clause fails here as well as in P1.
-both_have "D34 both branches carry the (S) clause, the ask conjunct and the workflow-only RECORD sentence" \
+both_have "D34 both branches carry the (S) clause, the ask conjunct, the workflow-only RECORD sentence and the refused-question default that records nothing" \
   "(S) — read this before (A)" \
   "and the route field reads 'ask'" \
   "RECORD a Zensu-workflow answer before dispatching" \
@@ -1141,9 +1142,10 @@ both_have "D34 both branches carry the (S) clause, the ask conjunct and the work
   "The 'No — implement directly' answer records nothing and decides this plan only" \
   "this one Bash call comes BEFORE the 'next tool call' that arm names" \
   "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back" \
-  "evidence.acceptanceGate). Its description MUST also say that this answer is remembered for the rest of this session, later code requests included unless their reminder is switched off, through one Bash call the user may be asked to allow" \
+  "acceptance criterion. Its description MUST also say that this answer is remembered for the rest of this session, later code requests included unless their reminder is switched off, through one Bash call the user may be asked to allow" \
   "no evidence audit. Its description MUST also say that this answer decides this plan only and is not remembered" \
   "a route the field decided records nothing" \
+  "refused unanswered — default to the Zensu workflow and do NOT ask or record. The field's 'yes' holds" \
   "The field never names /zensu:autopilot or /zensu:pilot" \
   "ZENSU DELIVERY ROUTE:"
 # D35 the default fixture has no marker and no config default, so the field must

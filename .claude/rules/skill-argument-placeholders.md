@@ -6,6 +6,9 @@ paths:
   - "skills/build/references/review-chain.md"
   - "skills/pr-team-review/references/debate.md"
   - "tests/structure/test-skill-workflow-markers.sh"
+  - "tests/structure/lib-skill-free-text.js"
+  - "tests/structure/fixtures/record-zensu-cli-floor-help.js"
+  - "tests/structure/fixtures/zensu-cli-*-floor-help.json"
 ---
 
 # Skill Argument Placeholders (`test-skill-workflow-markers.sh` AP checks)
@@ -95,9 +98,10 @@ paragraph of `docs/build-workflow.md` (unpinned). `ZENSU_ROOT` is read by nothin
 the plugin; pick another name if that ever changes, because the probe hands it to every child the
 sourced library starts.
 
-**Free text never goes into a command line (`FT1`–`FT7`).** A skill that sends model-written
+**Free text never goes into a command line (`FT1`–`FT8`).** A skill that sends model-written
 Markdown, JSON, a plan document, review findings or conditions writes the text to a temporary
-file through a heredoc with a quoted delimiter and passes `"$(cat "$f")"`:
+file through a heredoc with a quoted delimiter. Where zensu-cli has a file flag for the value,
+the skill passes the file's path; where it has none, it passes `"$(cat "$f")"`:
 
 ```bash
 f="$(mktemp)" || exit 1
@@ -105,25 +109,57 @@ trap 'rm -f "$f"' EXIT
 cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
 ZENSU_TEXT_<hex>
+zensu link docs <feature-id> --doc-type <type> --content-file "$f"
+```
+
+```bash
+f="$(mktemp)" || exit 1
+trap 'rm -f "$f"' EXIT
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
+<plain-text-summary>
+ZENSU_TEXT_<hex>
 grep -qI '[^[:space:]]' -- "$f" || exit 1
-zensu link docs <feature-id> --doc-type <type> --content "$(cat "$f")"
+zensu features revision <feature-id> --scope-summary "$(cat "$f")"
 ```
 
 Inside double quotes the shell runs every backtick span of the text and expands every
 `$NAME`; a single quote ends at the first apostrophe, and the rest of the text becomes shell
-words. The quoted delimiter keeps the heredoc body literal, and the shell inserts the output of
-`"$(cat "$f")"` as one argument without expanding it again. Measured under macOS `/bin/bash`
-3.2.57 and `/bin/zsh` with backticks, `$(…)`, `$HOME`, an apostrophe and parentheses in the text:
-every character arrived unchanged. The heredoc stays OUTSIDE `$( )` on purpose: bash 3.2.57
-refuses `x="$(cat <<'EOF'` with an apostrophe in the body (`unexpected EOF while looking for
-matching`), the same parser hazard as `.claude/rules/bash32-command-substitution.md`. The
-redirect also makes the text a write channel the Bash secret scan inspects: `detectChannels`
-reports `redirect` and `heredoc` for the file form and nothing for the old inline
-`--content "…"`. zensu-cli has no stdin or file form for `--content`, `--candidates`,
-`--result`, `--children`, `--tiers`, `--findings` or `--conditions` (read from its
-`internal/cmd/*.go` at `bffa3ae`), nor for `--description`, `--expected-result`,
-`--scope-summary` and `--scope-details` (read from the zensu-cli 0.16.0 `--help`), which is why
-the round trip through a file exists.
+words. The quoted delimiter keeps the heredoc body literal. The heredoc stays OUTSIDE `$( )` on
+purpose: bash 3.2.57 refuses `x="$(cat <<'EOF'` with an apostrophe in the body (`unexpected EOF
+while looking for matching`), the same parser hazard as
+`.claude/rules/bash32-command-substitution.md`. The redirect also makes the text a write channel
+the Bash secret scan inspects: `detectChannels` reports `redirect` and `heredoc` for both forms
+and nothing for an inline `--content "…"`.
+
+**The file flags.** zensu-cli `d466f49`, "read long free-text flag values from a file or stdin"
+(#52), is the `v0.22.0` tag, and `v0.21.0` has no `internal/cmd/valuefile.go`. It adds
+`--<flag>-file path`, or `-` for stdin, to `features update --description`,
+`ghost scan --candidates` and `--components`, `journeys create --description`,
+`link docs --content`, `products create --description`, `products vision-create --content`,
+`products bootstrap-apply --result`, `roadmap create` and `roadmap update --description`,
+`security review --findings` and `--conditions`, `subfeatures add --description`, and
+`wiki create` and `wiki update --content`. Read from `internal/cmd/valuefile.go` at `v0.22.0`:
+a text value holds at most 256 KiB and loses its trailing CR and LF, a JSON value at most 4 MiB;
+before the command runs, the CLI refuses a missing or unreadable path, a path that is not a
+regular file (it opens the path `O_NONBLOCK` on unix, so a FIFO cannot block it), an oversized
+file, invalid UTF-8, a NUL byte and an empty or whitespace-only value. It strips a UTF-8 BOM,
+makes each file flag exclusive with its inline flag, and lets only one flag of a call read
+stdin. So a file-flag site needs no shell content check, and its text no longer travels as a
+command-line argument, which takes it out of the operating system's argument-size limits. The
+skills rely on these flags because the floor is 0.22.0 (`.claude/rules/zensu-cli-floor.md`); an
+older CLI refuses each such call with `unknown flag`. The skills never use the stdin form: one
+call can feed only one flag from stdin, and a file serves both flags of `security review`.
+
+**The inline form stays where zensu-cli has no file flag:** `features split --children`,
+`features merge --source`, `features deprecate --reason`, `features revision --scope-summary`
+and `--scope-details`, `tiers create --description`, `tiers set-feature --tiers`,
+`journeys step --description` and `--expected-result`, `ghost batch --reject-reason` and
+`ghost reject --reason`, read from `v0.22.0` and from every branch of the zensu-cli remote on
+2026-11-17. There the shell inserts the output of `"$(cat "$f")"` as one argument without
+expanding it again. Measured under macOS `/bin/bash` 3.2.57 and `/bin/zsh` with backticks,
+`$(…)`, `$HOME`, an apostrophe and parentheses in the text: every character arrived unchanged.
+`skills/autopilot/SKILL.md` uses the same form for the plugin's own
+`zensu-log.sh --autopilot-event --payload`, which is no zensu-cli flag.
 
 Four rules make the recipe safe to repeat. The delimiter is random: `<hex>` stands for eight
 hex digits picked anew for each call and written the same on both lines, because a fixed
@@ -131,48 +167,76 @@ delimiter ends the heredoc at the first text line that spells it, and the shell 
 line after it as a command. A plan document, or a page that documents this recipe, can hold
 that line. A plan document that is already a Markdown or plain-text file goes in by path, never
 retyped into a heredoc and never under the `trap`, which would delete it: `p` holds an absolute
-or `$HOME/…` path, never `~/…`, which double quotes leave unexpanded, and
-`[ -f "$p" ] && grep -qI '[^[:space:]]' -- "$p" || exit 1` runs before
-`--content "$(cat "$p")"`. A PDF or Word document is read and goes through the heredoc as text.
-`>|` writes even under `noclobber`, which a shell profile may set: `mktemp` has already created
-the file, so a plain `>` fails with exit 1, the file stays empty and the command still runs with
-an empty value. `grep -qI '[^[:space:]]' -- "$f" || exit 1` stops the call before that. The
-content check is `grep` because each weaker test lets something through: `cat` of a wrong path,
-a `~/…` path, a directory or an unreadable file hands on an empty value; `-s` passes a
-directory, an unreadable file and a file of blank lines; and `grep` without `-I` passes a binary
-file. `[ -f "$p" ]` stays in front because `grep` would block on a FIFO. Measured under macOS
-`/bin/bash` 3.2.57 and `/bin/zsh` with BSD grep 2.6.0, in the C and the `en_US.UTF-8` locale:
-with `noclobber` set the plain `>` failed and left 0 bytes, `>|` wrote the file, and a text line
-spelling another delimiter stayed text; `grep -qI` returned 1 for an empty, a blank and a binary
-file, 2 for an unreadable file and a directory, and 0 for text, a line of umlauts and a single
-character between blanks; `-s` passed a directory and `-f` did not, `grep` on a FIFO waited until
-a 3-second alarm ended it while `-f` stopped the FIFO, and a `~/…` path in double quotes stayed
-literal, so `cat` read nothing. GNU grep was not measured; its manual gives `-q`,
-`-I` and `[:space:]` the same meaning. Last, one recipe runs per Bash call,
+or `$HOME/…` path, never `~/…`, which double quotes leave unexpanded, and `--content-file "$p"`
+hands it to zensu-cli, which refuses a wrong path, a directory, an empty or blank file and a
+file that is not UTF-8 text by itself. A PDF or Word document is read and goes through the
+heredoc as text. `>|` writes even under `noclobber`, which a shell profile may set: `mktemp` has
+already created the file, so a plain `>` fails with exit 1 and the file stays empty. A file flag
+then refuses the empty file; at an inline site the command would still run with an empty value,
+and `grep -qI '[^[:space:]]' -- "$f" || exit 1` stops the call before that. The content check is
+`grep` because each weaker test lets something through: `cat` of a wrong path, a `~/…` path, a
+directory or an unreadable file hands on an empty value; `-s` passes a directory, an unreadable
+file and a file of blank lines; and `grep` without `-I` passes a binary file. Measured under
+macOS `/bin/bash` 3.2.57 and `/bin/zsh` with BSD grep 2.6.0, in the C and the `en_US.UTF-8`
+locale: with `noclobber` set the plain `>` failed and left 0 bytes, `>|` wrote the file, and a
+text line spelling another delimiter stayed text; `grep -qI` returned 1 for an empty, a blank and
+a binary file, 2 for an unreadable file and a directory, and 0 for text, a line of umlauts and a
+single character between blanks; `-s` passed a directory, and a `~/…` path in double quotes
+stayed literal, so `cat` read nothing. GNU grep was not measured; its manual gives `-q`, `-I` and
+`[:space:]` the same meaning. Last, one recipe runs per Bash call,
 with one `mktemp` per variable and one `trap` that names every file: a second `trap` replaces the
 first, and a second `mktemp` into the same variable leaves the first file behind.
 
 `FT1` scans every Markdown file under `skills/`, references and rules included, and fails on a
 `--flag` whose value is a placeholder naming Markdown, JSON, a document, a description, findings
-or conditions, whether unquoted, double-quoted, single-quoted or joined with `=`. `FT2` requires the
-whole recipe, `>|`, the `<hex>` delimiter, the content check, the `trap` and `"$(cat "$f")"`, in
-the seven skills that send free text: docs, implement, bootstrap, ghost-scan, security-review,
-autopilot and change. `FT3` and `FT4` pin the five flagged spellings and five near misses on
-fixtures. `FT5` pins the text-format sentence at each of the thirteen free-text field sites of
-bootstrap, ghost-scan, security-review and implement, and the file form at each flag site among
-them: a Markdown field says Zensu renders headings, lists and code, a plain-text field says Zensu
-does not render Markdown there. `FT6` fails on any Markdown file under `skills/` that spells the
-retired fixed delimiter `ZENSU_TEXT_END`, writes a heredoc into a temporary file with a plain
-`>` or checks it with the weaker `[ -s "$f" ] || exit 1`, and bites all three on a fixture.
-`FT7` requires bootstrap's by-path plan form to run
-`[ -f "$p" ] && grep -qI '[^[:space:]]' -- "$p" || exit 1` before `--content "$(cat "$p")"` and
-to spell no `~/` path inside double quotes. The formats come from the Zensu web app, which renders
+or conditions, whether unquoted, double-quoted, single-quoted or joined with `=`. `FT2` requires,
+in the seven skills that send free text (docs, implement, bootstrap, ghost-scan, security-review,
+autopilot and change), `>|`, the `<hex>` delimiter, the `trap`, a file flag or `"$(cat "$f")"`,
+and the content check in the `SKILL.md` of every one of them whose text keeps the inline form
+anywhere: it reads the skill as `skill_text_file` of `tests/structure/lib-skill-text.sh`
+concatenates it, because change keeps all of its inline sites in `references/commands.md`, and a
+planted skill whose only inline site sits in a reference fails without the check and passes with
+it. `FT3` and `FT4` pin the
+five flagged spellings and five near misses on fixtures. `FT5` pins the text-format sentence at
+each of the thirteen free-text field sites of bootstrap, ghost-scan, security-review and
+implement, and a file, as a file flag or inline, at each flag site among them: a Markdown field
+says Zensu renders headings, lists and code, a plain-text field says Zensu does not render
+Markdown there. `FT6` fails on any Markdown file under `skills/` that spells the retired fixed
+delimiter `ZENSU_TEXT_END`, writes a heredoc into a temporary file with a plain `>` or checks it
+with the weaker `[ -s "$f" ] || exit 1`, and bites all three on a fixture. `FT7` requires
+bootstrap's by-path plan form to pass `--content-file "$p"`, never `"$(cat "$p")"`, and to spell
+no `~/` path inside double quotes. The formats come from the Zensu web app, which renders
 product, component, feature, sub-feature and journey descriptions and security findings and
 conditions as Markdown, and renders no Markdown in the tier description, the journey step fields,
 the revision scope fields or a ghost candidate's reject reason. A ghost candidate's description
 shows unrendered on the scan's review page and rendered in the feature apply creates from it, so
-the skill writes it as Markdown. `B52` and `B52b` in `tests/structure/test-bash-zensu-gate.sh` drive the
-whole form through the CLI write-gate: it passes inside a window that declares its tool and
+the skill writes it as Markdown.
+
+`FT8` holds every site against the floor release. `tests/structure/lib-skill-free-text.js`
+lists each `--<flag>-file "$v"` and `--<flag> "$(cat "$v")"` under `skills/` and pairs it with
+its `zensu <noun> <verb>`: inside a code fence the one on the same logical line, joined over
+trailing backslashes; outside one the command in the same code span, or else the nearest
+`zensu <noun> <verb>` before it in the file. A code line or code span that runs another program,
+such as `gh`, `glab` or the plugin's `zensu-log.sh`, is skipped. One that runs `zensu` with words
+the scanner cannot read as a noun and a verb, such as `zensu --api-url "$U" link docs`, is not
+skipped: its site fails, because the scanner cannot tell which command it fills. `FT8` judges each
+site against the help the floor release recorded in
+`tests/structure/fixtures/zensu-cli-<MIN_VERSION>-floor-help.json`: the file flag must be
+declared for that command, the inline form is allowed only for a flag the command declares
+without a file flag, a `-file` flag never takes `"$(cat …)"`, and a `"$(cat …)"` outside a flag,
+a flag after no `zensu` command and a command the fixture does not hold all fail. The fixture's
+version line must equal `MIN_VERSION`, and it must be the only `zensu-cli-*-floor-help.json`, so a
+raise that keeps the old fixture fails. A fixture tree bites every verdict, at a continued fenced
+line and in a prose span as well, and the version check. In the real tree `FT8` also requires four
+site kinds, so a scanner that stops reading one cannot pass by finding fewer sites: the continued
+fenced `link docs` call of docs, the `features deprecate` row of change's command table, the
+`wiki update` span of implement and the foreign `gh` call of autopilot's `rules/pr-open.md`.
+`tests/structure/fixtures/record-zensu-cli-floor-help.js`
+records the fixture from a release binary, with the `ai-work` help the floor unit case replays
+and the help of every command the scanner finds, so a raised floor re-records it and `FT8` then
+names every inline site the new release gives a file flag. `B52` and `B52b` in
+`tests/structure/test-bash-zensu-gate.sh` drive the file-flag form and `B52c` and `B52d` the
+inline form through the CLI write-gate: each passes inside a window that declares its tool and
 stays a denied mutation outside one.
 
 Known gaps: a positional free-text argument and a placeholder with another name are not
@@ -180,11 +244,14 @@ judged; short titles (`--title "<title>"`), a journey's `--persona`, the wiki
 `--change-summary` and the work-order `--rationale` stay double-quoted, so a backtick in them
 still runs; nothing checks that a model picks a fresh delimiter, so one that types `<hex>`
 literally or reuses an earlier value has a fixed delimiter again; the CLI write-gate's token scan
-reads each heredoc line as a command
-(`.claude/rules/subagent-shell-guard.md`), so a text line that opens with a `zensu` mutation the
-window does not declare is denied; and the text still travels as one command-line argument, so
-the operating system's argument-size limits apply exactly as they did inline. A zensu-cli flag
-that reads stdin or a file would remove both the round trip and that limit; it is a CLI change.
+reads each heredoc line as a command (`.claude/rules/subagent-shell-guard.md`), so a text line
+that opens with a `zensu` mutation the window does not declare is denied. At the inline sites
+the text still travels as one command-line argument, so the operating system's argument-size
+limits apply there; those flags carry short values, and file flags for them are a zensu-cli
+change. The pairing of a prose site is textual: a sentence that names its flag before its
+command pairs with an earlier command, and `FT8` then fails rather than passes unless that
+command declares the same flag. A file over 256 KiB of text or 4 MiB of JSON is refused by the
+CLI, where the inline form used to pass it up to the argument limit.
 
 **Version: `patch`.** Skill text and a structure check: no schema field, key set, hook, matcher,
 config key or attestation moves.

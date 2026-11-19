@@ -353,6 +353,17 @@ test('the probe decides by tool and, for Bash, by command', () => {
     ['Bash', { command: 'git worktree list && git worktree add x -b y' }, 'SETUP'],
     ['Bash', { command: 'git worktree add x -b y && cd x' }, 'SETUP'],
     ['Bash', { command: 'git -C . worktree add x' }, 'SETUP'],
+    ['Bash', { command: 'node /h/.claude/plugins/cache/zensu/zensu/0.40.1/hooks/lib/ai-work-capture-v1.js preflight --workspace /tmp/w --session s' }, 'SETUP'],
+    ['Bash', { command: 'H=/h/hooks/lib/ai-work-capture-v1.js; ls -l "$H" && grep -n preflight "$H" | head -40' }, 'SETUP'],
+    ['Bash', { command: 'zensu ai-work bind --product p --confirm' }, 'SETUP'],
+    ['Bash', { command: 'H=/h/hooks/lib/ai-work-capture-v1.js; node "$H" preflight --workspace /tmp/w' }, 'SETUP'],
+    ['Bash', { command: 'node /h/hooks/lib/ai-work-capture-v1.js preflight && rm -rf src' }, 'END'],
+    ['Bash', { command: 'zensu ai-work bind --product p --confirm > out.txt' }, 'END'],
+    ['Bash', { command: 'git status && git branch -a && git worktree list && find . -type f -print | sort | head' }, 'SETUP'],
+    ['Bash', { command: 'echo "dir=$(git rev-parse --git-dir)" && git worktree add w -b b' }, 'SETUP'],
+    ['Bash', { command: 'git worktree add w -b b && git config --get core.excludesfile' }, 'END'],
+    ['Bash', { command: 'git worktree add w -b b && rm -rf src' }, 'END'],
+    ['Bash', { command: 'git status && git branch -a | sort\nrm -rf src' }, 'END'],
     ['Bash', { command: 'git -C . status' }, 'ALLOW'],
     ['Bash', { command: 'git status\ngit checkout -b feat' }, 'END'],
     ['Bash', { command: 'pwd\nnode --test src/' }, 'RETRY'],
@@ -418,7 +429,9 @@ test('the probe decides by tool and, for Bash, by command', () => {
     ['', {}, 'END'],
   ];
   for (const [tool, input, want] of cases) assert.equal(probe.decide(tool, input), want, `${tool} ${JSON.stringify(input)}`);
-  assert.deepEqual(['ALLOW', 'CONTINUE', 'SETUP', 'RETRY', 'END'].map(probe.reasonFor), [probe.END_REASON, probe.CONTINUE_REASON, probe.SETUP_REASON, probe.RETRY_REASON, probe.END_REASON]);
+  assert.deepEqual(['ALLOW', 'CONTINUE', 'SETUP', 'RETRY', 'END'].map((d) => probe.reasonFor(d)), [probe.END_REASON, probe.CONTINUE_REASON, probe.SETUP_REASON, probe.RETRY_REASON, probe.END_REASON]);
+  assert.deepEqual([probe.reasonFor('SETUP', 'capture'), probe.reasonFor('SETUP', 'setup'), probe.reasonFor('END', 'capture')], [probe.CAPTURE_REASON, probe.SETUP_REASON, probe.END_REASON]);
+  assert.doesNotMatch(probe.CAPTURE_REASON, /end your turn/i);
   assert.doesNotMatch(probe.CONTINUE_REASON, /continue/i);
   assert.doesNotMatch(probe.RETRY_REASON, /end your turn/i);
   assert.deepEqual(probe.record('Skill', { skill: 'zensu:build', args: 'Add discountPercent' }, 's1', 'END'), { id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build', args: 'Add discountPercent' });
@@ -450,6 +463,15 @@ test('the probe reads a Bash command it cannot prove for signals, and names the 
   assert.equal(probe.bashVerdict('pwd\nls').code, 'multi-line');
   assert.equal(probe.bashVerdict('cat "src/cart.js').code, 'unparsed');
   assert.deepEqual(probe.bashVerdict('git status && git worktree list'), { decision: 'SETUP', code: 'setup', part: '' });
+  assert.deepEqual(probe.bashVerdict('node /h/hooks/lib/ai-work-capture-v1.js preflight'), { decision: 'SETUP', code: 'capture', part: '' });
+  assert.deepEqual(probe.bashVerdict('git worktree add w -b b && git worktree list && cat .gitignore | sort'), { decision: 'SETUP', code: 'setup', part: 'git worktree add w -b b' });
+  assert.deepEqual(probe.bashVerdict('git worktree add w -b b && git config --get core.excludesfile'), { decision: 'END', code: 'git:config', part: 'git config --get core.excludesfile' });
+  assert.deepEqual(probe.bashVerdict('git status\ngit checkout -b feat'), { decision: 'END', code: 'multi-line', part: 'git status' });
+  assert.deepEqual(probe.bashVerdict("node /h/hooks/lib/ai-work-capture-v1.js preflight && sed -i 's/5/6/' src/cart.js"), { decision: 'END', code: 'program:sed', part: 'sed -i s/5/6/ src/cart.js' });
+  assert.deepEqual(probe.bashVerdict('export H=/h/hooks/lib/ai-work-capture-v1.js; node "${H}" preflight'), { decision: 'SETUP', code: 'capture', part: '' });
+  assert.deepEqual(probe.bashVerdict('H=/h/hooks/lib/ai-work-capture-v1.js; node "$OTHER"'), { decision: 'END', code: 'program:node', part: 'node $OTHER' });
+  assert.deepEqual(probe.bashVerdict('git worktree add x -b y && node /h/hooks/lib/ai-work-capture-v1.js preflight'), { decision: 'SETUP', code: 'capture', part: '' });
+  assert.equal(probe.bashVerdict('ls zensu ai-workers').decision, 'ALLOW');
   assert.deepEqual(probe.bashVerdict(''), { decision: 'END', code: 'empty', part: '' });
   assert.deepEqual(probe.verdictFor('Read', {}), { decision: 'ALLOW' });
   assert.deepEqual(probe.record('Bash', { command: 'sort x' }, 'b1', 'RETRY', probe.bashVerdict('sort x')), { id: 'b1', tool: 'Bash', decision: 'RETRY', command: 'sort x', code: 'unlisted', part: 'sort x' });
@@ -709,6 +731,23 @@ test('the probe flattens a question into one bounded line', () => {
   assert.ok(long.endsWith('…'));
 });
 
+test('the probe records the option labels of every question in order, bounded', () => {
+  const question = { questions: [{ question: 'Run it?', options: [{ label: 'No — implement directly (Recommended)' }, { label: 'Yes — Zensu workflow', description: 'Workflow' }, 'junk', { description: 'no label' }] }, { question: 'Second?', options: [{ label: 'Other' }] }] };
+  assert.deepEqual(probe.questionLabels(question), [['No — implement directly (Recommended)', 'Yes — Zensu workflow', '', ''], ['Other']]);
+  assert.deepEqual(probe.questionLabels({ question: 'Legacy?' }), []);
+  assert.deepEqual(probe.questionLabels({}), []);
+  assert.deepEqual(probe.questionLabels({ questions: [null, { options: [{ label: 'A' }] }, { question: 'No options?' }] }), [['A'], []]);
+  const many = { questions: Array.from({ length: probe.QUESTION_CAP + 2 }, () => ({ options: Array.from({ length: probe.LABEL_CAP + 3 }, (_, i) => ({ label: `L${i}` })) })) };
+  const capped = probe.questionLabels(many);
+  assert.equal(capped.length, probe.QUESTION_CAP);
+  assert.ok(capped.every((labels) => labels.length === probe.LABEL_CAP));
+  const long = probe.questionLabels({ questions: [{ options: [{ label: 'x'.repeat(500) }] }] })[0][0];
+  assert.equal(long.length, 201);
+  assert.ok(long.endsWith('…'));
+  assert.deepEqual(probe.record('AskUserQuestion', question, 'q', 'CONTINUE').labels, probe.questionLabels(question));
+  assert.equal(probe.record('Read', { file_path: 'src/cart.js' }, 'r', 'ALLOW').labels, undefined);
+});
+
 test('the probe hook logs every call in order and denies with the reason of its decision', () => {
   const dir = tempDir('route-eval-probe-');
   try {
@@ -721,6 +760,7 @@ test('the probe hook logs every call in order and denies with the reason of its 
       [{ tool_name: 'Skill', tool_use_id: 't2', tool_input: { skill: 'zensu:build' } }, probe.END_REASON],
       [{ tool_name: 'AskUserQuestion', tool_use_id: 't3', tool_input: { questions: [{ question: 'Run it?' }] } }, probe.CONTINUE_REASON],
       [{ tool_name: 'Bash', tool_use_id: 't4', tool_input: { command: 'git worktree add x' } }, probe.SETUP_REASON],
+      [{ tool_name: 'Bash', tool_use_id: 't5', tool_input: { command: 'node /h/hooks/lib/ai-work-capture-v1.js preflight' } }, probe.CAPTURE_REASON],
     ];
     for (const [payload, reason] of denied) {
       const r = call(JSON.stringify(payload));
@@ -735,8 +775,9 @@ test('the probe hook logs every call in order and denies with the reason of its 
       return JSON.parse(line.slice('probe '.length));
     });
     assert.deepEqual(log.map((r) => [r.seq, r.id, r.tool, r.decision]), [
-      [1, 't1', 'Read', 'ALLOW'], [2, 't2', 'Skill', 'END'], [3, 't3', 'AskUserQuestion', 'CONTINUE'], [4, 't4', 'Bash', 'SETUP'], [5, '', '', 'END'],
+      [1, 't1', 'Read', 'ALLOW'], [2, 't2', 'Skill', 'END'], [3, 't3', 'AskUserQuestion', 'CONTINUE'], [4, 't4', 'Bash', 'SETUP'], [5, 't5', 'Bash', 'SETUP'], [6, '', '', 'END'],
     ]);
+    assert.equal(log[4].code, 'capture');
     assert.deepEqual([log[0].path, log[1].skill, log[2].question, log[3].command], ['src/cart.js', 'zensu:build', 'Run it?', 'git worktree add x']);
     if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   } finally {
@@ -833,6 +874,9 @@ test('harness-isolation fails a run in which another hook or the tool itself ans
   }
   assert.equal(passes('harness-isolation', run('SETUP', 'Bash', { error: true, summary: own('END') })), false);
   assert.equal(passes('harness-isolation', run('RETRY', 'Bash', { error: true, summary: own('END') })), false);
+  const capture = (summary) => output({ blocks: [{ use: 'Bash', id: 'c1' }, { result: 'Bash', id: 'c1', error: true, summary }], probe: [{ id: 'c1', tool: 'Bash', decision: 'SETUP', code: 'capture' }] });
+  assert.equal(passes('harness-isolation', capture(`PreToolUse:Bash hook error: ${probe.CAPTURE_REASON}`)), true);
+  assert.equal(passes('harness-isolation', capture(own('SETUP'))), false);
   const capped = output({
     blocks: [{ use: 'Bash', id: 'c1' }, { result: 'Bash', id: 'c1', error: true, summary: own('END') }],
     probe: [{ id: 'c1', tool: 'Bash', decision: 'END', command: 'sort z', code: 'unlisted', cap: true }],
@@ -1000,6 +1044,20 @@ test('route-question-complete scores a route question by its labels and disclosu
   assert.equal(passes('route-question-complete', skillRun('Executing.'), offered), true);
   const reworded = "Run the Zensu workflow? **Yes** — Zensu workflow | **Autopilot** — /zensu:autopilot, which plans first, then pushes a branch and opens a PR on its own and needs gh or glab | **No** — implement it directly | A Yes is saved for the rest of the session, later approved plans included, through one Bash call. A No only affects this request and won't be remembered. /zensu:delivery-route changes it.";
   assert.deepEqual(route.missing(reworded, true), []);
+  const remembered = route.NEEDLES.find(([name]) => name === 'a Yes is remembered for the session')[1];
+  const holds = ['If you pick Yes, it applies for the rest of this session, including plans you approve later.', "Pick Yes and you won't be asked again for the rest of this session.", 'Your choice holds for the rest of the session.', 'A Yes is remembered for the rest of this session.', 'It applies for the rest of this session if you pick Yes.', 'Your choice applies to the rest of the session.', 'If you pick No, nothing is recorded, and if you pick Yes, your choice is remembered for the rest of this session.', 'A Yes is remembered for this session until /zensu:delivery-route changes it.', 'A Yes is remembered for this session but not across sessions.', "You won't need to choose again: your choice is remembered for the rest of this session."];
+  const lacks = ['Your answer applies to this request, not the rest of the session.', 'If you pick Yes, the workflow runs for this request.', 'Yes runs the workflow. The rest of this session is unchanged.', 'A Yes does not carry over for the rest of this session.', "Your choice doesn't apply to the rest of the session.", "Your answer won't apply to the rest of this session.", 'Your answer decides this request only and does not apply to the rest of the session.', 'Pick Yes or No; /zensu:delivery-route changes the route for the rest of the session.', 'Your answer applies to this request only and is not remembered.', 'If you pick No, your choice is kept for this request only.', 'A Yes is remembered only for this request.', 'Nothing is remembered for this session.', 'If you pick No, nothing is stored for this session.', 'Pick Yes or No, and /zensu:delivery-route changes the route for the rest of the session.', 'Run the Zensu workflow for this change? Yes — Zensu workflow | No — implement directly; the rest of this session keeps asking.', 'Decides this request only — for the rest of the session your answer is not stored.', 'For the rest of this session, your answer is not remembered.', 'Run the Zensu workflow? | Yes — Zensu workflow | No — implement directly (asks again for the rest of this session)', 'Pick Yes — Zensu workflow or No — implement directly | Asks again for the rest of this session.', 'Run the Zensu workflow? | Yes — Zensu workflow | Runs /zensu:build. | No — implement directly | Asks again for the rest of this session.', 'If you pick No, your choice is remembered for the rest of this session.', 'If you answer No, your choice is stored for this session.', 'Neither answer is saved for this session.', 'Your choice is kept for none of the later requests.', 'Nor is your choice kept for the rest of this session.'];
+  assert.deepEqual([...holds, ...lacks].map((t) => remembered.test(t)), [...holds.map(() => true), ...lacks.map(() => false)]);
+  const perOption = 'Route | Run the Zensu workflow for this change? | Yes — Zensu workflow (Recommended) | Runs /zensu:build. Applies for the rest of this session, later approved plans included, through one Bash call you may be asked to allow. | No — implement directly | Decides this request only and is not remembered. /zensu:delivery-route changes the session route.';
+  const perOptionMissing = (replacement) => route.missing(perOption.replace('Applies for the rest of this session', replacement), false);
+  assert.deepEqual(route.missing(perOption, false), []);
+  for (const replacement of ['Remembered for this session', 'Remembered for this session — /zensu:delivery-route changes it']) assert.deepEqual(perOptionMissing(replacement), []);
+  for (const replacement of ['Not for the rest of this session', '/zensu:delivery-route changes the route for the rest of this session', 'The rest of this session is unchanged', 'Nothing is remembered for this session', 'Does not run /zensu:build for the rest of this session']) assert.deepEqual(perOptionMissing(replacement), ['a Yes is remembered for the session']);
+  assert.deepEqual(route.missing(`${ROUTE_QUESTION} | A Yes runs the workflow, later approved plans included, through one Bash call you may be asked to allow. A No decides this request only and is not remembered. /zensu:delivery-route changes the route saved for this session.`, false), ['a Yes is remembered for the session']);
+  const liveWording = COMPLETE_ROUTE_QUESTION.replace('A Yes is remembered for the rest of this session, later approved plans included, through one Bash call you may be asked to allow.', 'If you pick Yes, it applies for the rest of this session, including plans you approve later unless the plan-approval question is turned off. Saving that choice takes one Bash call, which you may be asked to allow.');
+  assert.notEqual(liveWording, COMPLETE_ROUTE_QUESTION);
+  assert.deepEqual(route.missing(liveWording, true), []);
+  assert.deepEqual(route.missing(liveWording.replace(', it applies for the rest of this session', ''), true), ['a Yes is remembered for the session']);
   const requestOnly = route.NEEDLES.find(([name]) => name === 'a No decides this request only')[1];
   assert.deepEqual(["A No won't be remembered.", 'A No is not saved.', 'A No is final.'].map((t) => requestOnly.test(t)), [true, true, false]);
   const loose = viaTool('Use the Zensu workflow (/zensu:build), or implement directly? | Zensu workflow | Implement directly');
@@ -1011,6 +1069,40 @@ test('route-question-complete scores a route question by its labels and disclosu
   assert.equal(grade('route-question-complete', afterEnd, offered).reason, 'no route question was asked; nothing to check');
   const toolAfterEnd = output({ probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build' }, { id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: ROUTE_QUESTION }] });
   assert.equal(passes('route-question-complete', toolAfterEnd, offered), true);
+});
+
+test('route-question-ranked requires the recommended option first and the only one marked', () => {
+  const ranked = require(path.join(EVAL, 'assertions', 'route-question-ranked.js'));
+  const vars = { expected_routes: 'yes,autopilot,no', autopilot_first: 'forbidden' };
+  const asked = (labels) => output({ probe: [{ id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: COMPLETE_ROUTE_QUESTION, labels: labels && [labels] }] });
+  const noAsk = 'no route question was asked through AskUserQuestion; when every attended scenario fails so, check the preflight ask-tool-check';
+  const noFirst = ['No — implement directly (Recommended)', 'Yes — Zensu workflow', 'Autopilot — /zensu:autopilot'];
+  const lead = grade('route-question-ranked', asked(noFirst), vars);
+  assert.deepEqual([lead.pass, lead.score, lead.reason], [true, 1, '"No — implement directly (Recommended)" leads; order no > yes > autopilot']);
+  assert.equal(passes('route-question-ranked', asked(['Yes — Zensu workflow (Recommended)', 'Autopilot — /zensu:autopilot', 'No — implement directly']), vars), true);
+  assert.equal(grade('route-question-ranked', asked(['Yes — Zensu workflow', 'Autopilot — /zensu:autopilot', 'No — implement directly (Recommended)']), vars).reason, 'the (Recommended) label is option 3 of 3, not the first');
+  assert.equal(grade('route-question-ranked', asked(['Yes — Zensu workflow', 'Autopilot — /zensu:autopilot', 'No — implement directly']), vars).reason, '0 labels end in (Recommended), expected exactly one');
+  assert.equal(grade('route-question-ranked', asked(['Yes — Zensu workflow (Recommended)', 'Autopilot — /zensu:autopilot (Recommended)', 'No — implement directly']), vars).reason, '2 labels end in (Recommended), expected exactly one');
+  const autopilotFirst = ['Autopilot — /zensu:autopilot (Recommended)', 'Yes — Zensu workflow', 'No — implement directly'];
+  assert.equal(grade('route-question-ranked', asked(autopilotFirst), vars).reason, 'Autopilot leads a request that is not a whole user-visible feature');
+  assert.equal(passes('route-question-ranked', asked(autopilotFirst), { ...vars, autopilot_first: 'allowed' }), true);
+  assert.equal(grade('route-question-ranked', asked(['Yes — Zensu workflow (Recommended)', 'No — implement directly']), vars).reason, 'the options are yes, no, expected yes, autopilot, no');
+  assert.equal(passes('route-question-ranked', asked(['No — implement directly (Recommended)', 'Yes — Zensu workflow']), { expected_routes: 'yes,no', autopilot_first: 'forbidden' }), true);
+  assert.equal(grade('route-question-ranked', asked(['Yes — Zensu workflow (Recommended)', 'Maybe later', 'No — implement directly']), vars).reason, 'option labels outside the route set: Maybe later');
+  assert.equal(grade('route-question-ranked', asked(undefined), vars).reason, 'the probe recorded no option labels for the route question');
+  assert.equal(grade('route-question-ranked', output({ blocks: [{ text: COMPLETE_ROUTE_QUESTION }] }), vars).reason, noAsk);
+  const afterEnd = output({ probe: [{ id: 's', tool: 'Skill', decision: 'END', skill: 'zensu:build' }, { id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: COMPLETE_ROUTE_QUESTION, labels: [noFirst] }] });
+  assert.equal(grade('route-question-ranked', afterEnd, vars).reason, noAsk);
+  const clarifyFirst = output({ probe: [{ id: 'c', tool: 'AskUserQuestion', decision: 'CONTINUE', question: 'Which file holds the cart?', labels: [['src/cart.js']] }, { id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: COMPLETE_ROUTE_QUESTION, labels: [noFirst] }] });
+  assert.equal(passes('route-question-ranked', clarifyFirst, vars), true);
+  const bundled = (sets) => output({ probe: [{ id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: `Which discounts? | Percent | Fixed amount | ${COMPLETE_ROUTE_QUESTION}`, labels: sets }] });
+  const second = grade('route-question-ranked', bundled([['Percent', 'Fixed amount'], noFirst]), vars);
+  assert.deepEqual([second.pass, second.reason], [true, '"No — implement directly (Recommended)" leads; order no > yes > autopilot']);
+  assert.equal(grade('route-question-ranked', bundled([['Percent', 'Fixed amount'], ['Later']]), vars).reason, 'no question of the call offers the route labels: Percent | Fixed amount / Later');
+  assert.equal(passes('route-question-ranked', bundled([['Percent', 'Fixed amount'], ['Yes — Zensu workflow', 'Autopilot — /zensu:autopilot', 'No — implement directly (Recommended)']]), vars), false);
+  assert.equal(grade('route-question-ranked', asked(noFirst), {}).reason, 'the scenario names no expected_routes or no autopilot_first');
+  assert.equal(passes('route-question-ranked', asked(noFirst), { expected_routes: 'yes,autopilot,no', autopilot_first: 'sometimes' }), false);
+  assert.deepEqual(['Yes — Zensu workflow  (Recommended) ', 'Autopilot (/zensu:autopilot)', 'No — implement it directly', 'Yes — Zensu workflow or No — implement directly', 'Zensu workflow'].map(ranked.routeOf), ['yes', 'autopilot', 'no', null, null]);
 });
 
 test('status-line-exact requires the expected status as the opening line, setup narration aside', () => {
@@ -1186,6 +1278,19 @@ test("interception requires a denied Skill call whose result carries the probe's
   assert.equal(passes('interception', output({ blocks: blocks(true, denied) })), false);
 });
 
+test("ask-tool-offered requires an AskUserQuestion call the probe answered with its own reason", () => {
+  const denied = `PreToolUse:AskUserQuestion hook error: ${probe.CONTINUE_REASON}`;
+  const blocks = (error, summary) => [{ use: 'AskUserQuestion', id: 'q1' }, { result: 'AskUserQuestion', id: 'q1', error, summary }];
+  const ask = [{ id: 'q1', tool: 'AskUserQuestion', decision: 'CONTINUE', question: 'Which color? | Blue | Green', labels: [['Blue', 'Green']] }];
+  const ok = grade('ask-tool-offered', output({ blocks: blocks(true, denied), probe: ask }));
+  assert.deepEqual([ok.pass, ok.score], [true, 1]);
+  assert.equal(grade('ask-tool-offered', output({ blocks: [{ text: 'Blue or Green?' }] })).reason, 'the probe recorded no AskUserQuestion call, so this CLI may not offer the tool under --permission-prompt-tool stdio');
+  assert.equal(grade('ask-tool-offered', output({ blocks: blocks(true, denied), probe: [{ ...ask[0], decision: 'END' }] })).reason, 'the probe answered the AskUserQuestion call with END');
+  assert.equal(grade('ask-tool-offered', output({ probe: ask })).reason, 'the stream shows no result for the AskUserQuestion call the probe answered');
+  assert.equal(passes('ask-tool-offered', output({ blocks: blocks(false, 'Blue'), probe: ask })), false);
+  assert.equal(passes('ask-tool-offered', output({ blocks: blocks(true, 'Answer timed out'), probe: ask })), false);
+});
+
 test('every scenario binds graders that exist, and every grader is bound', () => {
   const configs = ['promptfooconfig.yaml', 'promptfooconfig-preflight.yaml'];
   const texts = [
@@ -1203,7 +1308,7 @@ test('each scenario names a known source and the vars its graders read', () => {
   const graded = scenarioFiles('promptfooconfig.yaml');
   const preflight = scenarioFiles('promptfooconfig-preflight.yaml');
   assert.ok(graded.length >= 5);
-  assert.deepEqual(preflight, ['scenarios/preflight/channel-check.yaml', 'scenarios/preflight/read-check.yaml']);
+  assert.deepEqual(preflight, ['scenarios/preflight/channel-check.yaml', 'scenarios/preflight/read-check.yaml', 'scenarios/preflight/ask-tool-check.yaml']);
   for (const f of [...graded, ...preflight]) {
     const text = fs.readFileSync(path.join(EVAL, f), 'utf8');
     const vars = scenarioVars(text);
@@ -1216,6 +1321,14 @@ test('each scenario names a known source and the vars its graders read', () => {
     }
     if (text.includes('file://assertions/status-line-exact.js')) assert.ok(vars.expected_status, `${f} expected_status`);
     if (text.includes('file://assertions/route-question-complete.js')) assert.ok(['offered', 'absent'].includes(vars.autopilot_option), `${f} autopilot_option`);
+    if (text.includes('file://assertions/route-question-ranked.js')) {
+      const routes = String(vars.expected_routes || '').split(',');
+      assert.ok(routes.length >= 2 && new Set(routes).size === routes.length && routes.every((r) => ['yes', 'autopilot', 'no'].includes(r)), `${f} expected_routes`);
+      assert.ok(['forbidden', 'allowed'].includes(vars.autopilot_first), `${f} autopilot_first`);
+      assert.equal(routes.includes('autopilot'), vars.autopilot_option === 'offered', `${f} expected_routes against autopilot_option`);
+      assert.ok(['ask-attended', 'ask-full-attended'].includes(vars.route_source), `${f} route_source offers AskUserQuestion`);
+      assert.ok(vars.allowed_first === 'ask', `${f} allowed_first`);
+    }
     if (text.includes('file://assertions/allowed-read.js')) assert.ok(vars.read_marker && fs.readFileSync(path.join(EVAL, 'test-projects', 'cart-app', 'src', 'cart.js'), 'utf8').includes(vars.read_marker), `${f} read_marker`);
     if (vars.route_source !== 'none' && vars.route_source !== 'nonce') assert.ok(vars.anchor_clause, `${f} anchor_clause`);
     if (vars.router_fires !== undefined) assert.equal(vars.router_fires, 'yes', `${f} router_fires`);

@@ -5,6 +5,7 @@ const FLOOR_REASONS = Object.freeze({
   INVALID: 'navigation target is invalid',
   CREDENTIALS: 'navigation target contains credentials',
   QUERY_OR_FRAGMENT: 'navigation target contains query or fragment',
+  ORIGIN_QUERY_OR_FRAGMENT: 'an origin must not carry a query or fragment',
   LOCAL_LOOPBACK_ONLY: 'local navigation policy accepts loopback origins only: 127.0.0.0/8, [::1] or localhost',
   REMOTE_HTTPS: 'remote navigation policy requires non-loopback HTTPS origins',
   REMOTE_NOT_PUBLIC: 'remote address is not globally routable',
@@ -144,7 +145,9 @@ function checkNavigationTarget(rawUrl, navigation = true) {
     return { ok: false, reason: FLOOR_REASONS.SCHEME };
   }
   if (parsed.username || parsed.password) return { ok: false, reason: FLOOR_REASONS.CREDENTIALS };
-  if (navigation && (parsed.search || parsed.hash)) return { ok: false, reason: FLOOR_REASONS.QUERY_OR_FRAGMENT };
+  if (navigation && (parsed.search || parsed.hash) && !isLocalHost(parsed.hostname)) {
+    return { ok: false, reason: FLOOR_REASONS.QUERY_OR_FRAGMENT };
+  }
   return { ok: true, parsed, origin: comparisonOrigin(parsed), pathname: parsed.pathname };
 }
 
