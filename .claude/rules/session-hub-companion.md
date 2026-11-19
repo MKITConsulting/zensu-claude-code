@@ -38,11 +38,12 @@ that leaves the tree and on a `require`, `requireFromHere` or `import()` whose a
 a quoted literal, which the scan could not follow; H1 holds the tree to an allowlist, and H12
 runs the receipt entry and `trail.mjs list --json` from a `cp -R` copy outside the repository.
 
-**Byte-identical copies, not a build step.** Eight files are copies of PLM files, and H4 fails
+**Byte-identical copies, not a build step.** Nine files are copies of PLM files, and H4 fails
 on any byte that differs: the root `LICENSE`, `hooks/lib/claude-path-v1.js`,
 `desktop-store-read-v1.js`, `git-environment-v1.js`, `worktree-keep-v1.js`,
-`hooks/usage-feed.ts`, `hooks/usage-feed-contract.json` and
-`skills/session-trail/scripts/session-lineage-v1.mjs`. The license is copied because an install
+`hooks/usage-feed.ts`, `hooks/usage-feed-contract.json`,
+`skills/session-trail/scripts/session-lineage-v1.mjs` and
+`skills/session-trail/scripts/autopilot-runs-v1.mjs`. The license is copied because an install
 copies only the subdirectory. A change to one of those PLM files copies the file into the
 companion in the same commit. `trail.mjs`, `linked-sessions-v1.mjs`, `SKILL.md`, the
 references, `handover-contract.json` and the receipt module are the companion's own; H13 holds

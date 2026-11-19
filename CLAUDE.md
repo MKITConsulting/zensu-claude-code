@@ -1,9 +1,8 @@
 # zensu-claude-code Repo Conventions
 
-This file holds only the rules that apply to every change in this repository. Subsystem notes
-live in `.claude/rules/`, one file per subsystem. Each rule file declares `paths:` frontmatter, so
-Claude Code loads it only when a matching file is read. When a task touches a subsystem without
-opening its files, open the rule file from the index at the end of this file.
+This file holds only the rules that apply to every change in this repository. Subsystem notes live in `.claude/rules/`,
+one file per subsystem. Each rule file declares `paths:` frontmatter, so Claude Code loads it only when a matching file
+is read. When a task touches a subsystem without opening its files, open the rule file from the index at the end of this file.
 
 A pointer elsewhere in the tree that reads `CLAUDE.md §"<title>"` refers to the rule file listed under that title in the index.
 
@@ -162,6 +161,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Takeover Destination (`worktreeAdvice` in `skills/session-trail/scripts/trail.mjs`)** — where a taken-over session continues, and the carry-over recipe: `.claude/rules/takeover-destination.md`
 - **Session-Trail Prompt Listing (`extractPrompts` in `skills/session-trail/scripts/trail.mjs`)** — the prompt timeline and the separate list of withdrawn prompts: `.claude/rules/session-trail-prompt-listing.md`
 - **Session-Trail Open Task Chips (`openTaskChips` in `skills/session-trail/scripts/trail.mjs`)** — why every takeover carries the old session's open task chips, and from which record: `.claude/rules/session-trail-open-chips.md`
+- **Session-Trail Autopilot Runs (`autopilot-runs-v1.mjs` + `autopilotRunsOf` in `skills/session-trail/scripts/trail.mjs`)** — why a takeover names the old session's durable Autopilot runs, the route that carries each, the adoption question after the move and the release refusal: `.claude/rules/session-trail-autopilot-runs.md`
 - **Session-Trail Linked Sessions (`linkedSessions` in `trail.mjs` + `linked-sessions-v1.mjs`)** — why a takeover starts the old session's open linked sessions again, which of them qualify, the rendered `start_session` call and the contract capability the Session Hub reads: `.claude/rules/session-trail-linked-sessions.md`
 - **Session-Trail Read-Only Git (`READ_ONLY_GIT` in `skills/session-trail/scripts/trail.mjs`)** — why every git call into another session's worktree takes no index lock, runs no fsmonitor hook, needs `diff.autoRefreshIndex=false` and runs with the `gitEnvironment` scrub that `hooks/lib/git-environment-v1.js` owns: `.claude/rules/session-trail-read-only-git.md`
 - **Session-Trail Targeted Lookup (`idCandidateRows` / `ccdApp` in `skills/session-trail/scripts/trail.mjs`)** — why a selector verb summarizes only the transcripts its answer needs and parses only the matching desktop records, and the one row builder every path shares: `.claude/rules/session-trail-targeted-lookup.md`

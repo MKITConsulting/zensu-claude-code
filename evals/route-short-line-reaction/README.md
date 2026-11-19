@@ -169,7 +169,16 @@ file, is `edit-outside`. `first-decisive.js` names the part and the code that de
 question when it offers the Zensu workflow and implementing directly in a wording that
 `ROUTE_WORKFLOW` and `ROUTE_DIRECT` in [`lib/envelope.js`](lib/envelope.js) know; the completeness
 grader of the ask scenario and of the four attended scenarios also requires the exact labels and
-disclosures, and the ranking grader requires the exact labels too. Its
+every disclosure in a wording its needles accept, and the ranking grader requires the exact
+labels too. The session-memory disclosure is judged per sentence: a Yes, choice or answer that is
+remembered, saved, stored or kept, or that holds for, to or through the rest of this session,
+counts in either word order, and so does such a phrase, or a memory verb scoped to this session,
+in the Yes option's own description, the segment right after its label. A negation such as not,
+never, nothing or a contraction, a scope of this request, a last pick before the subject that
+names No, or a `/zensu:delivery-route` mention before the phrase refuses the match, while
+"won't be asked again" still counts. After a memory verb only the words up to the session it
+names are judged, and a phrase before its subject also needs the rest of the subject's clause to
+be affirmative. Its
 `autopilot_option` var says whether the injected line offers Autopilot: `offered` also requires the
 Autopilot label, the branch push and pull request and the gh or glab CLI, and `absent` fails a
 question that offers Autopilot anyway. The ask scenario sets `absent`, because the capture runs with

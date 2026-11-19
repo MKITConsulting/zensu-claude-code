@@ -8,14 +8,14 @@ One row per change this skill runs. The **Tool** column is the canonical name th
 
 A merge and a split create features and replace tracked data, so their rows carry both: the duplicate check first, then `; confirm:` and the consequence.
 
-Placeholders in angle brackets are values you resolve in Step 2. `"$(cat "$f")"` is the free-text file form of Step 6. Run `zensu <group> <command> --help` when a flag is unclear.
+Placeholders in angle brackets are values you resolve in Step 2. A `-file` flag and a quoted `$(cat …)` substitution are the two free-text forms of Step 6, and each row names the one its command takes. Run `zensu <group> <command> --help` when a flag is unclear.
 
 ## Features
 
 | Change | Command | Tool | Convention |
 |---|---|---|---|
 | Track a new feature | `zensu features create --product <product-id> --component <component-id> --title "<title>" --status planned` | `create_feature` | duplicate check: `zensu features list --product <product-id> --json`; then the follow-ups of Step 6 (priority, description, classification) |
-| Change a title, priority or description | `zensu features update <feature-id> --title "<title>" --priority <priority> --description "$(cat "$f")"`, each flag only when it changes | `update_feature` | the CLI sends only the flags you pass |
+| Change a title, priority or description | `zensu features update <feature-id> --title "<title>" --priority <priority> --description-file "$f"`, each flag only when it changes | `update_feature` | the CLI sends only the flags you pass |
 | Move a feature to another status | `zensu features status <feature-id> <new-status>` | `update_feature` | a move to `released` goes through `/zensu:pilot`, which checks the release gates first |
 | Record a new revision (build-out stage) | `zensu features revision <feature-id> --scope-summary "$(cat "$f")"` | `create_revision` | duplicate check: `zensu features history <feature-id> --json`, compared by scope summary |
 | Deprecate a feature | `zensu features deprecate <feature-id> --reason "$(cat "$f")"`, with `--replacement <feature-id>` and `--removal-planned-at <rfc3339>` when the user names them | `deprecate_feature` | confirm: the feature is marked deprecated; it stays tracked, and a replacement, when given, is linked to it |
@@ -26,15 +26,15 @@ Placeholders in angle brackets are values you resolve in Step 2. `"$(cat "$f")"`
 
 | Change | Command | Tool | Convention |
 |---|---|---|---|
-| Add a subfeature | `zensu subfeatures add <feature-id> --title "<title>" --priority <priority> --description "$(cat "$f")"` | `add_subfeature` | duplicate check: `zensu subfeatures list <feature-id> --json` |
+| Add a subfeature | `zensu subfeatures add <feature-id> --title "<title>" --priority <priority> --description-file "$f"` | `add_subfeature` | duplicate check: `zensu subfeatures list <feature-id> --json` |
 | Promote a subfeature to a feature | `zensu subfeatures promote <feature-id> <subfeature-id>` | `promote_subfeature` | confirm: the link to the parent feature is removed, and the subfeature becomes a top-level feature |
 
 ## Roadmaps and milestones
 
 | Change | Command | Tool | Convention |
 |---|---|---|---|
-| Create a roadmap | `zensu roadmap create --product <product-id> --title "<title>" --period <period> --description "$(cat "$f")"` | `create_roadmap` | duplicate check: `zensu roadmap list --product <product-id> --json`; one roadmap spans many periods, so an existing roadmap usually takes the feature instead |
-| Change a roadmap | `zensu roadmap update <roadmap-id> --title "<title>"`, plus the flags that change | `update_roadmap` | `--title` is required: pass the current title from `zensu roadmap get <roadmap-id>` when it does not change |
+| Create a roadmap | `zensu roadmap create --product <product-id> --title "<title>" --period <period> --description-file "$f"` | `create_roadmap` | duplicate check: `zensu roadmap list --product <product-id> --json`; one roadmap spans many periods, so an existing roadmap usually takes the feature instead |
+| Change a roadmap | `zensu roadmap update <roadmap-id> --title "<title>" --description-file "$f"`, `--description-file` only when the description changes, plus the other flags that change | `update_roadmap` | `--title` is required: pass the current title from `zensu roadmap get <roadmap-id>` when it does not change |
 | Delete a roadmap | `zensu roadmap delete <roadmap-id>` | `delete_roadmap` | confirm: the roadmap and every feature's membership in it are deleted; the features themselves stay |
 | Put a feature on a roadmap | `zensu roadmap add-feature <roadmap-id> --feature <feature-id> --start-period <period> --end-period <period>` | `add_feature_to_roadmap` | adding it again only updates its periods and sort order |
 | Take a feature off a roadmap | `zensu roadmap remove-feature <roadmap-id> <feature-id>` | `remove_feature_from_roadmap` | the feature itself stays |
@@ -59,7 +59,7 @@ Placeholders in angle brackets are values you resolve in Step 2. `"$(cat "$f")"`
 
 | Change | Command | Tool | Convention |
 |---|---|---|---|
-| Create a user journey | `zensu journeys create --product <product-id> --title "<title>" --type <type> --description "$(cat "$f")"` | `create_user_journey` | duplicate check: `zensu journeys list --product <product-id> --json` |
+| Create a user journey | `zensu journeys create --product <product-id> --title "<title>" --type <type> --description-file "$f"` | `create_user_journey` | duplicate check: `zensu journeys list --product <product-id> --json` |
 | Add a journey step | `zensu journeys step <journey-id> --product <product-id> --title "<title>" --step-order <order> --feature <feature-id>` | `create_journey_step` | duplicate check: `zensu journeys steps <journey-id> --product <product-id> --json` |
 | Change a journey step | `zensu journeys step-update <journey-id> <step-id> --product <product-id>`, plus the flags that change | `update_journey_step` | the CLI reads the step and writes it back whole, so pass only the fields that change |
 | Delete a journey step | `zensu journeys step-delete <journey-id> <step-id> --product <product-id>` | `delete_journey_step` | confirm: the step is deleted, and the remaining steps keep their order numbers, so a gap stays until they are reordered |
@@ -89,8 +89,8 @@ Placeholders in angle brackets are values you resolve in Step 2. `"$(cat "$f")"`
 
 | Change | Command | Tool | Convention |
 |---|---|---|---|
-| Create a wiki page | `zensu wiki create --product <product-id> --title "<title>" --content "$(cat "$f")"` | `create_wiki_page` | duplicate check: `zensu wiki list --product <product-id> --json`, compared by title and path; a page the CLI reports at the new path is a match too: ask as Step 3 says, and change that page only on that explicit answer |
-| Change a wiki page | `zensu wiki update <page-id> --content "$(cat "$f")" --change-summary "<summary>"` | `update_wiki_page` | the CLI changes only the fields you pass |
+| Create a wiki page | `zensu wiki create --product <product-id> --title "<title>" --content-file "$f"` | `create_wiki_page` | duplicate check: `zensu wiki list --product <product-id> --json`, compared by title and path; a page the CLI reports at the new path is a match too: ask as Step 3 says, and change that page only on that explicit answer |
+| Change a wiki page | `zensu wiki update <page-id> --content-file "$f" --change-summary "<summary>"` | `update_wiki_page` | the CLI changes only the fields you pass |
 | Upload a wiki image | `zensu wiki images upload --product <product-id> --file <path>` | `upload_wiki_image` | read `zensu wiki images policy --product <product-id>` for the limits first; an upload never publishes, so put the returned `wiki-asset:<uuid>` reference into a page and save the page |
 
 ## Products

@@ -52,9 +52,9 @@ option (2) of both heredocs. The room came from the text itself, not from `D44`'
 rationale after "never record it with --direct yourself", the repeated "The user changes a
 recorded route" sentence, "and in most cases ASK the user" (the question sentence already says
 so), the lead-in of the human-present sentence, which now opens with "The field's", and the
-vanilla option's cause clause went. Measured with `D44`'s method after the evidence gate keys
-left option (2), the vanilla directive takes 8,932 and the strict one 8,906 of the 9,000
-characters.
+vanilla option's cause clause went. Measured with `D44`'s method while the human-present field
+reads `yes`, the vanilla directive takes 8,942 and the strict one 8,916 of the 9,000 characters;
+CI, whose field reads `unknown`, counts four more.
 
 **An affirmation that asks for TDD runs that one chain strict.** The affirmation arm of `(B)`
 ensures the specification carries exactly one `TDD-MODE: strict` line and uses the status line
@@ -434,7 +434,12 @@ is read with a bash regex on the raw payload, without `node`: a JSON string cann
 `"permission_mode":`, and the host serializes the base fields before `tool_input`.
 
 (C) keys on the field and on a question that came back refused unanswered, so `unknown` asks and a
-host that cannot show the question still lands in (C). The (B) guard removes `/zensu:autopilot` and
+host that cannot show the question still lands in (C). Its default runs the Zensu workflow and says
+"do NOT ask or record", in the reminder's words: (C) dispatches through the workflow arm that the
+RECORD sentence puts its `--build` call in front of, and that sentence's catch-all, "No other answer
+or preference records anything", names no default, so without the two words a run that took the
+default could borrow the call, as a live run of the reminder did. `P1`, `R12b` and `D34` pin the
+clause. The (B) guard removes `/zensu:autopilot` and
 `/zensu:pilot` unless the field reads `yes`; an `unknown` session reaches them only through a human
 answer to the question. The reminder carries the field in its ask shapes only, both heredocs and the
 short line, right above the route block, which stays the last text of the reminder (`R13a2`); the
