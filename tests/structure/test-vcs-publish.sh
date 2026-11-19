@@ -45,6 +45,7 @@ has()  { local l="$1" g="$2" n="$3"; case "$g" in *"$n"*) check "$l" PASS ;; *) 
 nothas(){ local l="$1" g="$2" n="$3"; case "$g" in *"$n"*) check "$l (unexpected '$n')" FAIL ;; *) check "$l" PASS ;; esac; }
 before(){ local l="$1" g="$2" a="$3" b="$4"; local pre="${g%%"$b"*}"; case "$g" in *"$b"*) case "$pre" in *"$a"*) check "$l" PASS ;; *) check "$l ('$a' not before '$b')" FAIL ;; esac ;; *) check "$l ('$b' absent)" FAIL ;; esac; }
 
+export ZENSU_VCS_REMOTE=https://github.com/acme/widget.git
 argv() { env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1 bash "$LIB" "$@" 2>/dev/null; }
 fails() { local l="$1"; shift; local o rc; o="$(argv "$@" 2>/dev/null)"; rc=$?; { [ -z "$o" ] && [ "$rc" -ne 0 ]; } && check "$l" PASS || check "$l (out='$o' rc=$rc)" FAIL; }
 nth_json() {
@@ -65,8 +66,8 @@ cat > "$PAY" <<'JSON'
 JSON
 
 # ---- scout-pr argv ----
-eq "A1 scout github branch"  "$(argv --scout-pr --provider github)"   "gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels"
-eq "A2 scout github num"     "$(argv --scout-pr --provider github 42)" "gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels -- 42"
+eq "A1 scout github branch"  "$(argv --scout-pr --provider github)"   "env GH_HOST=github.com GH_REPO= gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels"
+eq "A2 scout github num"     "$(argv --scout-pr --provider github 42)" "env GH_HOST=github.com GH_REPO= gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels -- 42"
 eq "A3 scout gitlab branch"  "$(argv --scout-pr --provider gitlab)"   "glab mr view --output json"
 eq "A4 scout gitlab num"     "$(argv --scout-pr --provider gitlab 7)"  "glab mr view --output json -- 7"
 
@@ -75,11 +76,11 @@ eq "A5 fetch-pr-ref github"  "$(argv --fetch-pr-ref --provider github 42)" "pull
 eq "A6 fetch-pr-ref gitlab"  "$(argv --fetch-pr-ref --provider gitlab 7)"  "merge-requests/7/head"
 
 # ---- diff-refs argv ----
-eq "A7 diff-refs github num" "$(argv --diff-refs --provider github 42)" "gh pr view --json headRefOid -- 42"
+eq "A7 diff-refs github num" "$(argv --diff-refs --provider github 42)" "env GH_HOST=github.com GH_REPO= gh pr view --json headRefOid -- 42"
 eq "A8 diff-refs gitlab"     "$(argv --diff-refs --provider gitlab --repo-id grp%2Fproj 7)" "glab api projects/grp%2Fproj/merge_requests/7"
 
 # ---- post-review GitHub: one atomic reviews --input call ----
-eq "A9 post-review github atomic" "$(argv --post-review --provider github --repo-id acme/widget 42 "$PAY")" "gh api -X POST repos/acme/widget/pulls/42/reviews --input $PAY"
+eq "A9 post-review github atomic, on the remote's host" "$(argv --post-review --provider github --repo-id acme/widget 42 "$PAY")" "gh api -X POST repos/acme/widget/pulls/42/reviews --input $PAY --hostname github.com"
 
 # ---- post-review GitLab: the ordered LOOP sequence (summary note THEN discussions) ----
 GLP="$(argv --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"BBB","start_sha":"SSS","head_sha":"HHH"}' 7 "$PAY")"
@@ -114,6 +115,73 @@ fails "G8 post-review requires repo-id"         --post-review --provider github 
 fails "G9 post-review github repo-id needs slash" --post-review --provider github --repo-id noslash 42 "$PAY"
 fails "G10 post-review non-numeric id rejected" --post-review --provider github --repo-id acme/widget abc "$PAY"
 fails "G11 post-review unknown provider"        --post-review --provider bogus --repo-id x/y 1 "$PAY"
+
+. "$PLUGIN_DIR/tests/structure/lib-gh-host-fake.sh"
+mkdir -p "$WORK/hostpin/bin"
+gh_host_fake_write "$WORK/hostpin/bin/gh" <<'FAKE'
+set -u
+case "${1:-} ${2:-}" in
+  "pr view")
+    case "$*" in
+      *headRefOid*) printf '%s' '{"headRefOid":"ABCDEF0"}' ;;
+      *) printf '%s' '{"number":42,"url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","headRefName":"feat","baseRefName":"main","author":{"login":"alice"},"labels":[{"name":"bug"}]}' ;;
+    esac
+    exit 0 ;;
+  "api -X")
+    [ "${3:-}" = POST ] && [ "${4:-}" = repos/acme/widget/pulls/42/reviews ] || exit 2
+    printf '%s' '{"html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-1"}'
+    exit 0 ;;
+esac
+exit 2
+FAKE
+cat > "$WORK/hostpin/bin/ssh" <<'FAKE'
+#!/bin/bash
+[ "${1:-}" = -G ] || exit 255
+shift
+[ "${1:-}" = -- ] && shift
+printf 'user git\nhostname %s\nport 22\n' "${1:-}"
+FAKE
+chmod +x "$WORK/hostpin/bin/ssh"
+hs_run() {
+  : > "$WORK/hostpin/hosts"; : > "$WORK/hostpin/env"
+  HS_OUT="$(env PATH="$WORK/hostpin/bin:$PATH" GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hostpin/hosts" \
+    FAKE_GH_ENV_LOG="$WORK/hostpin/env" "$@" 2>"$WORK/hostpin/err")"
+  HS_RC=$?
+  HS_ERR="$(cat "$WORK/hostpin/err")"; HS_HOSTS="$(cat "$WORK/hostpin/hosts")"; HS_ENV="$(cat "$WORK/hostpin/env")"
+}
+hs_reached() {
+  local label="$1" want="$2" host="$3" count stray
+  count="$(printf '%s\n' "$HS_HOSTS" | grep -c .)"
+  stray="$(printf '%s\n' "$HS_HOSTS" | grep -v "^$host " | grep -c .)"
+  if [ "$HS_RC" -eq 0 ] && [ "$HS_OUT" = "$want" ] && [ "$count" = 1 ] && [ "$stray" = 0 ]; then check "$label" PASS
+  else check "$label (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS' err='$HS_ERR')" FAIL; fi
+}
+HS_SCOUT='{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","base":"main","head":"feat","author":"alice","labels":["bug"]}'
+hs_run bash "$LIB" --scout-pr --provider github
+hs_reached "HS1 --scout-pr of the current branch reaches the remote's github.com while GH_HOST names another host" "$HS_SCOUT" github.com
+hs_run bash "$LIB" --scout-pr --provider github 42
+hs_reached "HS2 --scout-pr by number reaches github.com while GH_HOST names another host" "$HS_SCOUT" github.com
+hs_run bash "$LIB" --diff-refs --provider github 42
+hs_reached "HS3 --diff-refs reaches github.com while GH_HOST names another host" '{"base_sha":"","start_sha":"","head_sha":"abcdef0"}' github.com
+hs_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
+hs_reached "HS4 --post-review posts to github.com while GH_HOST names another host" "https://github.test/acme/widget/pull/42#pullrequestreview-1" github.com
+hs_run ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com \
+  bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
+hs_reached "HS5 --post-review posts to the GitHub Enterprise host of an SSH remote while GH_HOST names another host" "https://github.test/acme/widget/pull/42#pullrequestreview-1" ghe.example.com
+HS_GHE=(ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com)
+hs_run "${HS_GHE[@]}" bash "$LIB" --scout-pr --provider github
+hs_reached "HS6 --scout-pr of the current branch reaches the GitHub Enterprise host of the remote" "$HS_SCOUT" ghe.example.com
+hs_run "${HS_GHE[@]}" bash "$LIB" --scout-pr --provider github 42
+hs_reached "HS7 --scout-pr by number reaches the GitHub Enterprise host of the remote" "$HS_SCOUT" ghe.example.com
+hs_run "${HS_GHE[@]}" bash "$LIB" --diff-refs --provider github 42
+hs_reached "HS8 --diff-refs reaches the GitHub Enterprise host of the remote" '{"base_sha":"","start_sha":"","head_sha":"abcdef0"}' ghe.example.com
+hs_run "${HS_GHE[@]}" GH_TOKEN=t1 GITHUB_TOKEN=t2 GH_ENTERPRISE_TOKEN=t3 GITHUB_ENTERPRISE_TOKEN=t4 \
+  bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
+if [ "$HS_RC" -eq 0 ] && [ "$HS_ENV" = ghe.example.com ]; then
+  check "HS9 --post-review to a host accepted for its stored login posts without the environment tokens" PASS
+else
+  check "HS9 --post-review to a host accepted for its stored login posts without the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
+fi
 
 # ---- normalizers (source + fixtures) ----
 source "$LIB" >/dev/null 2>&1
