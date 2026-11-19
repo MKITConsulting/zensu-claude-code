@@ -95,10 +95,11 @@ workflow arm names, so the two orders cannot be read as a conflict. If the user 
 call's permission prompt, the model says in one line that nothing was recorded and that the
 question will come back, then dispatches. A direct answer, the outward-facing answers and a
 preference taken from the approval or request text record nothing, and both directives tell the
-model never to record `--direct` itself. The reminder's default for a refused question or a
-`ZENSU HUMAN PRESENT:` field reading `no` runs the workflow and records nothing, and both full
-texts and the ask short line say so: no person chose the route, and a live run told only to skip
-the question borrowed the Yes arm and recorded `build`. The question says what outlives it: the plan question's
+model never to record `--direct` itself. The default for a refused question or a
+`ZENSU HUMAN PRESENT:` field reading `no` runs the workflow and records nothing in both
+directives, and the plan gate's (C) clause in both heredocs, the reminder's two full texts and its
+ask short line say so: no person chose the route, and a live run told only to skip the question
+borrowed the Yes arm and recorded `build`. The question says what outlives it: the plan question's
 workflow option and the reminder's Yes state that the answer is remembered for the rest of the
 session, the other question's requests included unless that question is switched off, through
 one Bash call the user may be asked to allow, the direct option and the No state
