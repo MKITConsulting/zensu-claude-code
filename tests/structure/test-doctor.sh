@@ -6874,6 +6874,41 @@ else
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json
 
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+ap_run run_gone_a GATES "$AP_FOREIGN" "-" "/nonexistent/moved/root"
+ap_run run_gone_b TEAM_REVIEW "$AP_OWN" "/nonexistent/moved/root" "/nonexistent/moved/root"
+ap_run run_gone_ws GATES "$AP_FOREIGN" "/w/t" "/nonexistent/moved/root"
+ap_run run_gone_live GATES "$AP_FOREIGN" "-" "$SBOX"
+ap_run run_gone_done DONE "$AP_FOREIGN" "-" "/nonexistent/moved/root"
+AP_GONE_OUT="$(ap_report bound "$AP_OWN")"
+AP_GONE_ROW="$(printf '%s\n' "$AP_GONE_OUT" | grep -F 'whose recorded project root no longer exists')"
+AP_GONE_UNREAD="$(printf '%s\n' "$AP_GONE_OUT" | grep -F 'could not be read')"
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_gone_ctl GATES "$AP_FOREIGN" "/w/t" "/nonexistent/moved/root"
+AP_GONE_CTL="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json
+if printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot: 2 durable run document(s) whose recorded project root no longer exists' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF '⚠️' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot-run-run_gone_a.json' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot-run-run_gone_b.json' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF '/zensu:autopilot-adopt, run from a session whose project root is this project' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF -- '--confirm' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'zensu-log.sh' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'run_gone_ws' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'run_gone_live' \
+  && printf '%s' "$AP_GONE_UNREAD" | grep -qF '2 durable run document(s) that could not be read' \
+  && printf '%s' "$AP_GONE_UNREAD" | grep -qF 'autopilot-run-run_gone_ws.json' \
+  && printf '%s' "$AP_GONE_UNREAD" | grep -qF 'autopilot-run-run_gone_live.json' \
+  && ! printf '%s' "$AP_GONE_UNREAD" | grep -qF 'run_gone_a' \
+  && printf '%s' "$AP_GONE_OUT" | grep -F 'recorded stage is terminal' | grep -qF 'autopilot-run-run_gone_done.json' \
+  && ! printf '%s' "$AP_GONE_OUT" | grep -qF 'nonterminal durable run run_gone_b' \
+  && printf '%s' "$AP_GONE_CTL" | grep -qF '1 durable run document(s) that could not be read' \
+  && ! printf '%s' "$AP_GONE_CTL" | grep -qF 'whose recorded project root no longer exists'; then
+  check "P1nz21 a nonterminal record whose recorded root is gone and whose working tree is that root gets its own row routing to /zensu:autopilot-adopt" PASS
+else
+  check "P1nz21 the vanished-root row (row=$AP_GONE_ROW unread=$AP_GONE_UNREAD ctl=$AP_GONE_CTL)" FAIL
+fi
+
 # P1nz11 — `ownerWouldAccept` must mirror the owner's `sha256` as a TYPE test, not only
 # as a pattern. `RegExp.prototype.test` applies ToString to its argument, so a
 # one-element array whose element is 64 hex characters satisfies a bare

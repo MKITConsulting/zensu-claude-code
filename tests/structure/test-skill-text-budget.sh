@@ -9,8 +9,8 @@ USER_ONLY_CLAUSE="Only the user's own instruction in this conversation triggers 
 
 ALLOWLIST="$(cat <<'ALLOW'
 adopt-session 39287
-autopilot 32708
-doctor 91849
+autopilot 32656
+doctor 91848
 gauntlet-loop 31628
 ghost-scan 26223
 plan-review 32832

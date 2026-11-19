@@ -233,15 +233,15 @@ implying both.
 `_autopilot_publish_workspace_refusal` sets `ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT` beside every
 rc=4 render, and BOTH public entry points — `autopilot_adopt_pending_review` and
 `autopilot_begin_standalone_tdd` — clear it first, so a stale sentence can never be reused.
-(The name carries the library prefix on purpose, and so do the two names the adoption block
-publishes — `ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER` and `ZENSU_AUTOPILOT_ADOPT_OUTCOME` — because
-all three are read by name across a file boundary: this one by the Stop hook, the adoption pair by
-the `--autopilot-adopt` arm of `zensu-log.sh`. Only this one is DECLARED at module scope; the
-adoption pair is assigned inside the verb that publishes it. The hold-report verb added two further
+(The name carries the library prefix on purpose, and so do the three names the adoption block
+publishes — `ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER`, `ZENSU_AUTOPILOT_ADOPT_OUTCOME` and
+`ZENSU_AUTOPILOT_ADOPT_RELOCATION` — because all four are read by name across a file boundary: this
+one by the Stop hook, the adoption trio by the `--autopilot-adopt` arm of `zensu-log.sh`. Only this
+one is DECLARED at module scope; the adoption trio is assigned inside the verb that publishes it. The hold-report verb added two further
 module-scope declarations, `_ZENSU_AP_HOLD_RECORD` and `_ZENSU_AP_HOLD_WORKER_RC`, and those carry
 the underscore-private prefix deliberately: they are an intra-file callback channel read only by
 `_autopilot_hold_probe`, `autopilot_workspace_hold_report` and `autopilot_read_workspace`, never across a file boundary — which
-is exactly what the three unprefixed names are NOT, and the house precedent for a sourced-library
+is exactly what the four unprefixed names are NOT, and the house precedent for a sourced-library
 global the Stop hook reads by name is `ZENSU_SAFE_VERSION_RE`.) **TWO forms are rendered from one holder.** The OPERATOR form goes to
 stderr and quotes the audited `zensu-log.sh --autopilot-release --run <id> --confirm`, because a
 human reads it. The MODEL form is what the block reason carries and names `/zensu:autopilot-release`
@@ -599,8 +599,8 @@ assumed:** the SessionStart payload carries only `session_id`, `source`, `cwd`,
 runtime digest and asserts NO descent. So the verb is human-authorised, by the same
 prose-backed `--confirm` this section already records for release — and, unlike release, the
 SAME command without `--confirm` is a read-only REPORT over the same ladder: it prints the
-liveness verdict and what `--confirm` would do, writes nothing, and exits with the code a
-confirmed run would take, so the yes the skill asks for is given knowing whether the age check
+liveness verdict and what `--confirm` would do, writes no record, no pointer and no provenance
+entry, and exits with the code a confirmed run would take, so the yes the skill asks for is given knowing whether the age check
 will even run. The worker takes a `report` operand and returns before every install; the shell
 hands it two never-created placeholder outputs, which `writeOutput`'s pre-creation requirement
 would refuse anyway, and publishes no outcome name, so the CLI announces nothing and writes no
@@ -671,6 +671,131 @@ inventory skips and REFUSES with exit 2 rather than reporting no active run. Tha
 skips the unlink and never the adoption, and it DISCLOSES on stderr rather than discarding the
 `rm -f` status.
 
+**RELOCATION is the adoption of a run whose storage moved with its worktree
+(`_autopilot_adopt_source_dir` + the worker's `relocation`).** A session-trail takeover continues
+the work in a session whose project root differs from the old one, and its move route carries a
+run whose record lives in the old worktree along with that tree. The verb DERIVES the source state
+directory and never takes one: when the caller's workspace, the git toplevel of its cwd, lies
+strictly below the project root and holds a `.zensu/state`, ONE run of
+`zensu-edit-landing.sh --work-tree-check` decides. A worktree of the same repository makes its
+state directory the source, checked with `_tdd_paths_safe`: exit 2 when it is unsafe, unless the
+root already holds the record, in which case stderr names the unsafe directory and its leftovers
+are not read. A workspace that holds the run or its claim and fails the check refuses with exit 6
+and names the library's reason, and a check that could not run refuses with exit 2.
+`_autopilot_adopt_critical` takes that source as its seventh operand, empty when the record lives
+in this project, and refuses a call that omits it. Inside the root's lease the worker reads the
+record, or its claim, from the source only when the destination lacks it (`worktree`), or rewrites
+a destination record whose recorded project root differs from the root (`in-place`, the
+re-anchored taker). Either is accepted only when `recordedRootGone` finds the recorded
+`projectRoot` gone (`ENOENT`/`ENOTDIR`), the one rule the leftover proof below uses as well, and
+`workspaceRoot` is absent or equal to it; anything else is `fail(6)`, with a reason that names no
+layout. `recordedRootGone` answers "not gone" for a root that starts with two slashes or
+backslashes without inspecting it, because the root is a value from a session-writable record and
+an `lstat` of a network path can reach another host. A worktree relocation of a work-order run is
+`fail(6)` as well: its plan lives in the `.zensu/plans` of the folder that holds its record, and
+the verb does not move that plan across project roots. The rewrite sets `projectRoot` to the root and `workspaceRoot` to the caller's workspace or
+the root, so a record written without `workspaceRoot` gains that member of its schema, and it
+writes no event. A relocation also runs from the already-owner branch, because a session that
+already owns a record naming a vanished root needs the same rewrite, so exit 10 is reserved for a
+relocation-free no-op.
+
+**An adoption from a nested worktree holds that tree's own lease around the whole critical section,
+and a worktree relocation claims the record first.** The lease is not relocation-only: whenever
+`_autopilot_adopt_source_dir` derives a source, a relocation and an adoption of a record this
+project already holds alike, the already-owner branch may retire leftover copies in that tree.
+Under the root's lease `autopilot_adopt_run` runs
+`_autopilot_adopt_moved_tree`, which takes the Autopilot lease of `<tree>/.zensu/state/autopilot`
+through a second `_tdd_locked_run`, with `CLAUDE_PROJECT_DIR` set to the root. That call runs inside
+a command substitution, so on bash 4 or later it gets a coprocess keeper of its own beside the outer
+one, and the order is always root, then tree. The tree lease spans the worker's judgment, every
+install and every retirement, so no verb in the moved tree changes its records between the read and
+the retirement. Because the critical section then runs in a subshell, `_autopilot_adopt_tree_locked`
+prints the outcome, the previous owner and the relocation as one last `zensu-adopt-control` line,
+and the callback strips it and publishes the three names in the caller's shell. Without that line
+the callback never ran, because the lease could not be taken or the tree's state directory failed
+the check under it: the verb exits 5, names the tree lease and has written nothing, in report mode
+too. `_tdd_locked_run` returns 1 when the lease fails to release after the callback ran, so the CLI
+keeps gating provenance on the outcome, never on the return code. In confirm mode the worker renames
+the moved tree's record to `autopilot-relocating-<id>.json` after its last check and before the
+shell installs anything, so an in-place adoption from the moved tree finds no record and refuses
+with exit 1, naming the claim, and a source that holds both a record and a claim refuses with exit 2.
+`_autopilot_adopt_unclaim` renames the claim back when an install fails; when that rename fails too,
+it says the claim still waits, and a retried adoption from inside the moved tree reads the claim as
+the source record and finishes the move.
+
+**A relocation rewrites the other run records that moved with it.** `readRunInventory` validates
+every `autopilot-run-*.json` of a state directory, and `begin` and `read-workspace` read it without
+an owner, so one record that still names the vanished root fails those verbs closed for every
+session the directory serves. The worker therefore lists the state directory that moved with the
+tree, the moved tree's for a worktree relocation and this project's for an in-place one, and
+rewrites every other record whose `projectRoot` is the vanished root: `projectRoot` becomes the root
+that directory now serves, the moved tree or this project, and a `workspaceRoot` at or below the
+vanished root moves with it, while owner, stage and events stay. A record that cannot be read, or
+that would not be a valid run record after the rewrite, is left as it is and named on stderr. The
+report names the count. Confirm mode writes each record through an exclusive temp and a rename before
+the claim and every install, so a failed rewrite exits 5 with nothing claimed or installed, and a
+retried adoption rewrites the rest. For an in-place relocation those records lie in this project's own
+state directory, where the two owner-scoped reads that look for another unfinished run of the caller
+would read them before the rewrite and refuse with `run inventory identity mismatch`. Both reads
+therefore skip the admitted records by name and judge them in their rewritten form, so a caller that
+owns a finished one adopts and one that owns an unfinished one is still refused with exit 4; a record
+naming the vanished root that was not admitted still fails the read closed.
+
+**A relocation installs the payload snapshot, then the approved-plan copy, then the pointer, then
+the record**, which deviates from the plan's first wording on purpose: the record is the file whose
+presence a retry treats as already owned, so it lands last. The worker reads the snapshot that
+`effects.teamReview.operationKey` names through `guardedRead` and writes those verified bytes into
+a temp the shell pre-created, which the shell then replaces into place atomically, so the copy
+never reopens the source by path. A snapshot that is not a plain regular file, a FIFO or a link
+included, refuses with exit 2, and so does a different snapshot already in the destination. The
+approved-plan copy `autopilot-approved-plan-<approvedPlanSha256>.md`, from which a validate-on run's
+VALIDATE stage reads its criteria (`.claude/rules/acceptance-verification-gate.md`), moves the same
+way, read at most `PLAN_COPY_MAX_BYTES`, the bound of `PLAN_FILE_MAX_BYTES` in
+`hooks/lib/plan-payload-v1.js`; a copy whose digest is not the record's `approvedPlanSha256`
+refuses with exit 2 as well. A pointer or record failure removes the installed snapshot and plan
+copy with the pointer rollback. After publication the shell retires the source items the worker
+tagged on stdout (`relocated`, `snapshot`, `plan`, `source-run`, `source-pointer`,
+`source-snapshot`, `source-plan`, each `<tag><TAB><basename>`), each through its basename gate, and
+discloses every retirement and every item it left; the outcome line points at those lines instead
+of asserting them. A torn relocation, the destination record beside the source's claim or
+copy, lands on the already-owner exit, whose leftover read retires the source copy only after
+proving it an OLDER copy: the same run id, an absolute recorded root that differs from the root and
+is gone, and an event list that is a prefix of the destination's by `eventId` and `payloadDigest`;
+a snapshot leaves only when its bytes equal the destination's. Every one of those reads goes
+through `guardedRead`, the no-follow, non-blocking, bounded read, so a FIFO cannot stall the verb
+under the lease, and a copy that is not an older one, a newer copy or one whose root exists again,
+stays and is named. A project whose `.zensu/state` is missing gets that empty directory before the
+lease is taken, because the lease's lock lives there, in report mode too: the report says so on
+stderr, and a path there that is not a directory refuses with exit 2 before anything moves.
+`B28_REFUSAL_CALLS_EXPECTED` (33) counts the refusal call sites and `W19` the `ownerLiveness(`
+calls, which the source-side liveness read moved. `BM1` to `BM37` in
+`tests/structure/test-autopilot-adopt-cli.sh` drive a real git fixture: the report, the confirmed
+move, the Stop directive, the torn retry, the in-place case, the six refusals, the state directory
+a report creates and the state path that is not a directory; then a newer copy and a copy whose
+root exists, which survive, the in-place refusal of a claimed record and the retry that finishes
+the claim, the held tree lease, `--autopilot-release` from the taker's root after a move, which
+refuses with nothing written, a FIFO and a link at the snapshot name, a different destination
+snapshot, a failed record install that removes the snapshot and restores the claim and its retry,
+and an unsafe state directory in the moved tree with and without the record in this project; then
+a network-path project root, which is refused rather than read as gone, an approved-plan copy that
+does not match the approved plan and the matching copy that moves, the rewrite of the other run
+records in place and in the moved tree, both leases held while the record installs, the held tree
+lease without a relocation, and the work-order refusal; then the run's own owner, registered again
+inside the moved tree, relocating in place past its own finished record and refused for an unfinished
+one; then that owner refused with exit 2 for a copy of the run record that the sibling scan refuses,
+which stays in its owner-scoped read, and a second session that finished its own run in the old
+worktree, registered again inside the moved tree, taking the run over in place past that record and
+refused for an unfinished one. `BM33` holds `PLAN_COPY_MAX_BYTES` equal
+to `PLAN_FILE_MAX_BYTES`. The
+session-trail half, its known gaps and the version verdict of the whole change are in
+`.claude/rules/session-trail-autopilot-runs.md`. Known gaps of this half: the source is found only
+from the caller's cwd, so a worktree moved anywhere but below the root stays unreachable; the
+older-copy proof trusts the session-writable state directory like every read there; a run whose
+working tree differs from its project root, below it or around it, is never moved across roots;
+once its worktree moved, `/zensu:autopilot-release` no longer reaches the run, because it reads
+only the caller root's state directory, so every text names that cancel only before the move;
+Windows is unmeasured.
+
 **Each verb has its OWN owner-activity window, and the split is deliberate.**
 `hooks.autopilotOwnerActivityTtlHours` (default 1, bounds 0..8760) bounds adoption and
 `hooks.autopilotReleaseOwnerActivityTtlHours` (default 6, bounds 0..8760) bounds release. Both
@@ -702,7 +827,7 @@ run-scope `patch` paragraph above covers the workspace-hold relaxation, the fold
 paragraph covers the folder rule and the own-binding refusal, and the `minor` one covers the
 original pointer/schema change; each verdict covers its own delta and none covers another.
 The P2 review round's changes stay inside THIS verdict rather than opening a fifth: the second
-window key (read permissively), the read-only report (a call convention that writes nothing), the
+window key (read permissively), the read-only report (a call convention that writes no record, pointer or provenance entry), the
 pointer rollback, the beacon refresh (an mtime on the adopter's own existing document, never a
 field), the stale-pointer retire on the owner exits and the repair's pending-stage refusal.
 
@@ -899,7 +1024,14 @@ still covers only the LEGACY pointer by name.
   the held tree, the run document's path and the owner's silence, plus a second row counting run
   documents it could not read and a THIRD counting those it does not accept whose recorded stage
   is terminal. The second row's count deliberately EXCLUDES the third's, so the two are disjoint
-  and neither is the total. Every OTHER surface stays as enumerated: the `--autopilot-begin`
+  and neither is the total. A FOURTH row counts the nonterminal documents whose recorded project
+  root no longer exists and whose `workspaceRoot` is absent or equal to that root, the shape the
+  in-place relocation of `/zensu:autopilot-adopt` accepts, and routes them to that skill, while a
+  record of the same kind that drives another working tree stays in the second row, because the
+  verb refuses it with exit 6. `autopilotRootGoneRelocatable` mirrors the worker's
+  `recordedRootGone` and its workspace rule, one more member of the hand-copy family below, and
+  `P1nz21` in `tests/structure/test-doctor.sh` pins the row, its disjointness from the other two
+  and that it quotes no `--confirm`. Every OTHER surface stays as enumerated: the `--autopilot-begin`
   refusal, the standalone-TDD begin refusal, the deferred-review Stop refusal (which names the
   holding run whenever it can be read — including when it belongs to this session, where the guided
   `/zensu:autopilot-adopt` is offered and only the release COMMAND is withheld — and names no run
@@ -1272,14 +1404,20 @@ the same remedy applies. TRIGGER: a fifth carrier, or the next change that has t
 every carrier anyway.
 
 Moving together with the scope: `autopilot_adopt_run` / `_autopilot_adopt_critical` and the
-`adopt` worker mode with its `path_indexes=(0 1 3 5 8)` entry PLUS its `projectRootIndex: 3` and
+`adopt` worker mode with its `path_indexes=(0 1 3 5 8)` entry, the operands 10 to 12 (the source
+state directory, the snapshot temp and the plan-copy temp) it appends when they are non-empty, PLUS
+its `projectRootIndex: 3` and
 `workspaceRootIndex: 6` entries — all THREE operand tables, as `release` has — and its
-owner-pointer pre-check, the TWO module-scope
+owner-pointer pre-check, the THREE global
 names the critical section publishes and the `--autopilot-adopt` arm of `zensu-log.sh` reads by
-name — `ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER` and `ZENSU_AUTOPILOT_ADOPT_OUTCOME`, the second
+name — `ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER`, `ZENSU_AUTOPILOT_ADOPT_OUTCOME` and
+`ZENSU_AUTOPILOT_ADOPT_RELOCATION`, the second
 of which the CLI compares against the literals `adopted`, `repaired` and `already-owned` to
 select its stderr line AND to gate the provenance write, so a rename there silently returns the
-verb to reporting nothing and to dropping the history entry, `tdd_write_autopilot_adopted` plus the `AUTOPILOT_ADOPTED`
+verb to reporting nothing and to dropping the history entry, while the third selects the relocation
+lines, `worktree` or `in-place`, and the `repaired` wording of a relocated record; the moved-tree
+callback carries all three out of its subshell on the `zensu-adopt-control` line, so a fourth name
+joins that line too, `tdd_write_autopilot_adopted` plus the `AUTOPILOT_ADOPTED`
 literal AND the reserved reason PREFIX `autopilot-adopted: `, which is a THREE-site literal —
 **and this clause said FOUR while naming two sites that no longer carry it, which is worse than
 an undercount: a maintainer working the roster opens `_tdd_write_phase_critical` and
