@@ -1134,7 +1134,7 @@ fi
 # in both hooks; these three rows keep the plan-hook contract visible from the
 # suite named for the hook. Both branches are graded through both_have, so a
 # one-sided edit of the (S) clause fails here as well as in P1.
-both_have "D34 both branches carry the (S) clause, the ask conjunct and the workflow-only RECORD sentence" \
+both_have "D34 both branches carry the (S) clause, the ask conjunct, the workflow-only RECORD sentence and the refused-question default that records nothing" \
   "(S) — read this before (A)" \
   "and the route field reads 'ask'" \
   "RECORD a Zensu-workflow answer before dispatching" \
@@ -1145,6 +1145,7 @@ both_have "D34 both branches carry the (S) clause, the ask conjunct and the work
   "acceptance criterion. Its description MUST also say that this answer is remembered for the rest of this session, later code requests included unless their reminder is switched off, through one Bash call the user may be asked to allow" \
   "no evidence audit. Its description MUST also say that this answer decides this plan only and is not remembered" \
   "a route the field decided records nothing" \
+  "refused unanswered — default to the Zensu workflow and do NOT ask or record. The field's 'yes' holds" \
   "The field never names /zensu:autopilot or /zensu:pilot" \
   "ZENSU DELIVERY ROUTE:"
 # D35 the default fixture has no marker and no config default, so the field must
