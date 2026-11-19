@@ -22,6 +22,11 @@
       "summary": "Review-aspect activation: which review perspectives a round activates for a given change."
     },
     {
+      "path": "tests/structure/autopilot-runs-v1.test.js", "registered": 25, "skips": {"root": 1, "win32": 2},
+      "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
+      "summary": "The session-trail Autopilot run reader: the bounded read of a session's run records under a byte budget, the schema version and owner filters, the folders and listings that cannot be read, the unfinished runs of a third session, the relocation claims an interrupted move leaves, the three layouts, the work-order route and the inner-chain classification, the pull-request shape, the brief section with the cancel route each layout allows, the show line, the release blockers and the vocabulary it mirrors from the state library and trail.mjs."
+    },
+    {
       "path": "tests/structure/background-review-v1.test.js", "registered": 54, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-background-review.sh" }],
       "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the reviewer register that renews a resumed fan-out reviewer at a Stop within its renewal, idle and name-binding bounds and the wait note it prints, the name bindings that map a named spawn's hand-back to its agent id, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."

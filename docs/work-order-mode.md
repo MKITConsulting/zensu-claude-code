@@ -125,8 +125,12 @@ The Zensu CLI write-gate (`hooks/pre-bash-zensu-gate.sh`), which runs in every s
 it asks the work-order hook library whether this session's marker binds it, the same test that
 wakes the work-order hooks. Every other `zensu` mutation follows the write-gate's ordinary rules
 there: a person's decision and a work-order protocol verb are denied even inside a skill window,
-any other mutation passes only inside a window that declares it, and the deliberate
-`ZENSU_MCP_GATE=off` one-off passes any of them. `/zensu:work` itself opens no window. In a bound
+an AI-work capture command (`ai-work bind`, `start`, `submit` and `recover`) passes on the main
+thread without a window and stays denied to a subagent, any other mutation passes only inside a
+window that declares it, and the deliberate `ZENSU_MCP_GATE=off` one-off passes any of them.
+Capture refuses work-order tokens ([AI work capture](ai-work-capture.md)), so in such a session
+only the offline `recover` acts, on the local capture receipts. `/zensu:work` itself
+opens no window. In a bound
 session the deny reason of a person's decision points to a work-order question instead of a user.
 
 `hooks/post-work-order.sh` runs after every tool call. It renews the lease when due, sends the

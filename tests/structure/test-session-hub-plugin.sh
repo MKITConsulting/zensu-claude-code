@@ -55,6 +55,7 @@ skills/session-trail/references/gotchas.md
 skills/session-trail/references/handoff.md
 skills/session-trail/references/limits.md
 skills/session-trail/references/takeover.md
+skills/session-trail/scripts/autopilot-runs-v1.mjs
 skills/session-trail/scripts/linked-sessions-v1.mjs
 skills/session-trail/scripts/session-lineage-v1.mjs
 skills/session-trail/scripts/trail.mjs'
@@ -136,6 +137,7 @@ hooks/lib/git-environment-v1.js:hooks/lib/git-environment-v1.js
 hooks/lib/worktree-keep-v1.js:hooks/lib/worktree-keep-v1.js
 hooks/usage-feed-contract.json:hooks/usage-feed-contract.json
 hooks/usage-feed.ts:hooks/usage-feed.ts
+skills/session-trail/scripts/autopilot-runs-v1.mjs:skills/session-trail/scripts/autopilot-runs-v1.mjs
 skills/session-trail/scripts/session-lineage-v1.mjs:skills/session-trail/scripts/session-lineage-v1.mjs'
 same_bytes() { [ -f "$1" ] && [ -f "$2" ] && cmp -s "$1" "$2"; }
 IDENTITY_BAD=""
@@ -148,8 +150,8 @@ while IFS= read -r pair; do
 done <<EOF
 $VENDORED
 EOF
-[ "$IDENTITY_N" = "8" ] && [ -z "$IDENTITY_BAD" ] \
-  && check "H4 the license, the four vendored libraries, the usage-feed module, its contract and the lineage ledger module are byte-identical to their PLM sources ($IDENTITY_N files)" PASS \
+[ "$IDENTITY_N" = "9" ] && [ -z "$IDENTITY_BAD" ] \
+  && check "H4 the license, the four vendored libraries, the usage-feed module, its contract, the Autopilot run reader and the lineage ledger module are byte-identical to their PLM sources ($IDENTITY_N files)" PASS \
   || check "H4 a vendored file differs from its PLM source or the list is incomplete ($IDENTITY_N files):$IDENTITY_BAD" FAIL
 cp "$HUB_DIR/hooks/lib/git-environment-v1.js" "$WORK/flipped.js"
 node -e '

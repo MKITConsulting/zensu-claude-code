@@ -135,9 +135,13 @@ Every run writes a **run config** into its own run directory with
 `scripts/verify-browser-config.js` and opens the browser with it, under a session named
 `zensu-verify-<run>`. The run config makes the browser isolated, restricts every HTTP(S) request
 to the run's origins (`network.allowedOrigins`) except a server redirect the browser follows — a
-WebSocket connection is not fenced by it, which is an open gap — blocks service workers, and
-keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
+WebSocket connection and a shared worker's fetch are not fenced by it, which are open gaps —
+blocks service workers, and keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
+
+The shared worker case was measured with playwright-cli 0.1.24 driving Google Chrome 157 on
+loopback `http` origins: a dedicated worker's fetch is fenced, a shared worker's fetch is not. An
+`https` target, a remote host, Windows and Linux were not measured.
 
 Blocking service workers has a cost to plan for. A state that depends on a service worker never
 appears in this browser, so the `browser` driver cannot verify a PWA's update prompt, its offline
@@ -223,9 +227,10 @@ Code, the gate runs in consent mode (`/zensu:doctor` reports this as
   before the browser starts. No credentials, no query or fragment in a navigation to a
   non-loopback origin, and the browser sends no HTTP(S) request to an origin outside the run
   config, except by following a server redirect (below). A WebSocket connection is not fenced by
-  the run config, which is an open gap. A loopback URL may carry a query or a fragment, such as a
-  fixture switch (`http://localhost:4200/?scenario=empty`): it is judged like the same URL without
-  them, and the consent record names the path only.
+  the run config, which is an open gap, and neither is a shared worker's fetch (measured, see
+  [How the browser is fenced](#how-the-browser-is-fenced)). A loopback URL may carry a query or a
+  fragment, such as a fixture switch (`http://localhost:4200/?scenario=empty`): it is judged like
+  the same URL without them, and the consent record names the path only.
 - An API or identity origin of a deployed app that its pages call is passed to the run as one
   more origin: it is asked in the same prompt as the app and never navigated to.
 - Under bypass permissions or `dontAsk`, or when the host reports no permission mode, the gate
@@ -250,7 +255,7 @@ control, not a proof: a forged record skips the prompt for a loopback origin, an
 bounds what it could reach to other loopback services; for a remote origin it skips only the
 prompt of a `goto` or `tab-new`, and the browser admits only the origins of the run config it was
 launched with. And the browser follows a server redirect to another origin even though
-it refuses every other HTTP(S) request there, so the skill checks the page URL after every navigation and
+it refuses an HTTP(S) request from a page or a dedicated worker there, so the skill checks the page URL after every navigation and
 stops a scenario that left the approved set. With a policy present its targets pass without a
 prompt, and every other origin is asked or, where the session cannot show the prompt, denied, as the sections
 below describe.
@@ -334,8 +339,9 @@ written for it. These limits are stated rather than hidden:
   types into a form. The list is yours, declared in the launch environment, bounded at 8 exact
   origins, and in remote mode public `https://` only, pinned to an approved address, so no entry
   reaches a private, metadata or loopback address.
-- The fence covers HTTP(S) only: page code can open a WebSocket connection to any origin, listed
-  or not.
+- The fence covers HTTP(S) requests from pages and dedicated workers only: page code can open a
+  WebSocket connection to any origin, listed or not, and a shared worker's fetch is not fenced
+  either.
 
 Consent mode has no network-only class: the helper refuses `--network-only-origin` without a
 policy. A loopback API origin of a local run, or a public HTTPS one of a remote run, is then
@@ -405,7 +411,7 @@ already names; the port rules below are for that case.
   refuses to trust DNS for a boundary decision.
 - **An API on another origin goes into the recipe under `validate.networkOnly`.** The browser
   requests nothing over HTTP(S) from an origin outside `allowedOrigins`, a followed server
-  redirect aside, so a frontend on
+  redirect, a WebSocket connection and a shared worker's fetch aside, so a frontend on
   `http://localhost:4200` that calls an API on `http://localhost:9090` needs both origins in the
   run config. List the API origin in the recipe's `validate.networkOnly.origins`. In consent mode
   the skill passes it as an ordinary origin, and one prompt covers both; under a policy that

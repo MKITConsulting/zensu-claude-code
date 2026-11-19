@@ -72,7 +72,7 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 - `zensu features status <id> <status>` — Transition status (planned|in-progress|testing|released)
 - `zensu products list` — List all products
 - `zensu products get <product-id>` — Get one product by its UUID
-- `zensu products create` — Create a new product. **Required: `--name` + `--slug`** (`slug` = URL-safe id, e.g. `my-saas-app`; the CLI sends a create without it, and the server rejects that with `slug is required`). Optional: `--type` (`public_product`|`internal_product`|`hybrid`) and `--description`
+- `zensu products create` — Create a new product. **Required: `--name` + `--slug`** (`slug` = URL-safe id, e.g. `my-saas-app`; the CLI sends a create without it, and the server rejects that with `slug is required`). Optional: `--type` (`public_product`|`internal_product`|`hybrid`) and the description as `--description-file <path>` or `--description`
 
 ### Subfeatures
 - `zensu subfeatures add <feature-id>` — Add a child feature (`--title` required)
@@ -114,8 +114,8 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 The product-level timeline (alias `zensu roadmaps`). A period is a quarter (`2026-Q2`), month (`2026-06`), week (`2026-W23`) or day (`2026-06-15`). Every write below goes through **change** (`/zensu:change`), which declares these writes in its window, checks for a duplicate before a create and asks before a command that removes or replaces data; recommend it for each roadmap or milestone write instead of a direct call.
 - `zensu roadmap list --product <id>` — List a product's roadmaps
 - `zensu roadmap get <roadmap-id>` — Get a roadmap with its features and milestones
-- `zensu roadmap create --product <id>` — Create a roadmap (`--title` required; optional `--period`, `--description`, a repeated `--goal`, and `--status` draft|active|completed|archived)
-- `zensu roadmap update <roadmap-id>` — Update a roadmap (`--title` is required here too; `--period`, `--description`, `--goal` and `--status` change only when passed)
+- `zensu roadmap create --product <id>` — Create a roadmap (`--title` required; optional `--period`, `--description-file <path>` or `--description`, a repeated `--goal`, and `--status` draft|active|completed|archived)
+- `zensu roadmap update <roadmap-id>` — Update a roadmap (`--title` is required here too; `--period`, `--description-file <path>` or `--description`, `--goal` and `--status` change only when passed)
 - `zensu roadmap delete <roadmap-id>` — Delete a roadmap; its features stay, only their membership goes
 - `zensu roadmap add-feature <roadmap-id>` — Add a feature (`--feature` UUID required; optional `--sort-order`, `--start-period` and `--end-period`)
 - `zensu roadmap remove-feature <roadmap-id> <feature-id>` — Take a feature off the roadmap; the feature stays
@@ -172,7 +172,7 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 ### Product Visions & Bootstrap
 - `zensu products vision-create` — Store a vision document (`--title` required, and the document as `--content-file <path>` or `--content`; optional `--product` and `--source` studio|import|claude-code)
 - `zensu products vision-get <vision-id>` — Retrieve vision content for analysis
-- `zensu products bootstrap-apply <vision-id>` — Create components and features from a structured decomposition (`--result`)
+- `zensu products bootstrap-apply <vision-id>` — Create components and features from a structured decomposition (the JSON as `--result-file <path>` or `--result`)
 - `zensu products bootstrap-step <vision-id> <step>` — Track post-bootstrap progress (the step number is positional, not `--step`)
 
 ### Product Studio
@@ -200,12 +200,13 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 Indexed for search: each product's features, visions, journeys, wiki pages, feature-doc titles and links (not the linked files), mocks and design assets, plus Zensu's built-in product documentation. Sources of type external are registrations only and are not indexed (no connector yet), whatever their sync status shows. Ranking is full-text keyword matching unless the server has an embedding model configured; then it is hybrid (meaning plus keywords), falling back to full-text when the embedding endpoint fails.
 
 ### AI Work Capture
-Automatic work capture drives these through `hooks/lib/ai-work-capture-v1.js`; `docs/ai-work-capture.md` names the CLI capabilities and flags each step needs. The CLI takes a personal `zensu auth login` only and refuses API keys and work-order session tokens. A submission reports a result version and never accepts it; the person accepts it in the web app.
+Automatic work capture drives `context`, `start`, `get` and `submit` through `hooks/lib/ai-work-capture-v1.js`; `docs/ai-work-capture.md` names the CLI capabilities and flags each step needs. For every capture command that reaches the backend, the CLI takes a personal `zensu auth login` only and refuses API keys and work-order session tokens; `recover` sends no request and needs no login. A submission reports a result version and never accepts it; the person accepts it in the web app.
 - `zensu ai-work context` — Show the selected capture host, without credentials
 - `zensu ai-work bind --product <id> --confirm` — Record the product the user explicitly confirmed for this repository; never run it on an inferred product
 - `zensu ai-work start` — Declare the agreed work objective of one goal
 - `zensu ai-work get <work-id>` — Read the current result and the capture history
 - `zensu ai-work submit <work-id>` — Submit an immutable result version
+- `zensu ai-work recover --session <capture-key>` — Inspect, offline, the local capture receipts of the capture key it names; with `--confirm`, `--archive <sha256>` moves the active receipt into the archive and `--restore <sha256>` copies an archived receipt back into an empty active slot and keeps the archive; neither submits, accepts or repairs scope. Only the main thread runs it, and only with the capture key the plugin supplied for this session; the write-gate does not check the key
 
 ### Organization
 - `zensu org users` — Search the organization's members by name or email (`--query`; omit it to list every member)

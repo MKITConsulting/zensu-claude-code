@@ -25,6 +25,7 @@ make_file_symlink() {
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/vcs-reconcile.XXXXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
+export ZENSU_VCS_REMOTE=https://github.com/acme/widget.git
 cat > "$WORK/a.json" <<'JSON'
 {"event":"COMMENT","body":"Stable body","commit_id":"abcdef0","comments":[{"body":"Second","line":9,"path":"b.js","side":"RIGHT"},{"path":"a.js","body":"First","side":"LEFT","line":4}]}
 JSON
@@ -389,8 +390,8 @@ fi
 
 # End-to-end GitHub operation: OPEN/head checks before and after, one POST, then present.
 mkdir -p "$WORK/bin" "$WORK/state"
-cat > "$WORK/bin/gh" <<'FAKE'
-#!/bin/bash
+. "$PLUGIN_DIR/tests/structure/lib-gh-host-fake.sh"
+gh_host_fake_write "$WORK/bin/gh" <<'FAKE'
 set -u
 printf '%s\n' "$*" >> "$FAKE_DIR/calls"
 if [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
@@ -444,7 +445,6 @@ if [ "${1:-}" = api ] && [ "${2:-}" = -X ] && [ "${3:-}" = POST ]; then
 fi
 exit 2
 FAKE
-chmod +x "$WORK/bin/gh"
 
 run_gh() {
   local payload="${1:-$WORK/a.json}"
@@ -510,7 +510,7 @@ rm -f "$WORK/state/body" "$WORK/state/calls" "$WORK/state/drift-before-write"
 if FAKE_DRIFT_AFTER_POST=1 run_gh >/dev/null 2>&1; then check "G16 post-write head drift fails closed" FAIL; else check "G16 post-write head drift fails closed" PASS; fi
 eq "G17 drift case reached the POST before failing post-check" "$(grep -c -- '-X POST repos/acme/widget/pulls/42/reviews' "$WORK/state/calls")" "1"
 case "$(tail -n 1 "$WORK/state/calls")" in
-  'api repos/acme/widget/pulls/42') check "G18 final OPEN/head snapshot is the last remote observation" PASS ;;
+  'api repos/acme/widget/pulls/42 --hostname github.com') check "G18 final OPEN/head snapshot is the last remote observation" PASS ;;
   *) check "G18 final OPEN/head snapshot is the last remote observation" FAIL ;;
 esac
 
@@ -521,6 +521,49 @@ if [ "$(printf '%s' "$SPECIAL_GH_RESULT" | jfield status)" = posted ] \
   check "G19 native Node handles payload, snapshot, and temp paths with spaces/apostrophes" PASS
 else
   check "G19 native Node handles payload, snapshot, and temp paths with spaces/apostrophes" FAIL
+fi
+
+hr_reached() {
+  local label="$1" ok="$2" host="$3" hosts calls count stray
+  hosts="$(cat "$WORK/hosts" 2>/dev/null)"; calls="$(cat "$WORK/state/calls" 2>/dev/null)"
+  count="$(printf '%s\n' "$hosts" | grep -c .)"
+  stray="$(printf '%s\n' "$hosts" | grep -v "^$host " | grep -c .)"
+  if [ "$ok" = PASS ] && [ "$count" -ge 1 ] && [ "$count" = "$(printf '%s\n' "$calls" | grep -c .)" ] && [ "$stray" = 0 ]; then
+    check "$label" PASS
+  else
+    check "$label (hosts='$hosts')" FAIL
+  fi
+}
+rm -f "$WORK/state/body" "$WORK/state/calls" "$WORK/state/post.json" "$WORK/hosts"
+HR_RESULT="$(export GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hosts"; run_gh)"
+HR_OK=FAIL; [ "$(printf '%s' "$HR_RESULT" | jfield status)" = posted ] && HR_OK=PASS
+hr_reached "HR1 --reconcile-review reads, posts and re-reads on the remote's github.com while GH_HOST names another host" "$HR_OK" github.com
+: > "$WORK/hosts"; : > "$WORK/state/calls"
+HR_MARKERS="$(export GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hosts"; FAKE_DIR="$WORK/state" PATH="$WORK/bin:$PATH" \
+  bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 2>/dev/null)"
+HR_OK=FAIL; [ "$HR_MARKERS" = "$MARKER" ] && HR_OK=PASS
+hr_reached "HR2 --review-markers lists the posted marker from github.com while GH_HOST names another host" "$HR_OK" github.com
+rm -f "$WORK/state/body" "$WORK/state/calls" "$WORK/state/post.json" "$WORK/hosts"
+HR_RESULT="$(export GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hosts" FAKE_GH_PR_HOST=ghe.example.com \
+  FAKE_GH_LOGINS=ghe.example.com ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git; run_gh)"
+HR_OK=FAIL; [ "$(printf '%s' "$HR_RESULT" | jfield status)" = posted ] && HR_OK=PASS
+hr_reached "HR3 --reconcile-review reaches the GitHub Enterprise host of the remote on every call while GH_HOST names another host" "$HR_OK" ghe.example.com
+: > "$WORK/hosts"; : > "$WORK/state/calls"
+HR_MARKERS="$(export GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hosts" FAKE_GH_PR_HOST=ghe.example.com \
+  FAKE_GH_LOGINS=ghe.example.com ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git; FAKE_DIR="$WORK/state" PATH="$WORK/bin:$PATH" \
+  bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 2>/dev/null)"
+HR_OK=FAIL; [ "$HR_MARKERS" = "$MARKER" ] && HR_OK=PASS
+hr_reached "HR4 --review-markers lists the posted marker from the GitHub Enterprise host of the remote" "$HR_OK" ghe.example.com
+rm -f "$WORK/state/body" "$WORK/state/calls" "$WORK/state/post.json" "$WORK/hosts" "$WORK/env"
+HR_RESULT="$(export GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hosts" FAKE_GH_ENV_LOG="$WORK/env" FAKE_GH_PR_HOST=ghe.example.com \
+  FAKE_GH_LOGINS=ghe.example.com ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git \
+  GH_TOKEN=t1 GITHUB_TOKEN=t2 GH_ENTERPRISE_TOKEN=t3 GITHUB_ENTERPRISE_TOKEN=t4; run_gh)"
+HR_ENV_LINES="$(grep -c . "$WORK/env" 2>/dev/null)"
+HR_ENV_BAD="$(grep -v -x -F -e ghe.example.com "$WORK/env" 2>/dev/null | grep -c .)"
+if [ "$(printf '%s' "$HR_RESULT" | jfield status)" = posted ] && [ "${HR_ENV_LINES:-0}" -ge 1 ] && [ "$HR_ENV_BAD" = 0 ]; then
+  check "HR5 --reconcile-review reads and posts on a host accepted for its stored login without the environment tokens" PASS
+else
+  check "HR5 --reconcile-review reads and posts on a host accepted for its stored login without the environment tokens (env='$(cat "$WORK/env" 2>/dev/null)')" FAIL
 fi
 
 # GitLab uses one summary note plus one discussion per inline finding. A partial
