@@ -181,7 +181,7 @@ candidate and follows `spawnedFrom.sessionId` to the parent's record in the dire
 the own record. The candidates are every store `ZENSU_CCD_EXTRA_STORES` names, split by the
 platform's list separator (`;` on Windows, `:` elsewhere), each entry trimmed, MSYS-mapped and
 resolved, which drops a trailing separator; then
-the platform's default store; then, on macOS only, every Zensu Session Hub profile store,
+the platform's default stores; then, on macOS only, every Zensu Session Hub profile store,
 `~/Library/Application Support/Zensu Session Hub/Claude-Profile/<uuid>/claude-code-sessions`,
 whose folder name is a canonical lowercase UUID, in sorted order; each spelling once. A set
 `ZENSU_CCD_STORE`, trimmed, MSYS-mapped and resolved, is the only store candidate, with no
@@ -356,11 +356,15 @@ route: a route change moves only the field, and every shape of the reminder carr
   in the resolver and `ccdStoreCandidates`, `namedStoreCandidates` and `hubProfileFolders` in
   `skills/session-trail/scripts/trail.mjs`, which apply one `ZENSU_CCD_STORE` rule, one
   `ZENSU_CCD_EXTRA_STORES` split, one Session Hub profile path and folder-name filter and one
-  candidate order, so a change to either side's rule moves both, and `L3o` in
-  `tests/structure/test-linked-session-route.sh` fails while the two macOS candidate lists
-  differ, together with
+  candidate order, so a change to either side's rule moves both, together with
   `.claude/rules/session-lineage-ledger.md` and `.claude/rules/session-trail-targeted-lookup.md`,
-  which state those rules for session-trail;
+  which state those rules for session-trail; `L3o` in
+  `tests/structure/test-linked-session-route.sh` fails when the two macOS candidate lists differ
+  in one of its four layouts (named stores beside lower-case, upper-case and non-UUID profile
+  folders, a padded `ZENSU_CCD_STORE` beside a named store, a blank one beside blank, padded and
+  repeated named entries, a home without a profiles folder), so a difference outside them passes
+  it, and a relative entry or another platform's default, where the two sides differ by design,
+  is never compared;
   `hooks/lib/desktop-store-read-v1.js`, the one owner of `writableOnlyByCaller`, `anyOwnerOrMode`,
   `realDirectory` with its required policy, `ownedRegularFile` and the bounded record reader, which
   the resolver and `trail.mjs` both load, so a change to the rule moves both readers, and
@@ -535,7 +539,11 @@ reason value is matched outside the resolver and its suite.
   (`.claude/rules/session-trail-targeted-lookup.md`). A linked session started in a Claude Desktop
   that runs on any other data folder of its own answers `unresolved` (`own-record-missing`) when
   another store holds the same account and organization folders and `none` (`no-session-store`)
-  when none does, and inherits nothing until that store is named in `ZENSU_CCD_EXTRA_STORES`. An
+  when none does, and inherits nothing. Naming that store in `ZENSU_CCD_EXTRA_STORES` helps only a
+  lineage still open when the variable reaches the hook, because `linked-session-<key>.json` keeps
+  a `none` at once and retries an `unresolved` once, on a later prompt, before keeping it as
+  `none`; a session that has answered resolves its route as one without a parent does, from its own
+  marker (`/zensu:delivery-route`) and then `hooks.defaultDeliveryRoute`, `ask` when unset. An
   own record two stores hold answers `none` (`own-record-ambiguous`) and inherits nothing, because
   which copy is the session's own cannot be told. That count takes every entry under the own
   record's name, a refused one included, where session-trail counts only the records it accepts,

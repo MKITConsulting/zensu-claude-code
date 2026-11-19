@@ -266,19 +266,36 @@ L3O_OUT="$(node -e '
     for (const name of ["bbbbbbbb-2222-4222-8222-222222222222", "aaaaaaaa-1111-4111-8111-111111111111", "CCCCCCCC-3333-4333-8333-333333333333", "notes"]) {
       fs.mkdirSync(path.join(profiles, name), { recursive: true });
     }
-    const extras = [path.join(scratch, "one"), path.join(scratch, "two") + path.sep, path.join(scratch, "Library", "Application Support", "Claude", "claude-code-sessions")].join(path.delimiter);
-    const resolver = m.storeCandidates("darwin", { HOME: scratch, ZENSU_CCD_EXTRA_STORES: extras });
-    const env = { PATH: process.env.PATH, HOME: scratch, ZENSU_CCD_EXTRA_STORES: extras };
-    const report = JSON.parse(execFileSync(process.execPath, [trail, "lineage", "--diagnose", "--json", "--config-dir", path.join(scratch, ".claude")], { env, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+    const bare = path.join(scratch, "bare-home");
+    fs.mkdirSync(bare);
+    const one = path.join(scratch, "one");
+    const layouts = [
+      ["named", 5, { HOME: scratch, ZENSU_CCD_EXTRA_STORES: [one, path.join(scratch, "two") + path.sep, path.join(scratch, "Library", "Application Support", "Claude", "claude-code-sessions")].join(path.delimiter) }],
+      ["override", 1, { HOME: scratch, ZENSU_CCD_STORE: "  " + path.join(scratch, "override") + path.sep + "  ", ZENSU_CCD_EXTRA_STORES: one }],
+      ["blank-override", 4, { HOME: scratch, ZENSU_CCD_STORE: "   ", ZENSU_CCD_EXTRA_STORES: [" " + one + " ", "", " " + one + path.sep + " ", ""].join(path.delimiter) }],
+      ["no-profiles", 2, { HOME: bare, ZENSU_CCD_EXTRA_STORES: one }],
+    ];
     const otherPlatforms = new Set(["Windows APPDATA (unverified)", "Windows LOCALAPPDATA (unverified)", "XDG_CONFIG_HOME (unverified)", "Linux ~/.config (unverified)"]);
-    const trailed = report.probes.filter((probe) => !otherPlatforms.has(probe.source)).map((probe) => probe.dir);
-    process.stdout.write(resolver.length === 5 && JSON.stringify(resolver) === JSON.stringify(trailed) ? "same" : "differ resolver=" + JSON.stringify(resolver) + " trail=" + JSON.stringify(trailed));
+    const differ = [];
+    for (const [name, length, env] of layouts) {
+      const resolver = m.storeCandidates("darwin", env);
+      let trailed;
+      try {
+        const report = JSON.parse(execFileSync(process.execPath, [trail, "lineage", "--diagnose", "--json", "--config-dir", path.join(scratch, ".claude")], { env: { PATH: process.env.PATH, ...env }, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+        trailed = report.probes.filter((probe) => !otherPlatforms.has(probe.source)).map((probe) => probe.dir);
+      } catch (_) {
+        differ.push(name + " trail-failed");
+        continue;
+      }
+      if (resolver.length !== length || JSON.stringify(resolver) !== JSON.stringify(trailed)) differ.push(name + " resolver=" + JSON.stringify(resolver) + " trail=" + JSON.stringify(trailed));
+    }
+    process.stdout.write(differ.length === 0 ? "same" : "differ " + differ.join(" | "));
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 ' "$RESOLVER" "$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs" 2>/dev/null)"
 [ "$L3O_OUT" = same ] \
-  && check "L3o the resolver's macOS store candidates equal the probes of session-trail's lineage --diagnose in the same order once the other platforms' defaults are left out: the named stores, the default store and the Session Hub profile stores, a trailing separator, an upper-case and a non-UUID profile folder and a named copy of the default store included" PASS \
+  && check "L3o the resolver's macOS store candidates equal the probes of session-trail's lineage --diagnose in the same order once the other platforms' defaults are left out, in four layouts: named stores with a trailing separator and a named copy of the default store beside lower-case, upper-case and non-UUID profile folders; a padded ZENSU_CCD_STORE with a trailing separator that stays alone beside a named store; a blank ZENSU_CCD_STORE that names no store beside blank, padded and repeated named entries; and a home without a Session Hub profiles folder" PASS \
   || check "L3o store parity with session-trail ($L3O_OUT)" FAIL
 L3F_INNER='
   const cp = require("child_process");
