@@ -47,6 +47,7 @@ _zensu_vcs_split_url() {
   U="$url" node -e '
     var u=(process.env.U||"").trim().replace(/\.git$/,"");
     var host="",path="",m;
+    if(/^file:\/\//i.test(u)||/^[A-Za-z]:[\\\/]/.test(u)){u="";}
     if(m=u.match(/^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^@\/]*@)?([^\/:@]+)(?::[0-9]+)?\/(.*)$/)){host=m[2];path=m[3];}
     else if(m=u.match(/^([^@\/]*@)?([^\/:@]+):(.*)$/)){host=m[2];path=m[3];}
     process.stdout.write(host+"\t"+path);
@@ -424,15 +425,25 @@ EOF
 }
 
 _zensu_vcs_sole_remote_url() {
-  local names name u h p pin first="" first_pin="" first_path="" fallback="" seen=0 mixed=0 same=1
-  if ! command -v git >/dev/null 2>&1 || ! names="$(git -C . remote 2>/dev/null)"; then
+  local names name u h p pin diag nl first="" first_pin="" first_path="" fallback="" seen=0 mixed=0 same=1
+  if ! command -v git >/dev/null 2>&1; then
     _zensu_vcs_inside_repo || return 0
-    printf 'zensu-vcs: git cannot read the remotes of this work tree, so no gh call was made\n' >&2
+    printf 'zensu-vcs: git is not installed, so the remotes of this work tree cannot be read and no gh call was made; install git, or set ZENSU_VCS_REMOTE for a verb given --repo-id\n' >&2
+    return 1
+  fi
+  if ! names="$(git -C . remote 2>/dev/null)"; then
+    _zensu_vcs_inside_repo || return 0
+    nl='
+'
+    diag="$(LC_ALL=C git -C . remote 2>&1 >/dev/null)"
+    diag="$(_zensu_vcs_clamp_diag "${diag%%"$nl"*}")"
+    [ -z "$diag" ] || diag=" ($diag)"
+    printf 'zensu-vcs: git cannot read the remotes of this work tree%s, so no gh call was made; repair its git configuration, or set ZENSU_VCS_REMOTE for a verb given --repo-id; if another account owns the repository, trusting it with git config --global --add safe.directory <path> changes the global git configuration and is for the user to decide, not for an agent\n' "$diag" >&2
     return 1
   fi
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    u="$(git -C . remote get-url "$name" 2>/dev/null)" || u=""
+    u="$(git -C . remote get-url "$name" 2>/dev/null)" || continue
     IFS="$(printf '\t')" read -r h p <<EOF_SOLE_URL
 $(_zensu_vcs_split_url "$u")
 EOF_SOLE_URL
@@ -484,7 +495,7 @@ $(_zensu_vcs_split_url "$url")
 EOF
   if [ -z "$host" ]; then
     if [ -n "$url" ]; then
-      printf 'zensu-vcs: the remote of this work tree names no GitHub host, so no gh call was made\n' >&2
+      printf 'zensu-vcs: the remote of this work tree names no GitHub host, so no gh call was made; set ZENSU_VCS_REMOTE to the URL of the GitHub remote for a verb given --repo-id, make the current branch track a remote on the GitHub host with git branch --set-upstream-to <remote>/<branch>, or spell a one-letter SSH alias as ssh://<alias>/<path>\n' >&2
       return 1
     fi
     printf 'github.com'
