@@ -398,6 +398,216 @@ O="$(env -i PATH=/dev/null "$BASH_ABS" "$LIB" --conventions --repo "$CV" --provi
   || check "C7 without node the verb fails closed (out='$O' rc=$RC)" FAIL
 rm -rf "$CV" "$CV_OUT" "$CV_CFG"
 
+HD="$(mktemp -d -t vcsdetect-ghhost-XXXXXX)"
+mkdir -p "$HD/bin" "$HD/nogit"
+. "$PLUGIN_DIR/tests/structure/lib-gh-host-fake.sh"
+gh_host_fake_write "$HD/bin/gh" <<'FAKE'
+exit 2
+FAKE
+cat > "$HD/bin/ssh" <<'FAKE'
+#!/bin/bash
+printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
+[ "${FAKE_SSH_FAIL:-0}" = 1 ] && exit 255
+[ "${1:-}" = -G ] || exit 255
+shift
+[ "${1:-}" = -- ] && shift
+case "${1:-}" in
+  gh-work|gh_work) printf 'user git\nhostname GitHub.com\nport 22\n' ;;
+  gh-bad) printf 'user git\nhostname bad_host.example\nport 22\n' ;;
+  *) printf 'user git\nhostname %s\nport 22\n' "${1:-}" ;;
+esac
+FAKE
+chmod +x "$HD/bin/ssh"
+hd_run() {
+  local remote="$1"; shift
+  : > "$HD/ssh.log"; : > "$HD/config.log"
+  HD_OUT="$(cd "$HD/nogit" && env PATH="$HD/bin:$PATH" GH_HOST= FAKE_SSH_LOG="$HD/ssh.log" \
+    FAKE_GH_CONFIG_LOG="$HD/config.log" ZENSU_VCS_REMOTE="$remote" "$@" \
+    bash -c 'source "$1" && _zensu_vcs_gh_host' _ "$LIB" 2>"$HD/err")"
+  HD_RC=$?
+  HD_ERR="$(cat "$HD/err")"; HD_SSH="$(cat "$HD/ssh.log")"; HD_CONFIG="$(cat "$HD/config.log")"
+}
+hd_host() {
+  local label="$1" want="$2"
+  if [ "$HD_RC" -eq 0 ] && [ "$HD_OUT" = "$want" ]; then check "$label" PASS
+  else check "$label (rc=$HD_RC out='$HD_OUT' err='$HD_ERR')" FAIL; fi
+}
+hd_refused() {
+  local label="$1" needle="$2"
+  if [ "$HD_RC" -ne 0 ] && [ -z "$HD_OUT" ]; then
+    case "$HD_ERR" in *"$needle"*) check "$label" PASS ;; *) check "$label (stderr misses '$needle': '$HD_ERR')" FAIL ;; esac
+  else check "$label (rc=$HD_RC out='$HD_OUT')" FAIL; fi
+}
+hd_run https://github.com/acme/widget.git
+hd_host "HD1 an HTTPS github.com remote reads as github.com" github.com
+{ [ "$HD_RC" -eq 0 ] && [ "$HD_OUT" = github.com ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ]; } && check "HD1b an HTTPS remote runs no ssh and github.com needs no gh login lookup" PASS \
+  || check "HD1b an HTTPS remote runs no ssh and github.com needs no gh login lookup (ssh='$HD_SSH' config='$HD_CONFIG')" FAIL
+hd_run ''
+hd_host "HD2 an empty remote outside every repository reads as github.com, the cloud host --detect reports for it" github.com
+hd_run https://WWW.GitHub.com/acme/widget.git
+hd_host "HD3 the host is lowercased and a leading www. is dropped, as gh reads a remote" github.com
+hd_run git@gh-work:acme/widget.git
+hd_host "HD4 an SSH alias resolves through ssh -G to the host it names" github.com
+case "$HD_SSH" in
+  *"-G -- gh-work"*) check "HD4b the alias goes to ssh -G behind an end-of-options marker" PASS ;;
+  *) check "HD4b the alias goes to ssh -G behind an end-of-options marker (ssh='$HD_SSH')" FAIL ;;
+esac
+hd_run ssh://git@ssh.github.com:443/acme/widget.git
+hd_host "HD5 ssh.github.com reads as github.com" github.com
+hd_run https://ghe.example.com/acme/widget.git FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD6 a GitHub Enterprise host gh is logged in to is accepted" ghe.example.com
+[ "$HD_CONFIG" = ghe.example.com ] && check "HD6b the login is looked up for exactly that host" PASS \
+  || check "HD6b the login is looked up for exactly that host (config='$HD_CONFIG')" FAIL
+hd_run https://ghe.example.com/acme/widget.git
+hd_refused "HD7 a host gh knows no login for is refused and the refusal names the login command" "gh auth login --hostname ghe.example.com"
+case "$HD_ERR" in
+  *GH_HOST*) check "HD7b the refusal names no GH_HOST route past the login check (err='$HD_ERR')" FAIL ;;
+  *"gh auth login --hostname ghe.example.com"*) check "HD7b the refusal names no GH_HOST route past the login check" PASS ;;
+  *) check "HD7b the refusal names no GH_HOST route past the login check (err='$HD_ERR')" FAIL ;;
+esac
+hd_run https://ghe.example.com/acme/widget.git GH_HOST=GHE.Example.com
+hd_host "HD8 the host GH_HOST names is accepted without a login lookup" ghe.example.com
+{ [ "$HD_RC" -eq 0 ] && [ "$HD_OUT" = ghe.example.com ] && [ -z "$HD_CONFIG" ]; } && check "HD8b no gh login lookup runs for the GH_HOST host" PASS \
+  || check "HD8b no gh login lookup runs for the GH_HOST host (config='$HD_CONFIG')" FAIL
+hd_run 'git@-oProxyCommand=touch:acme/widget.git'
+hd_refused "HD9 an option-shaped remote host is refused as no valid host name" "not a valid host name"
+{ [ "$HD_RC" -ne 0 ] && [ -z "$HD_OUT" ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ] && case "$HD_ERR" in *"not a valid host name"*) true ;; *) false ;; esac; } \
+  && check "HD9b the refused host reaches neither ssh nor gh" PASS \
+  || check "HD9b the refused host reaches neither ssh nor gh (ssh='$HD_SSH' config='$HD_CONFIG')" FAIL
+hd_run git@gh-bad:acme/widget.git
+hd_refused "HD10 a translated host that is no valid host name is refused" "not a valid host name"
+{ [ "$HD_RC" -ne 0 ] && [ "$HD_SSH" = "-G -- gh-bad" ] && [ -z "$HD_CONFIG" ]; } && check "HD10b the refused translated host reaches no gh login lookup" PASS \
+  || check "HD10b the refused translated host reaches no gh login lookup (rc=$HD_RC ssh='$HD_SSH' config='$HD_CONFIG')" FAIL
+hd_run git@gh-work:acme/widget.git FAKE_SSH_FAIL=1
+hd_refused "HD11 an alias ssh cannot resolve keeps its own name and is refused without a login" "gh auth login --hostname gh-work"
+hd_run "https://$(printf '%064d' 0 | tr 0 a).example/acme/widget.git"
+hd_refused "HD12 a host label longer than 63 characters is refused" "not a valid host name"
+HD_OUT="$(env -i PATH=/dev/null ZENSU_VCS_REMOTE=https://github.com/acme/widget.git "$BASH_ABS" -c 'source "$1" && _zensu_vcs_gh_host' _ "$LIB" 2>"$HD/err")"
+HD_RC=$?; HD_ERR="$(cat "$HD/err")"
+hd_refused "HD13 without node the host is not derived" "node"
+hd_run https://ghe.example.com/acme/widget.git FAKE_GH_EMPTY_LOGINS=ghe.example.com
+hd_refused "HD14 a login lookup that exits 0 with an empty answer counts as no login" "gh auth login --hostname ghe.example.com"
+hd_run git@gh_work:acme/widget.git
+hd_host "HD15 an SSH alias with an underscore resolves through ssh -G" github.com
+[ "$HD_SSH" = "-G -- gh_work" ] && check "HD15b the underscore alias reaches ssh -G unchanged" PASS \
+  || check "HD15b the underscore alias reaches ssh -G unchanged (ssh='$HD_SSH')" FAIL
+hd_run git@gh_work:acme/widget.git FAKE_SSH_FAIL=1
+hd_refused "HD16 an underscore alias ssh cannot translate is no host name to pin" "not a valid host name"
+{ [ "$HD_RC" -ne 0 ] && [ -z "$HD_CONFIG" ]; } && check "HD16b the untranslated underscore alias reaches no gh login lookup" PASS \
+  || check "HD16b the untranslated underscore alias reaches no gh login lookup (config='$HD_CONFIG')" FAIL
+hd_run git+ssh://git@gh-work/acme/widget.git
+hd_host "HD17 a git+ssh remote is an SSH remote whose alias goes through ssh -G" github.com
+hd_run ssh+git://git@gh-work/acme/widget.git
+hd_host "HD18 an ssh+git remote is an SSH remote whose alias goes through ssh -G" github.com
+hd_run 'gh-work:acme/odd://name.git'
+hd_host "HD19 a scp-like remote whose path holds :// stays an SSH remote" github.com
+hd_bad_host() {
+  local label="$1" host="$2"
+  hd_run "https://$host/acme/widget.git" FAKE_GH_LOGINS="$host"
+  if [ "$HD_RC" -ne 0 ] && [ -z "$HD_OUT" ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ]; then
+    case "$HD_ERR" in *"not a valid host name"*) check "$label" PASS ;; *) check "$label (err='$HD_ERR')" FAIL ;; esac
+  else check "$label (rc=$HD_RC out='$HD_OUT' ssh='$HD_SSH' config='$HD_CONFIG')" FAIL; fi
+}
+hd_bad_host "HD20 a label that ends with a hyphen is refused before any lookup" ghe-.example.com
+hd_bad_host "HD21 a label that starts with a hyphen is refused before any lookup" -ghe.example.com
+hd_bad_host "HD22 a leading dot is refused before any lookup" .ghe.example.com
+hd_bad_host "HD23 a trailing dot is refused before any lookup" ghe.example.com.
+hd_bad_host "HD24 an empty label is refused before any lookup" ghe..example.com
+HD_LONG="$(i=0; while [ "$i" -lt 25 ]; do printf 'abcdefghi.'; i=$((i + 1)); done; printf 'abc')"
+hd_run "https://$HD_LONG/acme/widget.git" FAKE_GH_LOGINS="$HD_LONG"
+hd_host "HD25 a host name of 253 characters is accepted" "$HD_LONG"
+hd_bad_host "HD25b a host name of 254 characters is refused before any lookup" "${HD_LONG}x"
+hd_repo() {
+  mkdir -p "$1" && git -C "$1" init -q && git -C "$1" symbolic-ref HEAD refs/heads/main \
+    && git -C "$1" -c user.email=t@example.invalid -c user.name=t -c commit.gpgsign=false commit -q --no-verify --allow-empty -m init
+}
+hd_run_in() {
+  local dir="$1"; shift
+  : > "$HD/ssh.log"; : > "$HD/config.log"
+  HD_OUT="$(cd "$dir" && env PATH="$HD/bin:$PATH" GH_HOST= FAKE_SSH_LOG="$HD/ssh.log" \
+    FAKE_GH_CONFIG_LOG="$HD/config.log" ZENSU_VCS_REMOTE= "$@" \
+    bash -c 'source "$1" && _zensu_vcs_gh_host' _ "$LIB" 2>"$HD/err")"
+  HD_RC=$?
+  HD_ERR="$(cat "$HD/err")"; HD_SSH="$(cat "$HD/ssh.log")"; HD_CONFIG="$(cat "$HD/config.log")"
+}
+hd_repo "$HD/local-upstream" && git -C "$HD/local-upstream" remote add origin https://ghe.example.com/acme/widget.git \
+  && git -C "$HD/local-upstream" checkout -q -b feat --track main
+hd_run_in "$HD/local-upstream" FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD26 a branch that tracks a local branch reads the host of origin" ghe.example.com
+HD_URL="$(cd "$HD/local-upstream" && ZENSU_VCS_REMOTE= bash -c 'source "$1" && _zensu_vcs_remote_url .' _ "$LIB" 2>/dev/null)"
+[ "$HD_URL" = https://ghe.example.com/acme/widget.git ] && check "HD26b the remote helper --detect shares falls back to origin for a local upstream" PASS \
+  || check "HD26b the remote helper --detect shares falls back to origin for a local upstream (url='$HD_URL')" FAIL
+hd_repo "$HD/disagree" && git -C "$HD/disagree" remote add upstream https://ghe.example.com/acme/widget.git \
+  && git -C "$HD/disagree" remote add github https://github.com/acme/widget.git
+hd_run_in "$HD/disagree" FAKE_GH_LOGINS=ghe.example.com
+hd_refused "HD27 remotes on different hosts that the branch tracks none of are refused instead of read as github.com" "name different hosts"
+case "$HD_ERR" in
+  *ZENSU_VCS_REMOTE*"git branch --set-upstream-to"*) check "HD27b that refusal names ZENSU_VCS_REMOTE and git branch --set-upstream-to" PASS ;;
+  *) check "HD27b that refusal names ZENSU_VCS_REMOTE and git branch --set-upstream-to (err='$HD_ERR')" FAIL ;;
+esac
+hd_repo "$HD/no-remote"
+hd_run_in "$HD/no-remote"
+hd_host "HD28 a work tree without any remote reads as github.com" github.com
+hd_run /srv/git/widget.git
+hd_refused "HD29 a remote URL that yields no host is refused instead of read as github.com" "names no GitHub host"
+{ [ "$HD_RC" -ne 0 ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ]; } && check "HD29b the hostless remote reaches neither ssh nor gh" PASS \
+  || check "HD29b the hostless remote reaches neither ssh nor gh (ssh='$HD_SSH' config='$HD_CONFIG')" FAIL
+hd_run "git@$(printf '%0254d' 0 | tr 0 a):acme/widget.git"
+hd_refused "HD30 an SSH alias longer than 253 characters is refused" "not a valid host name"
+[ -z "$HD_SSH" ] && check "HD30b the overlong alias reaches no ssh" PASS \
+  || check "HD30b the overlong alias reaches no ssh (ssh='$HD_SSH')" FAIL
+hd_run 'git@-gh-work:acme/widget.git'
+hd_refused "HD31 an SSH alias that starts with a hyphen is refused" "not a valid host name"
+[ -z "$HD_SSH" ] && check "HD31b the hyphen-led alias reaches no ssh" PASS \
+  || check "HD31b the hyphen-led alias reaches no ssh (ssh='$HD_SSH')" FAIL
+hd_repo "$HD/github-only" && git -C "$HD/github-only" remote add github https://github.com/acme/widget.git
+hd_run_in "$HD/github-only"
+hd_host "HD32 a branch without an upstream in a work tree whose only remote is not origin reads the host of that remote" github.com
+hd_repo "$HD/agree" && git -C "$HD/agree" remote add upstream https://ghe.example.com/acme/widget.git \
+  && git -C "$HD/agree" remote add fork git@ghe.example.com:me/widget.git
+hd_run_in "$HD/agree" FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD33 remotes that all name one host pin that host when the branch tracks none of them" ghe.example.com
+hd_repo "$HD/unreadable" && printf '[remote "origin"\n\turl = https://ghe.example.com/acme/widget.git\n' >> "$HD/unreadable/.git/config"
+hd_run_in "$HD/unreadable" FAKE_GH_LOGINS=ghe.example.com
+hd_refused "HD34 a work tree whose remotes git cannot read is refused instead of read as github.com" "git cannot read the remotes"
+{ [ "$HD_RC" -ne 0 ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ]; } && check "HD34b the unreadable work tree reaches neither ssh nor gh" PASS \
+  || check "HD34b the unreadable work tree reaches neither ssh nor gh (ssh='$HD_SSH' config='$HD_CONFIG')" FAIL
+hd_repo "$HD/ceiling" && mkdir -p "$HD/ceiling/sub" && git -C "$HD/ceiling" remote add origin https://ghe.example.com/acme/widget.git
+hd_run_in "$HD/ceiling/sub" GIT_CEILING_DIRECTORIES="$HD/ceiling"
+hd_host "HD35 a directory GIT_CEILING_DIRECTORIES keeps out of the repository above it reads as github.com" github.com
+mkdir -p "$HD/agree/pkg/widget" && ln -s "$HD/agree/pkg/widget" "$HD/agree-link"
+hd_run_in "$HD/agree-link" FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD36 a directory reached through a symlink into a work tree reads the host its remotes name" ghe.example.com
+git init -q --bare "$HD/bare.git" && git -C "$HD/bare.git" remote add upstream https://ghe.example.com/acme/widget.git
+hd_run_in "$HD/bare.git" FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD37 a bare repository reads the host its remotes name" ghe.example.com
+mkdir -p "$HD/unreadable/pkg" && ln -s "$HD/unreadable/pkg" "$HD/unreadable-link"
+hd_run_in "$HD/unreadable-link" FAKE_GH_LOGINS=ghe.example.com
+hd_refused "HD38 a directory reached through a symlink into a work tree whose remotes git cannot read is refused" "git cannot read the remotes"
+git init -q --bare "$HD/bare-unreadable.git" \
+  && printf '[remote "origin"\n\turl = https://ghe.example.com/acme/widget.git\n' >> "$HD/bare-unreadable.git/config"
+hd_run_in "$HD/bare-unreadable.git" FAKE_GH_LOGINS=ghe.example.com
+hd_refused "HD39 a bare repository whose remotes git cannot read is refused" "git cannot read the remotes"
+ln -s "$HD/ceiling" "$HD/ceiling-link"
+hd_run_in "$HD/ceiling/sub" GIT_CEILING_DIRECTORIES="$HD/ceiling-link"
+hd_host "HD40 a ceiling spelled through a symlink stops the walk where it stops git" github.com
+mkdir -p "$HD/unreadable/sub" && ln -s "$HD/unreadable" "$HD/unreadable-ceiling"
+hd_run_in "$HD/unreadable/sub" GIT_CEILING_DIRECTORIES=":$HD/unreadable-ceiling"
+hd_refused "HD41 a ceiling after an empty entry is compared as written, as git compares it" "git cannot read the remotes"
+hd_run_in "$HD/unreadable/sub" GIT_CEILING_DIRECTORIES=..
+hd_refused "HD41b a relative ceiling is ignored, as git ignores it" "git cannot read the remotes"
+hd_repo "$HD/mirror" && git -C "$HD/mirror" remote add origin https://ghe.example.com/acme/widget.git \
+  && git -C "$HD/mirror" remote add mirror https://github.com/acme/widget.git
+hd_run_in "$HD/mirror" FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD42 origin pins its host beside a mirror remote on another host" ghe.example.com
+hd_repo "$HD/tracking" && git -C "$HD/tracking" remote add upstream https://ghe.example.com/acme/widget.git \
+  && git -C "$HD/tracking" remote add origin https://github.com/me/widget.git \
+  && git -C "$HD/tracking" update-ref refs/remotes/upstream/main HEAD \
+  && git -C "$HD/tracking" branch --set-upstream-to upstream/main >/dev/null
+hd_run_in "$HD/tracking" FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD43 the remote the current branch tracks pins its host beside origin on another host" ghe.example.com
+rm -rf "$HD"
+
 echo "----"
 echo "test-vcs-detect: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
