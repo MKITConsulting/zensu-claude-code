@@ -84,9 +84,7 @@ turns its inline site into a finding; and the write-gate command tree
 `tests/structure/test-zensu-cli-map-drift.sh` then names (`.claude/rules/cli-command-classification.md`).
 `P10e` requires the new reason, word for word, in the README Requirements and in `/zensu:setup`
 Phase 0; the banner and the doctor print it from the module. A floor raised without a new reason
-keeps telling users the previous floor's reason. The 0.22.0 raise left the tree at 0.15.0: the
-0.22.0 tree adds `ai-work bind`, `ai-work recover` and `update`, and classifying `recover` and
-`update` for the write gate is a change of its own.
+keeps telling users the previous floor's reason.
 
 **One Homebrew upgrade spelling.** `INSTALL.homebrewUpgrade` is
 `brew update && brew upgrade --cask mkitconsulting/tap/zensu`, one command that every surface

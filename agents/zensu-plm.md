@@ -72,7 +72,7 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 - `zensu features status <id> <status>` — Transition status (planned|in-progress|testing|released)
 - `zensu products list` — List all products
 - `zensu products get <product-id>` — Get one product by its UUID
-- `zensu products create` — Create a new product. **Required: `--name` + `--slug`** (`slug` = URL-safe id, e.g. `my-saas-app`; the CLI sends a create without it, and the server rejects that with `slug is required`). Optional: `--type` (`public_product`|`internal_product`|`hybrid`) and `--description`
+- `zensu products create` — Create a new product. **Required: `--name` + `--slug`** (`slug` = URL-safe id, e.g. `my-saas-app`; the CLI sends a create without it, and the server rejects that with `slug is required`). Optional: `--type` (`public_product`|`internal_product`|`hybrid`) and the description as `--description-file <path>` or `--description`
 
 ### Subfeatures
 - `zensu subfeatures add <feature-id>` — Add a child feature (`--title` required)
@@ -114,8 +114,8 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 The product-level timeline (alias `zensu roadmaps`). A period is a quarter (`2026-Q2`), month (`2026-06`), week (`2026-W23`) or day (`2026-06-15`). Every write below goes through **change** (`/zensu:change`), which declares these writes in its window, checks for a duplicate before a create and asks before a command that removes or replaces data; recommend it for each roadmap or milestone write instead of a direct call.
 - `zensu roadmap list --product <id>` — List a product's roadmaps
 - `zensu roadmap get <roadmap-id>` — Get a roadmap with its features and milestones
-- `zensu roadmap create --product <id>` — Create a roadmap (`--title` required; optional `--period`, `--description`, a repeated `--goal`, and `--status` draft|active|completed|archived)
-- `zensu roadmap update <roadmap-id>` — Update a roadmap (`--title` is required here too; `--period`, `--description`, `--goal` and `--status` change only when passed)
+- `zensu roadmap create --product <id>` — Create a roadmap (`--title` required; optional `--period`, `--description-file <path>` or `--description`, a repeated `--goal`, and `--status` draft|active|completed|archived)
+- `zensu roadmap update <roadmap-id>` — Update a roadmap (`--title` is required here too; `--period`, `--description-file <path>` or `--description`, `--goal` and `--status` change only when passed)
 - `zensu roadmap delete <roadmap-id>` — Delete a roadmap; its features stay, only their membership goes
 - `zensu roadmap add-feature <roadmap-id>` — Add a feature (`--feature` UUID required; optional `--sort-order`, `--start-period` and `--end-period`)
 - `zensu roadmap remove-feature <roadmap-id> <feature-id>` — Take a feature off the roadmap; the feature stays
@@ -172,7 +172,7 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 ### Product Visions & Bootstrap
 - `zensu products vision-create` — Store a vision document (`--title` required, and the document as `--content-file <path>` or `--content`; optional `--product` and `--source` studio|import|claude-code)
 - `zensu products vision-get <vision-id>` — Retrieve vision content for analysis
-- `zensu products bootstrap-apply <vision-id>` — Create components and features from a structured decomposition (`--result`)
+- `zensu products bootstrap-apply <vision-id>` — Create components and features from a structured decomposition (the JSON as `--result-file <path>` or `--result`)
 - `zensu products bootstrap-step <vision-id> <step>` — Track post-bootstrap progress (the step number is positional, not `--step`)
 
 ### Product Studio
