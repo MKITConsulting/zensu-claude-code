@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
+export GH_GRAPHQL_MODEL="$PLUGIN_DIR/tests/structure/lib-fake-gh-graphql.js"
 PASS=0; FAIL=0
 check() {
   local label="$1" cond="$2"
@@ -403,11 +404,10 @@ if [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
     : > "$FAKE_DIR/drift-before-write"
   fi
   if [ -f "$FAKE_DIR/body" ]; then
-    BODY_FILE="$FAKE_DIR/body" node -e 'var fs=require("fs"),b=fs.readFileSync(process.env.BODY_FILE,"utf8");process.stdout.write(JSON.stringify([{data:{repository:{pullRequest:{reviews:{nodes:[{id:"r1",url:"https://github.test/acme/widget/pull/42#pullrequestreview-1",body:b}],pageInfo:{hasNextPage:false,endCursor:null}}}}}}]));'
-  else
-    printf '%s' '[{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}]'
+    FAKE_PAGES=graphql-page.json exec node "$GH_GRAPHQL_MODEL" "$FAKE_DIR" "$@"
   fi
-  exit 0
+  printf '%s' '{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}' > "$FAKE_DIR/graphql-empty.json"
+  FAKE_PAGES=graphql-empty.json exec node "$GH_GRAPHQL_MODEL" "$FAKE_DIR" "$@"
 fi
 if [ "${1:-}" = api ] && [ "${2:-}" = 'repos/acme/widget/pulls/42' ]; then
   if [ "${FAKE_MUTATE_PRIVATE_PAYLOAD:-0}" = 1 ] && [ ! -f "$FAKE_DIR/private-payload-mutated" ]; then
@@ -439,6 +439,7 @@ if [ "${1:-}" = api ] && [ "${2:-}" = -X ] && [ "${3:-}" = POST ]; then
       var j;try{j=JSON.parse(raw);}catch(_){process.exit(2);}
       fs.writeFileSync(process.env.FAKE_DIR+"/post.json",raw);
       fs.writeFileSync(process.env.FAKE_DIR+"/body",j.body);
+      fs.writeFileSync(process.env.FAKE_DIR+"/graphql-page.json",JSON.stringify({data:{repository:{pullRequest:{reviews:{nodes:[{id:"r1",url:"https://github.test/acme/widget/pull/42#pullrequestreview-1",body:j.body}],pageInfo:{hasNextPage:false,endCursor:null}}}}}}));
     });'
   printf '%s' '{"html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-1"}'
   exit 0

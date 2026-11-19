@@ -68,6 +68,7 @@
     "test-intent-router-hook.sh",
     "test-knowledge-context.sh",
     "test-linked-session-route.sh",
+    "test-live-evals.sh",
     "test-context-auto-load.sh",
     "test-msys-runtime-boundaries.sh",
     "test-msys-special-plugin-module-boundaries.sh",

@@ -248,11 +248,22 @@ _zensu_vcs_detect() {
     shift
   done
 
-  local url host path
+  local url host path pinned spelled="" probed
   url="$(_zensu_vcs_remote_url "$repo")"
+  if [ -z "$url" ]; then
+    url="$(CDPATH= cd -- "$repo" 2>/dev/null && _zensu_vcs_sole_remote_url --one-repository 2>/dev/null)" || url=""
+  fi
   IFS="$(printf '\t')" read -r host path <<EOF
 $(_zensu_vcs_split_url "$url")
 EOF
+  if [ -n "$host" ] && pinned="$(_zensu_vcs_pinned_host "$url" "$host" 2>/dev/null)"; then
+    spelled="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+    case "$spelled" in www.?*) spelled="${spelled#www.}" ;; esac
+    if [ "$spelled" = "$pinned" ] || [ -n "$(_zensu_vcs_classify_host "$spelled")" ]; then
+      spelled=""
+    fi
+    host="$pinned"
+  fi
 
   local provider="" edition=""
   if [ -n "$o_provider" ]; then
@@ -268,7 +279,12 @@ EOF
 $(_zensu_vcs_classify_host "$host")
 EOF
     if [ -z "$provider" ]; then
-      case "$(_zensu_vcs_probe "$host")" in
+      probed="$(_zensu_vcs_probe "$host")"
+      if [ "$probed" = none ] && [ -n "$spelled" ]; then
+        probed="$(_zensu_vcs_probe "$spelled")"
+        [ "$probed" = none ] || host="$spelled"
+      fi
+      case "$probed" in
         gitlab)            provider="gitlab"; edition="selfhosted" ;;
         github-enterprise) provider="github"; edition="enterprise" ;;
         *)
@@ -360,58 +376,8 @@ _zensu_vcs_inside_repo() {
   done
 }
 
-_zensu_vcs_sole_remote_url() {
-  local names name u h p first="" first_host="" seen=0 mixed=0
-  if ! command -v git >/dev/null 2>&1 || ! names="$(git -C . remote 2>/dev/null)"; then
-    _zensu_vcs_inside_repo || return 0
-    printf 'zensu-vcs: git cannot read the remotes of this work tree, so no gh call was made\n' >&2
-    return 1
-  fi
-  while IFS= read -r name; do
-    [ -n "$name" ] || continue
-    u="$(git -C . remote get-url "$name" 2>/dev/null)" || u=""
-    IFS="$(printf '\t')" read -r h p <<EOF_SOLE_URL
-$(_zensu_vcs_split_url "$u")
-EOF_SOLE_URL
-    h="$(printf '%s' "$h" | tr '[:upper:]' '[:lower:]')"
-    if [ "$seen" = 0 ]; then
-      first="$u"
-      first_host="$h"
-      seen=1
-    elif [ "$h" != "$first_host" ]; then
-      mixed=1
-    fi
-  done <<EOF_SOLE_NAMES
-$names
-EOF_SOLE_NAMES
-  if [ "$mixed" = 1 ]; then
-    printf 'zensu-vcs: the current branch tracks no remote and the remotes of this work tree name different hosts, so no gh call was made; set ZENSU_VCS_REMOTE or run git branch --set-upstream-to <remote>/<branch>\n' >&2
-    return 1
-  fi
-  printf '%s' "$first"
-}
-
-_zensu_vcs_gh_host() {
-  local url host path kind=other translated="" key value env_host login
-  command -v node >/dev/null 2>&1 || {
-    printf 'zensu-vcs: node is required to read the GitHub host of the remote, so no gh call was made\n' >&2
-    return 1
-  }
-  url="$(_zensu_vcs_remote_url .)"
-  if [ -z "$url" ] && [ -z "${ZENSU_VCS_REMOTE:-}" ]; then
-    url="$(_zensu_vcs_sole_remote_url)" || return 1
-  fi
-  IFS="$(printf '\t')" read -r host path <<EOF
-$(_zensu_vcs_split_url "$url")
-EOF
-  if [ -z "$host" ]; then
-    if [ -n "$url" ]; then
-      printf 'zensu-vcs: the remote of this work tree names no GitHub host, so no gh call was made\n' >&2
-      return 1
-    fi
-    printf 'github.com'
-    return 0
-  fi
+_zensu_vcs_pinned_host() {
+  local url="${1:-}" host="${2:-}" kind=other translated="" key value
   url="${url#"${url%%[![:space:]]*}"}"
   case "$url" in
     *://*)
@@ -447,8 +413,84 @@ EOF
     printf 'zensu-vcs: the host of the remote is not a valid host name, so no gh call was made\n' >&2
     return 1
   }
-  [ "$kind" != ssh ] || [ "$host" != ssh.github.com ] || host=github.com
+  if [ "$kind" = ssh ]; then
+    case "$host" in
+      ssh.github.com) host=github.com ;;
+      altssh.gitlab.com) host=gitlab.com ;;
+    esac
+  fi
   case "$host" in www.?*) host="${host#www.}" ;; esac
+  printf '%s' "$host"
+}
+
+_zensu_vcs_sole_remote_url() {
+  local names name u h p pin first="" first_pin="" first_path="" fallback="" seen=0 mixed=0 same=1
+  if ! command -v git >/dev/null 2>&1 || ! names="$(git -C . remote 2>/dev/null)"; then
+    _zensu_vcs_inside_repo || return 0
+    printf 'zensu-vcs: git cannot read the remotes of this work tree, so no gh call was made\n' >&2
+    return 1
+  fi
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    u="$(git -C . remote get-url "$name" 2>/dev/null)" || u=""
+    IFS="$(printf '\t')" read -r h p <<EOF_SOLE_URL
+$(_zensu_vcs_split_url "$u")
+EOF_SOLE_URL
+    if [ -z "$h" ]; then
+      [ -n "$fallback" ] || fallback="$u"
+      continue
+    fi
+    pin="$(_zensu_vcs_pinned_host "$u" "$h" 2>/dev/null)" || pin="!$(printf '%s' "$h" | tr '[:upper:]' '[:lower:]')"
+    p="$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')"
+    while [ "$p" != "${p%/}" ]; do p="${p%/}"; done
+    p="${p%.git}"
+    while [ "$p" != "${p#/}" ]; do p="${p#/}"; done
+    if [ "$seen" = 0 ]; then
+      first="$u"
+      first_pin="$pin"
+      first_path="$p"
+      seen=1
+    elif [ "$pin" != "$first_pin" ]; then
+      mixed=1
+    elif [ "$p" != "$first_path" ]; then
+      same=0
+    fi
+  done <<EOF_SOLE_NAMES
+$names
+EOF_SOLE_NAMES
+  if [ "$mixed" = 1 ]; then
+    printf 'zensu-vcs: the current branch tracks no remote and the remotes of this work tree name different hosts, so no gh call was made; set ZENSU_VCS_REMOTE or run git branch --set-upstream-to <remote>/<branch>\n' >&2
+    return 1
+  fi
+  if [ "$same" = 0 ] && [ "${1:-}" = --one-repository ]; then
+    return 0
+  fi
+  [ "$seen" = 1 ] || first="$fallback"
+  printf '%s' "$first"
+}
+
+_zensu_vcs_gh_host() {
+  local url host path env_host login
+  command -v node >/dev/null 2>&1 || {
+    printf 'zensu-vcs: node is required to read the GitHub host of the remote, so no gh call was made\n' >&2
+    return 1
+  }
+  url="$(_zensu_vcs_remote_url .)"
+  if [ -z "$url" ] && [ -z "${ZENSU_VCS_REMOTE:-}" ]; then
+    url="$(_zensu_vcs_sole_remote_url)" || return 1
+  fi
+  IFS="$(printf '\t')" read -r host path <<EOF
+$(_zensu_vcs_split_url "$url")
+EOF
+  if [ -z "$host" ]; then
+    if [ -n "$url" ]; then
+      printf 'zensu-vcs: the remote of this work tree names no GitHub host, so no gh call was made\n' >&2
+      return 1
+    fi
+    printf 'github.com'
+    return 0
+  fi
+  host="$(_zensu_vcs_pinned_host "$url" "$host")" || return 1
   if [ "$host" != github.com ]; then
     env_host="$(printf '%s' "${GH_HOST:-}" | tr '[:upper:]' '[:lower:]')"
     if [ "$host" != "$env_host" ]; then
@@ -2276,7 +2318,7 @@ _zensu_vcs_open_pr() {
   printf '%s' "$out" | _zensu_vcs_extract_url
 }
 
-export -f _zensu_vcs_clamp_diag _zensu_vcs_report_failure _zensu_vcs_run _zensu_vcs_native_node_path _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_gh_host_valid _zensu_vcs_ssh_alias_valid _zensu_vcs_inside_repo _zensu_vcs_sole_remote_url _zensu_vcs_gh_host _zensu_vcs_gh_cmd _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_gitlab_post_json _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_review_markers _zensu_vcs_body_markers _zensu_vcs_open_pr _zensu_vcs_no_pr_message _zensu_vcs_review_summary _zensu_vcs_normalize_review_summary _zensu_vcs_conventions 2>/dev/null || true
+export -f _zensu_vcs_clamp_diag _zensu_vcs_report_failure _zensu_vcs_run _zensu_vcs_native_node_path _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_gh_host_valid _zensu_vcs_ssh_alias_valid _zensu_vcs_inside_repo _zensu_vcs_pinned_host _zensu_vcs_sole_remote_url _zensu_vcs_gh_host _zensu_vcs_gh_cmd _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_gitlab_post_json _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_review_markers _zensu_vcs_body_markers _zensu_vcs_open_pr _zensu_vcs_no_pr_message _zensu_vcs_review_summary _zensu_vcs_normalize_review_summary _zensu_vcs_conventions 2>/dev/null || true
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in
