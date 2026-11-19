@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-18
+
+### Added
+
+- **cli**: Pass skill free text through zensu-cli 0.22.0 file flags (#634)
+- **multi-repo**: Add the code-roots foundation behind a dark-launch switch (#540)
+
+### Changed
+
+- **rules**: Record the live named-spawn measurement on 0.40.1 (#636)
+- **review-gate**: Probe an unreadable name store while the launch is open (#616)
+- **session-control**: Walk the record-reader ladder through one helper (#631)
+
+### Fixed
+
+- **pulse**: Fix the deferred review findings of #627 (#635)
+- **hooks**: Rank the reminder's route question with the recommended option first (#640)
+- **gates**: Stop naming gate escapes in model-facing text outside the review chain (#638)
+- **verify-feature**: Admit a query or fragment on a loopback navigation (#644)
+- **build**: Treat a spec-named dependency as a precondition, not consent (#583)
+- **verify-feature**: Announce the service-worker limit before verification (#639)
+- **session-control**: Refuse Bash rebinds of the adopt and re-anchor entry-point inputs (#633)
+- **deps**: Clear all known advisories from the eval tooling lockfile (#558)
+
+### Changed
+
+- **zensu-cli 0.22.0 is the floor, and long free text goes through its file flags**:
+  `/zensu:docs`, `/zensu:implement`, `/zensu:bootstrap`, `/zensu:ghost-scan`,
+  `/zensu:security-review` and `/zensu:change` hand documents, descriptions, findings,
+  conditions and JSON to zensu-cli as `--content-file`, `--description-file`,
+  `--candidates-file`, `--result-file`, `--findings-file` and `--conditions-file`, so the CLI
+  reads the file itself (up to 256 KiB of text or 4 MiB of JSON) and the text no longer travels
+  as one command-line argument. The flags zensu-cli has no file form for keep the
+  `"$(cat "$f")"` recipe with its content check. README, `/zensu:setup`, the session banner and
+  `/zensu:doctor` name 0.22.0: older releases cannot read free text from a file, so skill calls
+  that send documents, descriptions, findings or JSON to Zensu fail. FT8 of
+  `test-skill-workflow-markers.sh` holds every free-text flag site against the help the floor
+  release recorded, and `record-zensu-cli-floor-help.js` re-records that fixture.
+
+### Fixed
+
+- **Gate-escape hints outside the review chain**: no deny reason, directive or skill text an
+  agent reads names a gate escape any more, as an option, a hand-off or a prohibition, so
+  agents stop proposing to switch a gate off. The CLI write-gate's Bash, PowerShell and
+  subagent reasons drop the `ZENSU_MCP_GATE=off` sentence and the sentences that pointed at it,
+  and keep the skill, `--help` and localhost routes. The TDD edit gate's invalid-state deny
+  keeps the fresh-session remedy, and its phase-mismatch deny leaves `--tdd-reset` to the user in
+  a standalone chain and sends a chain an active Autopilot run owns to the TDD steps. The
+  source-write gate's opt-in note still names `hooks.bashWriteGate` as the reason the gate runs
+  but no longer offers to switch it off, and its bound parser-failure deny keeps Edit or Write
+  inside the own worktree as the route and ends with that note. The secret scan's deny no longer
+  points at its documented opt-out. `/zensu:build`, `/zensu:change` and `/zensu:pilot` drop the
+  escape sentences, and the plan-approval route question states the Zensu workflow's cost
+  without the evidence gate keys. Disclosures printed after the user set an escape,
+  operator-facing Stop notices and the `/zensu:zensu-help` routing row are unchanged, and every
+  escape still works. `tests/structure/test-escape-wording.sh` now walks every file under
+  `hooks/`, `skills/`, `agents/`, `templates/`, `scripts/` and each companion plugin's roots of
+  those names instead of a fixed list, recognizes the code reads it meets there, judges shell
+  case arms and quoted dollar spellings, holds file-scoped allowlists for the disclosures, the
+  operator notices, the routing row and two ledger values, fails on an allowlist entry that
+  matches no shipped line, and checks its names against the escape stems the gauntlet-loop
+  suite derives.
+- **/zensu:pulse session end**: the session record that 0.40.2 introduced now lives in the
+  repository's common git directory and names the worktree the session started in, so a
+  session can end in another worktree of the same repository once the user confirms it, and
+  a lost session id is listed with its worktree, start commit and start time; a record that
+  0.40.2 kept in a linked worktree's own git directory is still found. The end checks the
+  worktree and other authors' commits before it lists or counts any path, and a second call
+  ends a session without any path when the user declines to send the paths. Untracked files
+  count by their change time, tested with one `find` per batch of paths rather than one per
+  file, so a file unpacked, copied or moved in during the session is sent even with an older
+  modification time. The README privacy row says which changes pass without the
+  confirmation, the `zensu-plm` agent names the end without paths, and `test-pulse-skill.sh`
+  pins each block whole. C4 of `test-zensu-plm-arg-guidance.sh` counts a catalog line only by
+  the command spans before its description.
+- **CLI write-gate**: zensu-cli 0.22.0's `zensu ai-work recover` is an AI-work capture
+  mutation, `recover_ai_work_capture`. The main thread runs it without a skill window, also in
+  direct mode, and a subagent is denied with a reason that leaves the command to the main
+  thread. A localhost backend reading never lifts that deny, also without the word reader,
+  because the verb sends no request but changes the local capture receipts. The recorded CLI
+  tree moves to 0.22.0, the drift test exempts only the bare `update` leaf, and the
+  `pulse-session` live scenario expects `zensu pulse start` or `zensu pulse summary`.
+
 ## [0.40.2] - 2026-11-17
 
 ### Added

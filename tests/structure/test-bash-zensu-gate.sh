@@ -153,6 +153,26 @@ run "B48c capture start denied to child" "zensu ai-work start --id goal --title 
 run "B48d capture submit denied to child" "zensu ai-work submit goal --event-id event" general-purpose DENY
 run "B48e capture does not allow chained mutation" "zensu ai-work start --id goal --title agreed && zensu security classify f1" '' DENY
 run "B48f capture reads remain reads" "zensu ai-work context && zensu ai-work get goal" '' ALLOW
+run "B65 capture recover inspection in direct mode" "zensu ai-work recover --session scv1_key" '' ALLOW
+run "B65b capture recover archive in direct mode" "zensu ai-work recover --session scv1_key --archive digest --confirm" '' ALLOW
+run "B65c capture recover archive denied to child" "zensu ai-work recover --session scv1_key --archive digest --confirm" general-purpose DENY
+run "B65d capture recover inspection denied to child" "zensu ai-work recover --session scv1_key" general-purpose DENY
+run "B65e capture recover behind a localhost --api-url stays denied to child" "zensu --api-url http://localhost:8090 ai-work recover --session scv1_key --archive digest --confirm" general-purpose DENY
+run "B65f capture recover behind an inline localhost ZENSU_API_URL stays denied to child" "ZENSU_API_URL=http://localhost:8090 zensu ai-work recover --session scv1_key" general-purpose DENY
+RECOVER_ENV_OUT="$(payload "zensu ai-work recover --session scv1_key --restore digest --confirm" general-purpose gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_API_URL=http://localhost:8090 bash "$HOOK" 2>/dev/null | classify)"
+[ "$RECOVER_ENV_OUT" = DENY ] && check "B65g capture recover under the hook's localhost ZENSU_API_URL stays denied to child -> DENY" PASS || check "B65g capture recover under the hook's localhost ZENSU_API_URL (got '$RECOVER_ENV_OUT' want 'DENY')" FAIL
+run "B65h capture recover behind a localhost --api-url in direct mode" "zensu --api-url http://localhost:8090 ai-work recover --session scv1_key --archive digest --confirm" '' ALLOW
+run "B65i a capture verb that sends a request keeps the localhost reading for a child" "zensu --api-url http://localhost:8090 ai-work start --id goal --title agreed" general-purpose ALLOW
+RECOVER_DENY_OUT="$(payload "zensu ai-work recover --session scv1_key --archive digest --confirm" general-purpose gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
+if [ "$(printf '%s' "$RECOVER_DENY_OUT" | classify)" = DENY ] \
+   && printf '%s' "$RECOVER_DENY_OUT" | grep -qF "maps to 'recover_ai_work_capture'" \
+   && printf '%s' "$RECOVER_DENY_OUT" | grep -qF 'Capture commands are reserved for the interactive main thread, which runs them directly, without a skill window. Do not retry this command' \
+   && ! printf '%s' "$RECOVER_DENY_OUT" | grep -qF 'capture key' \
+   && ! printf '%s' "$RECOVER_DENY_OUT" | grep -qF '/zensu:'; then
+  check "B65j a child's capture deny says the main thread runs the command directly and names no skill route" PASS
+else
+  check "B65j capture deny reason for a child (got '$(printf '%s' "$RECOVER_DENY_OUT" | cut -c1-240)')" FAIL
+fi
 
 run "B5 read (features get)"                "zensu features get f1"                                      '' ALLOW
 run "B6 freelance mutation (classify)"      "zensu security classify f1 --classification confidential"   '' DENY
@@ -293,12 +313,19 @@ fi
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
 
 B52_CMD="$(printf '%s\n' 'f="$(mktemp)" || exit 1' "trap 'rm -f \"\$f\"' EXIT" "cat >| \"\$f\" <<'ZENSU_TEXT_3f9a1c7e'" \
-  '# Guide' 'Run `whoami` and read $HOME.' 'ZENSU_TEXT_END' 'ZENSU_TEXT_3f9a1c7e' "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" \
-  'zensu link docs f1 \' '  --doc-type user_facing --title "Guide" --audience end_user \' '  --content "$(cat "$f")"')"
+  '# Guide' 'Run `whoami` and read $HOME.' 'ZENSU_TEXT_END' 'ZENSU_TEXT_3f9a1c7e' \
+  'zensu link docs f1 \' '  --doc-type user_facing --title "Guide" --audience end_user \' '  --content-file "$f"')"
 tdd_workflow_begin gate-test "link_docs" "$(( $(date +%s) + 3600 ))" 2>/dev/null
-run "B52 the skills' free-text form (>| into a temporary file through a quoted heredoc with a random delimiter, a content check, then \"\$(cat \"\$f\")\") passes in a window that declares its tool" "$B52_CMD" '' ALLOW
+run "B52 the skills' file-flag form (>| into a temporary file through a quoted heredoc with a random delimiter, then --content-file \"\$f\") passes in a window that declares its tool" "$B52_CMD" '' ALLOW
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
-run "B52b the same free-text form stays a mutation the gate denies outside that window" "$B52_CMD" '' DENY
+run "B52b the same file-flag form stays a mutation the gate denies outside that window" "$B52_CMD" '' DENY
+B52C_CMD="$(printf '%s\n' 'f="$(mktemp)" || exit 1' "trap 'rm -f \"\$f\"' EXIT" "cat >| \"\$f\" <<'ZENSU_TEXT_9c2e4b10'" \
+  'Shipped `whoami` for $USER.' 'ZENSU_TEXT_END' 'ZENSU_TEXT_9c2e4b10' "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" \
+  'zensu features revision f1 --scope-summary "$(cat "$f")"')"
+tdd_workflow_begin gate-test "create_revision" "$(( $(date +%s) + 3600 ))" 2>/dev/null
+run "B52c the inline form of a flag without a file flag (a content check, then \"\$(cat \"\$f\")\") passes in a window that declares its tool" "$B52C_CMD" '' ALLOW
+tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
+run "B52d the same inline form stays a mutation the gate denies outside that window" "$B52C_CMD" '' DENY
 
 tdd_workflow_begin gate-test "upload_wiki_image" "$(( $(date +%s) + 3600 ))" 2>/dev/null
 run "B60f wiki images upload passes in a window that declares upload_wiki_image" "zensu wiki images upload --product p1 --file shot.png" '' ALLOW
@@ -329,17 +356,20 @@ CREATE_ROUTE='Run the matching skill — /zensu:change (one requested change), /
 CREATE_OUT="$(gate_out 'zensu features create --product p1 --component c1 --title T')"
 if [ "$(printf '%s' "$CREATE_OUT" | classify)" = DENY ] \
    && printf '%s' "$CREATE_OUT" | grep -qF "maps to 'create_feature'" \
-   && printf '%s' "$CREATE_OUT" | grep -qF "$CREATE_ROUTE" \
-   && printf '%s' "$CREATE_OUT" | grep -qF 'prefix the command with ZENSU_MCP_GATE=off (honored inline)'; then
-  check "B61a a freelance features create is denied with a reason that names /zensu:change for one change and /zensu:bootstrap or /zensu:ghost-scan for onboarding, and keeps the escape sentence" PASS
+   && printf '%s' "$CREATE_OUT" | grep -qF "$CREATE_ROUTE --help is never gated, and neither is a write the gate can read as going to a localhost backend" \
+   && ! printf '%s' "$CREATE_OUT" | grep -qF 'ZENSU_MCP_GATE' \
+   && ! printf '%s' "$CREATE_OUT" | grep -qF 'gate escape' \
+   && ! printf '%s' "$CREATE_OUT" | grep -qF 'one-off'; then
+  check "B61a a freelance features create is denied with a reason that names /zensu:change for one change and /zensu:bootstrap or /zensu:ghost-scan for onboarding, keeps the --help and localhost routes and names no gate escape" PASS
 else
   check "B61a features create deny reason (got '$(printf '%s' "$CREATE_OUT" | cut -c1-240)')" FAIL
 fi
 PS_CREATE_OUT="$(gate_out 'zensu features create --product p1 --component c1 --title T' '' PowerShell)"
 if [ "$(printf '%s' "$PS_CREATE_OUT" | classify)" = DENY ] \
-   && printf '%s' "$PS_CREATE_OUT" | grep -qF "$CREATE_ROUTE A PowerShell command has no inline gate escape." \
-   && ! printf '%s' "$PS_CREATE_OUT" | grep -qF '(honored inline)'; then
-  check "B61b the PowerShell deny of features create names the same routes and no inline escape" PASS
+   && printf '%s' "$PS_CREATE_OUT" | grep -qF "$CREATE_ROUTE --help is never gated" \
+   && ! printf '%s' "$PS_CREATE_OUT" | grep -qF 'ZENSU_MCP_GATE' \
+   && ! printf '%s' "$PS_CREATE_OUT" | grep -qF 'gate escape'; then
+  check "B61b the PowerShell deny of features create names the same routes and no gate escape" PASS
 else
   check "B61b PowerShell features create deny reason (got '$(printf '%s' "$PS_CREATE_OUT" | cut -c1-240)')" FAIL
 fi
@@ -413,7 +443,8 @@ if printf '%s' "$SUB_REASON_OUT" | grep -qF '"permissionDecision":"deny"' \
    && printf '%s' "$SUB_REASON_OUT" | grep -qF 'which runs it through the matching skill — /zensu:security-review (classification/review), /zensu:change (one requested change).' \
    && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'ZENSU_MCP_GATE' \
    && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'prefix the command with' \
-   && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'in the interactive main thread. For a deliberate one-off'; then
+   && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'gate escape' \
+   && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'one-off'; then
   check "B19b subagent deny reason: reports the operation to the main thread and names no escape" PASS
 else
   check "B19b subagent deny reason content" FAIL
@@ -747,21 +778,25 @@ OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROO
 OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_API_URL=https://api.zensu.dev bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT" = "DENY" ] && check "B36b process-env ZENSU_API_URL=prod -> DENY" PASS || check "B36b process-env prod (got '$OUT')" FAIL
 
-# B37 deny-reason advertises the narrowed escapes (inline off + localhost)
+# B37 deny reason names the localhost route and no gate escape
 REASON_N="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
-if printf '%s' "$REASON_N" | grep -qF 'ZENSU_MCP_GATE=off' && printf '%s' "$REASON_N" | grep -qiF 'localhost'; then
-  check "B37 deny reason advertises inline-off + localhost escapes" PASS
+if printf '%s' "$REASON_N" | grep -qiF 'localhost' \
+   && printf '%s' "$REASON_N" | grep -qF 'ZENSU_API_URL to a literal localhost URL' \
+   && ! printf '%s' "$REASON_N" | grep -qF 'ZENSU_MCP_GATE' \
+   && ! printf '%s' "$REASON_N" | grep -qF 'one-off'; then
+  check "B37 the main-thread deny reason names the localhost route and no gate escape" PASS
 else
-  check "B37 deny reason narrowed-escape wording" FAIL
+  check "B37 main-thread deny reason wording (got '$(printf '%s' "$REASON_N" | cut -c1-400)')" FAIL
 fi
 REASON_S="$(payload 'ZENSU_MCP_GATE=off zensu security classify f1' general-purpose gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
-if printf '%s' "$REASON_S" | grep -qF 'never a route for a subagent. Do not retry this command, with or without a prefix.' \
-   && ! printf '%s' "$REASON_S" | grep -qF 'prefix the command with ZENSU_MCP_GATE=off' \
+if printf '%s' "$REASON_S" | grep -qF "a subagent never borrows the main thread's skill window. Do not retry this command, with or without a prefix." \
+   && ! printf '%s' "$REASON_S" | grep -qF 'ZENSU_MCP_GATE' \
+   && ! printf '%s' "$REASON_S" | grep -qF 'gate escape' \
    && ! printf '%s' "$REASON_S" | grep -qF 'ZENSU_API_URL' \
-   && ! printf '%s' "$REASON_N" | grep -qF 'never a route for a subagent'; then
-  check "B37b subagent deny reason withdraws the inline escapes; the main-thread reason does not" PASS
+   && ! printf '%s' "$REASON_N" | grep -qF 'a subagent never borrows'; then
+  check "B37b a subagent's prefixed call is denied with a reason that forbids the retry and names neither an escape nor the localhost route, and the main-thread reason is not the subagent's" PASS
 else
-  check "B37b subagent deny reason must name the withdrawn inline escape" FAIL
+  check "B37b subagent deny reason (got '$(printf '%s' "$REASON_S" | cut -c1-400)')" FAIL
 fi
 REASON_TEXT_ONLY="$(payload 'git commit -m "x; Zensu features create y"' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
 if printf '%s' "$REASON_TEXT_ONLY" | grep -qF 'pass that text through a file instead (git commit -F <file>, gh pr create --body-file <file>)' \
@@ -1209,10 +1244,10 @@ psrun "B40x7 PowerShell spaced cmd.exe operator is quoted"  "zensu features get 
 PS_MAIN="$(payload 'zensu security classify f1' '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
 if printf '%s' "$PS_MAIN" | grep -qF "maps to 'set_security_classification'" \
    && printf '%s' "$PS_MAIN" | grep -qF '/zensu:security-review' \
-   && printf '%s' "$PS_MAIN" | grep -qF 'A PowerShell command has no inline gate escape' \
-   && ! printf '%s' "$PS_MAIN" | grep -qF 'prefix the command with ZENSU_MCP_GATE=off' \
-   && ! printf '%s' "$PS_MAIN" | grep -qF '(honored inline)'; then
-  check "B40y PowerShell main-thread deny names the skills and no inline escape" PASS
+   && printf '%s' "$PS_MAIN" | grep -qF 'in the interactive main thread. --help is never gated' \
+   && ! printf '%s' "$PS_MAIN" | grep -qF 'ZENSU_MCP_GATE' \
+   && ! printf '%s' "$PS_MAIN" | grep -qF 'gate escape'; then
+  check "B40y PowerShell main-thread deny names the skills and no gate escape" PASS
 else
   check "B40y PowerShell main-thread deny wording" FAIL
 fi
@@ -1336,7 +1371,8 @@ WR_OUT="$(
     '|Bash|command -v zensu' '|Bash|zensu' '|Bash|zensu --version' \
     '|Bash|zensu --version 2>/dev/null' '|Bash|zensu --version >/dev/null 2>&1' '|Bash|zensu --version 2>&1' \
     "|Bash|zensu '' --json" '|Bash|command -v zensu >/dev/null 2>&1' '|Bash|zensu 2>/dev/null features get f1' \
-    '|PowerShell|zensu $x'; do
+    '|PowerShell|zensu $x' 'general-purpose|Bash|zensu --api-url http://localhost:8090 ai-work recover --session scv1_key' \
+    "|Bash|ZENSU_API_URL=http://localhost:8090 zensu ai-work 'recover' --session scv1_key --archive digest --confirm"; do
     wr_agent="${spec%%|*}"; wr_rest="${spec#*|}"
     payload "${wr_rest#*|}" "$wr_agent" word-reader-gate "${wr_rest%%|*}" | env CLAUDE_PLUGIN_ROOT="$WR_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$WR_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null | tr -d '\n'
     printf '\n<<%s>>\n' "$spec"
@@ -1348,6 +1384,7 @@ WR_LOCAL="$(WR_LINE 10)"; WR_CHILD="$(WR_LINE 12)"; WR_PS="$(WR_LINE 14)"; WR_ES
 WR_PROBE="$(WR_LINE 20)"; WR_BARE="$(WR_LINE 22)"; WR_VERSION="$(WR_LINE 24)"
 WR_QUIET="$(WR_LINE 26)"; WR_SILENT="$(WR_LINE 28)"; WR_MERGED="$(WR_LINE 30)"; WR_EMPTY="$(WR_LINE 32)"; WR_QUIET_PROBE="$(WR_LINE 34)"
 WR_QUIET_READ="$(WR_LINE 36)"; WR_PS_OPAQUE="$(WR_LINE 38)"
+WR_LOCAL_RECOVER_CHILD="$(WR_LINE 40)"; WR_LOCAL_RECOVER="$(WR_LINE 42)"
 if [ "$(WR_LINE 1)" = "BOUND" ] && [ ! -e "$WR_ROOT/hooks/lib/zensu-cli-words-v1.js" ] \
    && printf '%s' "$WR_MUTATION" | grep -qF '"permissionDecision":"deny"' \
    && printf '%s' "$WR_MUTATION" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
@@ -1366,7 +1403,7 @@ fi
 [ "$(WR_LINE 1)" = "BOUND" ] && [ -z "$WR_HELP" ] && [ -z "$WR_ECHO" ] && [ -z "$WR_LOCAL" ] && [ -z "$WR_ESCAPE" ] \
   && [ -z "$WR_PROBE" ] && [ -z "$WR_BARE" ] && [ -z "$WR_VERSION" ] \
   && [ -z "$WR_QUIET" ] && [ -z "$WR_SILENT" ] && [ -z "$WR_MERGED" ] && [ -z "$WR_EMPTY" ] && [ -z "$WR_QUIET_PROBE" ] \
-  && check "B64f without the word reader --help, a command that runs no zensu call, a call with no word that can name a subcommand (command -v zensu, a bare zensu, zensu --version, the same probes with their output redirected, an empty word), a localhost backend and the main thread's inline escape still pass" PASS \
+  && check "B64f without the word reader --help, a command that runs no zensu call, a call with no word that can name a subcommand (command -v zensu, a bare zensu, zensu --version, the same probes with their output redirected, an empty word), a localhost call to a verb that sends a request and the main thread's inline escape still pass" PASS \
   || check "B64f reader-less passes (help='$WR_HELP' echo='$WR_ECHO' localhost='$WR_LOCAL' escape='$WR_ESCAPE' probe='$WR_PROBE' bare='$WR_BARE' version='$WR_VERSION' quiet='$WR_QUIET' silent='$WR_SILENT' merged='$WR_MERGED' empty='$WR_EMPTY' quiet-probe='$WR_QUIET_PROBE')" FAIL
 if printf '%s' "$WR_CHILD" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
    && printf '%s' "$WR_CHILD" | grep -qF 'Report the operation you need to the main thread' \
@@ -1374,6 +1411,16 @@ if printf '%s' "$WR_CHILD" | grep -qF 'the word reader hooks/lib/zensu-cli-words
   check "B64g a subagent's reader-less deny reports the operation to the main thread" PASS
 else
   check "B64g reader-less subagent deny (got '$(printf '%s' "$WR_CHILD" | cut -c1-200)')" FAIL
+fi
+if printf '%s' "$WR_LOCAL_RECOVER_CHILD" | grep -qF '"permissionDecision":"deny"' \
+   && printf '%s' "$WR_LOCAL_RECOVER_CHILD" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
+   && printf '%s' "$WR_LOCAL_RECOVER_CHILD" | grep -qF 'Report the operation you need to the main thread' \
+   && printf '%s' "$WR_LOCAL_RECOVER" | grep -qF '"permissionDecision":"deny"' \
+   && printf '%s' "$WR_LOCAL_RECOVER" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
+   && printf '%s' "$WR_LOCAL_RECOVER" | grep -qF 'reinstall the plugin'; then
+  check "B64o without the word reader a localhost backend does not pass ai-work recover, which sends no request, for a subagent or the main thread, also with a quoted verb" PASS
+else
+  check "B64o reader-less localhost recover (child='$(printf '%s' "$WR_LOCAL_RECOVER_CHILD" | cut -c1-160)' main='$(printf '%s' "$WR_LOCAL_RECOVER" | cut -c1-160)')" FAIL
 fi
 if printf '%s' "$WR_PS" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
    && ! printf '%s' "$WR_PS" | grep -qF 'Run the zensu call through the Bash tool'; then

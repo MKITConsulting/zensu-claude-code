@@ -209,7 +209,12 @@ done
 for t in $ZENSU_HUMAN_DECISION_TOOL_NAMES; do
   zensu_is_work_order_tool "$t" && { C_FAIL=$((C_FAIL+1)); echo "      '$t' is both a human decision and a work-order tool"; }
 done
-[ "$C_FAIL" -eq 0 ] && check "C1 no mutation classifies as a read; human-decision and work-order names are mutations; session names are work-order names; the two families are disjoint" PASS || check "C1 classification invariants ($C_FAIL)" FAIL
+for t in $ZENSU_AI_WORK_CAPTURE_TOOL_NAMES; do
+  zensu_is_mutation_tool "$t" || { C_FAIL=$((C_FAIL+1)); echo "      capture tool '$t' is not in ZENSU_MUTATION_TOOL_NAMES"; }
+  zensu_is_human_decision_tool "$t" && { C_FAIL=$((C_FAIL+1)); echo "      capture tool '$t' is also a human decision"; }
+  zensu_is_work_order_tool "$t" && { C_FAIL=$((C_FAIL+1)); echo "      capture tool '$t' is also a work-order tool"; }
+done
+[ "$C_FAIL" -eq 0 ] && check "C1 no mutation classifies as a read; human-decision, work-order and AI-work capture names are mutations; session names are work-order names; the human-decision, work-order and capture families are disjoint" PASS || check "C1 classification invariants ($C_FAIL)" FAIL
 
 M_FAIL=0
 for t in $(grep -oE 'echo "[a-z_]+"' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh" | sed -E 's/echo "([a-z_]+)"/\1/' | sort -u); do
@@ -670,21 +675,39 @@ if [ -z "$FT_BAD" ] && [ "${#FT_FILES[@]}" -gt 1 ] && [ "$FT_SCANNED" = "${#FT_F
   check "FT1 no skill file passes a Markdown, JSON, document, description or findings placeholder as a quoted or unquoted flag value ($FT_SCANNED files scanned)" PASS
 else
   printf '%s\n' "${FT_BAD:-$FT_OUT}" | sed 's/^/      /'
-  echo "      write free text to a temporary file through a heredoc with a quoted delimiter and pass \"\$(cat \"\$f\")\""
+  echo "      write free text to a temporary file through a heredoc with a quoted delimiter and pass --<flag>-file \"\$f\", or \"\$(cat \"\$f\")\" where zensu-cli has no file flag"
   check "FT1 skill files pass free-text placeholders on the command line (scanned ${FT_SCANNED:-0} of ${#FT_FILES[@]})" FAIL
 fi
 
+ft2_skill_ok() {
+  local dir="$1" md="$1/SKILL.md" all rc=0
+  all="$(skill_text_file "$dir")" || return 1
+  grep -qF "cat >| \"\$f\" <<'ZENSU_TEXT_<hex>'" "$md" && grep -qxF 'ZENSU_TEXT_<hex>' <(sed 's/^ *//' "$md") \
+    && grep -qF "trap 'rm -f \"\$f\"" "$md" \
+    && { grep -qE -- '-file "\$[A-Za-z_]' "$md" || grep -qF '"$(cat "$f")"' "$md"; } \
+    && { ! grep -qF '"$(cat "$' "$all" || grep -qF "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" "$md"; } \
+    || rc=1
+  rm -f "$all"
+  return "$rc"
+}
 FT_MISSING=""
 for ft_skill in docs implement bootstrap ghost-scan security-review autopilot change; do
-  ft_md="$CLAUDE_PLUGIN_ROOT/skills/$ft_skill/SKILL.md"
-  grep -qF "cat >| \"\$f\" <<'ZENSU_TEXT_<hex>'" "$ft_md" && grep -qxF 'ZENSU_TEXT_<hex>' <(sed 's/^ *//' "$ft_md") \
-    && grep -qxF "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" <(sed 's/^ *//' "$ft_md") \
-    && grep -qF '"$(cat "$f")"' "$ft_md" && grep -qF "trap 'rm -f \"\$f\"" "$ft_md" \
-    || FT_MISSING="$FT_MISSING $ft_skill"
+  ft2_skill_ok "$CLAUDE_PLUGIN_ROOT/skills/$ft_skill" || FT_MISSING="$FT_MISSING $ft_skill"
 done
-[ -z "$FT_MISSING" ] \
-  && check "FT2 every skill that uploads free text writes it with >| through a quoted heredoc with a random <hex> delimiter, stops on an empty, blank or binary file and passes \"\$(cat \"\$f\")\"" PASS \
-  || check "FT2 skills without the free-text file form (>|, a <hex> delimiter, the content check, the trap and \"\$(cat \"\$f\")\"):$FT_MISSING" FAIL
+FT2_FIX="$(mktemp -d -t skillft2-XXXXXX)"
+mkdir -p "$FT2_FIX/bare/references" "$FT2_FIX/checked/references"
+printf '%s\n' 'f="$(mktemp)" || exit 1' "trap 'rm -f \"\$f\"' EXIT" "cat >| \"\$f\" <<'ZENSU_TEXT_<hex>'" '<text>' 'ZENSU_TEXT_<hex>' \
+  'zensu wiki update <page-id> --content-file "$f"' > "$FT2_FIX/bare/SKILL.md"
+cp "$FT2_FIX/bare/SKILL.md" "$FT2_FIX/checked/SKILL.md"
+printf '%s\n' "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" >> "$FT2_FIX/checked/SKILL.md"
+printf '%s\n' '`zensu features deprecate <id> --reason "$(cat "$f")"`' > "$FT2_FIX/bare/references/commands.md"
+cp "$FT2_FIX/bare/references/commands.md" "$FT2_FIX/checked/references/commands.md"
+FT2_BARE=0; ft2_skill_ok "$FT2_FIX/bare" && FT2_BARE=1
+FT2_CHECKED=0; ft2_skill_ok "$FT2_FIX/checked" && FT2_CHECKED=1
+rm -rf "$FT2_FIX"
+[ -z "$FT_MISSING" ] && [ "$FT2_BARE" = 0 ] && [ "$FT2_CHECKED" = 1 ] \
+  && check "FT2 every skill that sends free text writes it with >| through a quoted heredoc with a random <hex> delimiter under one trap and passes the file as --<flag>-file or \"\$(cat \"\$f\")\", a skill with the inline form anywhere in its text, references included, stops on an empty, blank or binary file, and a fixture whose only inline site sits in a reference fails without that check" PASS \
+  || check "FT2 skills without the free-text recipe (>|, a <hex> delimiter, the trap, a file flag or \"\$(cat \"\$f\")\", and the content check beside an inline form anywhere in the skill's text):$FT_MISSING (fixture bare=$FT2_BARE checked=$FT2_CHECKED, want 0 and 1)" FAIL
 
 FT_FIX="$(mktemp -d -t skillftfix-XXXXXX)"
 mkdir -p "$FT_FIX/bad" "$FT_FIX/good"
@@ -733,7 +756,7 @@ const fs = require('fs');
 const path = require('path');
 const MD = 'renders headings, lists and code, so write structured Markdown, not one unformatted paragraph';
 const PLAIN = 'plain text: Zensu does not render Markdown there, so do not use Markdown syntax';
-const FILE_FORM = '"$(cat "$';
+const FILE_FORM = /"\$\(cat "\$[A-Za-z_]|--[a-z][a-z0-9-]*-file "\$[A-Za-z_]/;
 const SITES = [
   ['skills/bootstrap/SKILL.md', 'with name, slug, and product type', MD, true],
   ['skills/bootstrap/SKILL.md', 'with the structured JSON containing components and features', MD, false],
@@ -763,7 +786,7 @@ const blocksOf = (raw) => {
 let checked = 0;
 for (const [file, anchor, phrase, fileForm] of SITES) {
   const blocks = blocksOf(fs.readFileSync(path.join(process.argv[2], file), 'utf8')).filter((b) => b.includes(anchor));
-  const ok = blocks.length === 1 && blocks[0].includes(phrase) && (!fileForm || blocks[0].includes(FILE_FORM));
+  const ok = blocks.length === 1 && blocks[0].includes(phrase) && (!fileForm || FILE_FORM.test(blocks[0]));
   if (!ok) console.log('MISS ' + file + ' ' + anchor + ' (blocks=' + blocks.length + ')');
   checked++;
 }
@@ -771,7 +794,7 @@ console.log('CHECKED ' + checked);
 NODE
 FF_OUT="$(node "$FF_PROBE" "$CLAUDE_PLUGIN_ROOT" 2>&1)"
 if ! printf '%s\n' "$FF_OUT" | grep -q '^MISS ' && printf '%s\n' "$FF_OUT" | grep -qx 'CHECKED 13'; then
-  check "FT5 each of the 13 free-text field sites of bootstrap, ghost-scan, security-review and implement states its text format, and each flag site passes its value through the file form" PASS
+  check "FT5 each of the 13 free-text field sites of bootstrap, ghost-scan, security-review and implement states its text format, and each flag site passes its value through a file, as a file flag or inline" PASS
 else
   printf '%s\n' "$FF_OUT" | sed 's/^/      /'
   check "FT5 a free-text field site lost its text-format sentence or its file form" FAIL
@@ -801,11 +824,90 @@ else
 fi
 
 FT7_MD="$CLAUDE_PLUGIN_ROOT/skills/bootstrap/SKILL.md"
-if grep -qxF "[ -f \"\$p\" ] && grep -qI '[^[:space:]]' -- \"\$p\" || exit 1" <(sed 's/^ *//' "$FT7_MD") \
-  && grep -qF -- '--content "$(cat "$p")"' "$FT7_MD" && ! grep -qF '"~/' "$FT7_MD"; then
-  check "FT7 bootstrap passes a plan file by path only after its regular-file and content check, and spells no ~/ path inside double quotes" PASS
+if grep -qF -- '--content-file "$p"' "$FT7_MD" && ! grep -qF '"$(cat "$p")"' "$FT7_MD" && ! grep -qF '"~/' "$FT7_MD"; then
+  check "FT7 bootstrap hands a plan file to zensu-cli by path as --content-file \"\$p\", never as \"\$(cat \"\$p\")\", and spells no ~/ path inside double quotes" PASS
 else
-  check "FT7 bootstrap's by-path plan form lacks its regular-file and content check, or spells a ~/ path inside double quotes" FAIL
+  check "FT7 bootstrap's by-path plan form reads the file into the command line, lacks --content-file \"\$p\", or spells a ~/ path inside double quotes" FAIL
+fi
+
+FT8_FLOOR="$(node -p 'require(process.argv[1]).MIN_VERSION' "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-cli-version-v1.js" 2>/dev/null)"
+FT8_OUT="$(cd "$CLAUDE_PLUGIN_ROOT" && node tests/structure/lib-skill-free-text.js judge . "tests/structure/fixtures/zensu-cli-${FT8_FLOOR:-unread}-floor-help.json" "${FT8_FLOOR:-unread}" 2>&1)"
+FT8_SITES="$(printf '%s\n' "$FT8_OUT" | sed -n 's/^SITES //p')"
+FT8_FIXTURES="$(find "$CLAUDE_PLUGIN_ROOT/tests/structure/fixtures" -maxdepth 1 -name 'zensu-cli-*-floor-help.json' | sed 's#.*/##' | LC_ALL=C sort)"
+FT8_KINDS="$(cd "$CLAUDE_PLUGIN_ROOT" && node tests/structure/lib-skill-free-text.js sites . 2>&1 | awk -F'\t' '{ sub(/:[0-9]+$/, "", $1); print $1 "|" $2 "|" $3 "|" $4 "|" $5 }')"
+ft8_kind() { printf '%s\n' "$FT8_KINDS" | grep -qxF -- "$1"; }
+FT8_FIX="$(mktemp -d -t skillft8-XXXXXX)"
+mkdir -p "$FT8_FIX/skills/ft8" "$FT8_FIX/skills/ft8b" "$FT8_FIX/fixtures"
+cat > "$FT8_FIX/skills/ft8/SKILL.md" <<'EOF'
+---
+name: ft8
+---
+zensu link docs <id> --content-file "$f"
+zensu features split <id> --children-file "$f"
+zensu link docs <id> --content "$(cat "$f")"
+zensu features revision <id> --scope-summary "$(cat "$f")"
+zensu mocks create <id> --description-file "$f"
+Pass it as `"$(cat "$f")"` from its file.
+`gh pr edit <id> --body-file "$B"` on GitHub.
+~~~bash
+CLAUDE_PLUGIN_DATA="x" bash "$LOG" --event-id e \
+  --payload "$(cat "$f")"
+~~~
+```bash
+zensu features split <id> \
+  --children-file "$f"
+```
+Then run `zensu features split <id> --children-file "$f"` once.
+zensu link docs <id> --content-file "$(cat "$f")"
+zensu features revision <id> --reason "$(cat "$f")"
+EOF
+cat > "$FT8_FIX/skills/ft8b/SKILL.md" <<'EOF'
+---
+name: ft8b
+---
+--reason "$(cat "$f")" before any command.
+~~~bash
+zensu --api-url "$U" link docs <id> --content "$(cat "$f")"
+~~~
+Or run `zensu --api-url "$U" link docs <id> --content "$(cat "$f")"` there.
+EOF
+cat > "$FT8_FIX/fixtures/floor.json" <<'EOF'
+{
+  "version": "zensu 9.9.9 (commit fixture, built now)",
+  "commands": {
+    "link docs": "Flags:\n      --content string   page\n      --content-file path   read the --content value from path\n",
+    "features split": "Flags:\n      --children string   children\n",
+    "features revision": "Flags:\n      --scope-summary string   summary\n"
+  }
+}
+EOF
+FT8_FX_OUT="$(cd "$FT8_FIX" && node "$CLAUDE_PLUGIN_ROOT/tests/structure/lib-skill-free-text.js" judge . fixtures/floor.json 9.9.9 2>&1)"
+FT8_FX_OLD="$(cd "$FT8_FIX" && node "$CLAUDE_PLUGIN_ROOT/tests/structure/lib-skill-free-text.js" judge . fixtures/floor.json 1.0.0 2>&1)"
+rm -rf "$FT8_FIX"
+ft8_has() { printf '%s\n' "$FT8_FX_OUT" | grep -qxF -- "$1"; }
+if [ -n "$FT8_FLOOR" ] && [ "$FT8_FIXTURES" = "zensu-cli-$FT8_FLOOR-floor-help.json" ] \
+  && [ "${FT8_SITES:-0}" -gt 0 ] && ! printf '%s\n' "$FT8_OUT" | grep -q '^BAD ' \
+  && ft8_kind 'skills/docs/SKILL.md|file|content|link docs|zensu' \
+  && ft8_kind 'skills/change/references/commands.md|inline|reason|features deprecate|zensu' \
+  && ft8_kind 'skills/implement/SKILL.md|file|content|wiki update|zensu' \
+  && ft8_kind 'skills/autopilot/rules/pr-open.md|file|body|-|foreign' \
+  && ft8_has 'BAD skills/ft8/SKILL.md:5 zensu features split has no --children-file in the floor release' \
+  && ft8_has 'BAD skills/ft8/SKILL.md:6 zensu link docs reads --content-file in the floor release, so pass the file instead of "$(cat "$f")"' \
+  && ft8_has 'BAD skills/ft8/SKILL.md:8 zensu mocks create is not recorded in the floor fixture' \
+  && ft8_has 'BAD skills/ft8/SKILL.md:9 passes "$(cat "$f")" without the flag it fills' \
+  && ft8_has 'BAD skills/ft8/SKILL.md:17 zensu features split has no --children-file in the floor release' \
+  && ft8_has 'BAD skills/ft8/SKILL.md:19 zensu features split has no --children-file in the floor release' \
+  && ft8_has "BAD skills/ft8/SKILL.md:20 --content-file takes the file's path, never its text" \
+  && ft8_has 'BAD skills/ft8/SKILL.md:21 zensu features revision has no --reason in the floor release' \
+  && ft8_has 'BAD skills/ft8b/SKILL.md:4 --reason follows no zensu command' \
+  && ft8_has 'BAD skills/ft8b/SKILL.md:6 --content follows a zensu call whose noun and verb the scanner cannot read' \
+  && ft8_has 'BAD skills/ft8b/SKILL.md:8 --content follows a zensu call whose noun and verb the scanner cannot read' \
+  && ft8_has 'SITES 13' && [ "$(printf '%s\n' "$FT8_FX_OUT" | grep -c '^BAD ')" = 11 ] \
+  && printf '%s\n' "$FT8_FX_OLD" | grep -qxF 'BAD the floor fixture records 9.9.9, the floor is 1.0.0'; then
+  check "FT8 every free-text flag site of the skills ($FT8_SITES) matches the help the floor release $FT8_FLOOR recorded: a file flag it declares, the inline form only where it has no file flag; the scanner reads a continued fenced line, a reference table row, a prose span and a foreign program in the real tree, the floor fixture is the only one and carries the floor's name, and a fixture bites every arm and the floor check" PASS
+else
+  printf '%s\n' "$FT8_OUT" "$FT8_FX_OUT" "$FT8_FX_OLD" "floor fixtures: $(printf '%s' "$FT8_FIXTURES" | tr '\n' ' ')" | sed 's/^/      /'
+  check "FT8 a free-text flag site disagrees with the floor release's recorded help, the scanner lost a site kind, or the floor fixture is missing, stale or not the only one (floor ${FT8_FLOOR:-unread})" FAIL
 fi
 
 echo "----"

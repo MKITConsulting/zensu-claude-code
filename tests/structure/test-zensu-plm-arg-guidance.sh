@@ -115,20 +115,25 @@ MAP_FORMS="$(awk '
   group != "" && /^[[:space:]]*[a-z][a-z-]*\)/ { word = $1; sub(/\)$/, "", word); print group " " word; next }
   group != "" && /esac/ { group = "" }
 ' "$PLUGIN_DIR/hooks/lib/zensu-cli-map.sh")"
-CATALOG_SPANS="$(awk '
-  /^## Available CLI Commands$/ { on = 1; next }
-  /^## / { on = 0 }
-  on && index($0, "- `") == 1 {
-    rest = $0
-    while ((opening = index(rest, "`")) > 0) {
-      rest = substr(rest, opening + 1)
-      closing = index(rest, "`")
-      if (closing == 0) break
-      print substr(rest, 1, closing - 1)
-      rest = substr(rest, closing + 1)
+catalog_spans() {
+  awk '
+    /^## Available CLI Commands$/ { on = 1; next }
+    /^## / { on = 0 }
+    on && index($0, "- `") == 1 {
+      rest = $0
+      cut = index(rest, " — ")
+      if (cut > 0) rest = substr(rest, 1, cut - 1)
+      while ((opening = index(rest, "`")) > 0) {
+        rest = substr(rest, opening + 1)
+        closing = index(rest, "`")
+        if (closing == 0) break
+        print substr(rest, 1, closing - 1)
+        rest = substr(rest, closing + 1)
+      }
     }
-  }
-' "$AGENT")"
+  ' "$1"
+}
+CATALOG_SPANS="$(catalog_spans "$AGENT")"
 catalog_names() {
   printf '%s\n' "$1" | awk -v prefix="zensu ${2% *} " -v word="${2##* }" '
     index($0, prefix) == 1 {
@@ -159,6 +164,24 @@ if catalog_names 'zensu work list|get <id>' 'work get' \
   check "C4b the catalog match reads only the word right after the noun, split on |" PASS
 else
   check "C4b the catalog match accepts a verb that does not follow the noun" FAIL
+fi
+C4C_FIXTURE="$(mktemp)" || exit 1
+trap 'rm -f "$C4C_FIXTURE"' EXIT
+printf '%s\n' \
+  '## Available CLI Commands' \
+  '- `zensu alpha one <id>` — Show one, then run `zensu beta two`' \
+  '- `zensu gamma three` / `zensu gamma four <id>` — Run either command' \
+  '## Next' \
+  '- `zensu delta five` — A line outside the catalog section' >| "$C4C_FIXTURE"
+C4C_SPANS="$(catalog_spans "$C4C_FIXTURE")"
+if catalog_names "$C4C_SPANS" 'alpha one' \
+  && catalog_names "$C4C_SPANS" 'gamma three' \
+  && catalog_names "$C4C_SPANS" 'gamma four' \
+  && ! catalog_names "$C4C_SPANS" 'beta two' \
+  && ! catalog_names "$C4C_SPANS" 'delta five'; then
+  check "C4c a catalog line counts only by the command spans before its description, inside the catalog section" PASS
+else
+  check "C4c a catalog line counts by a span in its description or outside the catalog section" FAIL
 fi
 
 PULSE_START_LINE="$(grep -F -- '- `zensu pulse start`' "$AGENT")"

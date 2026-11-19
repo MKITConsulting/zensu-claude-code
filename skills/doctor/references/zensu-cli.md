@@ -17,7 +17,8 @@ identity it decodes from a stored token in the CLI's own `hosts.json`.
 - **⚠️ zensu CLI: not found on PATH** → relay the install commands the row names.
 - **✅ zensu CLI version: … at or above …** → nothing to do.
 - **⚠️ zensu CLI version: … is older than …** → relay the reason and the upgrade commands the row
-  names. An older release still runs, but AI-work capture refuses to begin with it: the capture
+  names. An older release still runs, but every skill call that passes free text through a `-file`
+  flag fails with `unknown flag`. Below 0.18.0 AI-work capture also refuses to begin: the capture
   preflight answers `cli_incompatible`.
 - **⚠️ zensu CLI version: a development build** → the floor was not checked. Nothing to do unless
   the user expects a release.

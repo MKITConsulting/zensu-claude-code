@@ -82,9 +82,12 @@ without duplication or loss.
 Every command runs through the same bounded supervisor and Windows Job Object
 cleanup used by the blocking profiles, with a 30-minute command deadline; no
 individual safety job can consume the six-hour hosted-runner maximum. It no
-longer extends the pull-request critical path. Promptfoo suites are local-only:
-GitHub Actions never invokes the Promptfoo binary, live/model wrappers, config
-validation, nightly profiles, or release profiles. The Session Control and
+longer extends the pull-request critical path. Outside the scheduled
+`live-evals.yml` below, Promptfoo suites are local-only: no pull-request or
+release gate runs Promptfoo or a model, GitHub Actions never invokes the
+Promptfoo binary, a live model, config validation, nightly profiles, or release
+profiles, and the CI suites start the model wrapper only in its dry-run mode or
+against a stub `claude`. The Session Control and
 reset-review self-checks expose a `--ci` mode that skips Promptfoo while
 retaining their credential-free contract, attestation, barrier, provenance,
 and deterministic wrapper selftests. Release workflows use deterministic
@@ -106,6 +109,73 @@ set, injects a time read from a file the kernel just stamped instead. The allowl
 a test that can do neither. The same
 command takes unit files as arguments for a local check, for example
 `node tests/run-clock-shift.js tests/structure/full-suite-ci-v1.test.js`.
+
+### Scheduled live evals
+
+`live-evals.yml` runs once a day at 03:17 UTC and on manual dispatch, on Ubuntu only, in the
+`live-evals` environment. It is an advisory canary: a red run asks for a look and never blocks a
+pull request or a release. Every run installs the newest `@anthropic-ai/claude-code` release
+through `.github/scripts/live-evals-install-claude-code.sh`: resolved with `npm view`, installed
+with install scripts off, refused when the lockfile gives an install script to another package or
+pulls a package that is not a Claude Code package on the npm registry, then set up by Claude
+Code's own `install.cjs` and version-checked. Only its `claude` command goes on `PATH`. So a
+Claude Code release that breaks the plugin's evals shows up the night after it ships, and the
+summary names the version. The workflow installs its own dependencies on Node 22, the engine
+floor of Claude Code, with `npm ci --ignore-scripts`. `.github/scripts/live-evals.sh` then runs
+four steps:
+
+- `probe` starts a run: it drops the usage ledger, notice and suite table an earlier run left in
+  the results directory, then makes one tiny `claude -p` call. Without a credential it fails and
+  names both secrets. When the reply is a usage-limit message it skips the suites with a warning,
+  because results produced at a limit say nothing about the plugin. Any other error fails the
+  step.
+- `run` runs `zen-mode-reaction` and `context-nudge-reaction` through the pinned Promptfoo from
+  `node_modules`, with a private Promptfoo home and telemetry and update checks off. Each
+  `claude` call appends a line with its cost, tokens, turns and models to a usage ledger. Each
+  suite is judged only by the ledger lines and the results file of its own Promptfoo run: an
+  assertion that failed on an answer without a usage-limit message marks it failed; otherwise a
+  usage limit in its ledger lines marks it inconclusive, and any other Promptfoo failure marks it
+  failed. A usage limit in its ledger lines also skips the later suites, and a failed suite turns
+  the run red.
+- `summary` writes the Claude Code version, the model, each suite's status and the usage totals
+  to the job summary.
+- `scrub` copies the results into a separate upload directory and leaves out every file that
+  holds a credential value, every symbolic link and every other entry that is neither a regular
+  file nor a directory. It fails the step when it left a file out. When it cannot read an entry
+  it writes no `scrubbed=true`, and the upload step, which runs only on that output, uploads
+  nothing. The staged results and the ledger are kept for 14 days.
+
+Setup, once, by a repository owner:
+
+1. Create a Claude account just for this workflow. `claude setup-token` requires a Claude
+   subscription (its `--help` says so). Under a subscription login `claude -p` draws from that
+   subscription's usage limits, which the account then holds for the nightly alone. Whether
+   those limits cover a full run is not known in advance: the summary's usage-limit column shows
+   it.
+2. Run `claude setup-token` and approve the request in a browser that is signed in to that
+   account only, a private window for example. It prints a long-lived token. Approved in a
+   browser signed in to your own account, the token would draw from your own limits.
+3. Create the environment `live-evals` (Settings → Environments → New environment) and limit its
+   deployment branches to `main` (Deployment branches and tags → Selected branches and tags →
+   add `main`). Then store the token as its secret with
+   `gh secret set CLAUDE_CODE_OAUTH_TOKEN --env live-evals` and paste the token when asked. An API
+   key works instead, stored the same way as `ANTHROPIC_API_KEY`; set only one of the two.
+4. Optional: `gh variable set EVAL_CLAUDE_MODEL --body haiku` sets the model for the scheduled
+   runs and for a dispatch with an empty model input. Without it every session uses the account's
+   default model.
+
+Run it by hand from `main` with
+`gh workflow run live-evals.yml --ref main -f suites=zen-mode-reaction -f model=haiku` (both
+inputs are optional); the environment refuses a run from another branch. The suites the workflow
+does not run yet stay local-only: `route-short-line-reaction` needs a user-scope `zensu@zensu`
+install in the runner's Claude home, `session-control` (live, concurrency, adversarial) and
+`reset-review-limit` check Claude Code 2.1.221 exactly, and `tdd-manager-pretool` still targets
+the removed `zensu:tdd-manager` agent. `test-promptfoo-local-only.sh` keeps every other workflow
+free of Promptfoo, the live-eval scripts and model credentials, and pins this workflow's
+triggers, read-only token, environment, Node version, script-free dependency install, the three
+steps that receive the credential and the upload that follows only a complete scrub, with a
+planted weakening for each that must fail; `test-live-evals.sh` drives the scripts against stub
+`claude`, `promptfoo` and `npm` binaries.
 
 `playwright-cli-drift.yml` also runs once a day and on manual dispatch, on Ubuntu only, and
 runs no suite. Its `drift` job keeps the read-only token and runs
@@ -208,7 +278,8 @@ summary line reads `N PASS / M FAIL / K XFAIL`.
 - Generated fixtures (`*/fixtures/`) and captures (`*/results/`, `tests/results/`) are
   git-ignored; build them with each suite's `setup-fixtures.sh`.
 - Deterministic non-Promptfoo suites run in CI via `--ci`. Promptfoo and live model/API
-  suites remain explicitly local and opt-in. The live GitLab suite runs in CI only through
+  suites remain explicitly local and opt-in, except the two that the advisory `live-evals.yml`
+  runs every night (§"Scheduled live evals"). The live GitLab suite runs in CI only through
   `.github/workflows/gitlab-live.yml` and the release gates, never through `run-all.sh`.
 
 ## Live-suite notes

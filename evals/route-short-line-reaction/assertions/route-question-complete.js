@@ -2,10 +2,84 @@
 
 const { parse, firstEnd, proseAsk, classifyQuestion, YES_LABEL, NO_LABEL, AUTOPILOT_LABEL } = require('../lib/envelope.js');
 
+const SUBJECT = /\b(?:yes|choice|answer)\b/gi;
+const MEMORY = /\b(?:remember(?:ed)?|saved|stored|kept)\b/gi;
+const DURATION = /\b(?:for|to|through|throughout|during|over)\s+the\s+rest\s+of\s+(?:this|the)\s+session\b/gi;
+const SESSION_SCOPE = /\b(?:this|the)\s+session\b/i;
+const REQUEST_SCOPE = /\b(?:this|that|the|each|every|one)\s+request\b/i;
+const NEGATION = /\b(?:not|never|cannot|no longer|nothing|none|neither|nor|rather than|instead of)\b|n['’]t\b/i;
+const ASKED_AGAIN = /\b(?:won['’]t|will not|isn['’]t|is not|not|never)\s+(?:be\s+)?asked\s+again\b/gi;
+const PICK = /\b(?:pick|picks|choose|chooses|select|selects|answer|answers|say|says)\s+[*_"'“‘]*(yes|no)\b/gi;
+const ROUTE_CHANGE = /\/zensu:delivery-route\b/i;
+const CLAUSE_BREAK = /[,;]|:(?=\s|$)/;
+const LABEL_LEAD = /^[\s*_`"'“”‘’>•-]+/;
+const GAP = 80;
+
+function affirmative(span) {
+  return !ROUTE_CHANGE.test(span) && !NEGATION.test(span.replace(ASKED_AGAIN, ' '));
+}
+
+function spans(re, text) {
+  return [...text.matchAll(re)].map((m) => ({ start: m.index, end: m.index + m[0].length }));
+}
+
+function clauseBefore(sentence, index) {
+  return sentence.slice(0, index).split(CLAUSE_BREAK).pop();
+}
+
+function clauseAfter(sentence, index) {
+  return sentence.slice(index).split(CLAUSE_BREAK)[0];
+}
+
+function linked(sentence, from, to) {
+  return to.start >= from.end && to.start - from.end <= GAP && affirmative(sentence.slice(from.end, to.start));
+}
+
+function unblocked(sentence, predicate) {
+  return affirmative(clauseBefore(sentence, predicate.start)) && !ROUTE_CHANGE.test(sentence.slice(0, predicate.start));
+}
+
+function memoryHolds(sentence, memory) {
+  const after = clauseAfter(sentence, memory.end);
+  return unblocked(sentence, memory) && affirmative(after.split(SESSION_SCOPE)[0]) && !REQUEST_SCOPE.test(after);
+}
+
+function pickedNo(sentence, subject) {
+  const picks = [...sentence.slice(0, subject.end + 6).matchAll(PICK)];
+  return picks.length > 0 && picks[picks.length - 1][1].toLowerCase() === 'no';
+}
+
+function joined(sentence, subject, predicate) {
+  if (linked(sentence, subject, predicate)) return true;
+  return linked(sentence, predicate, subject) && affirmative(clauseAfter(sentence, subject.end));
+}
+
+function startsWith(segment, label) {
+  const match = label.exec(segment.replace(LABEL_LEAD, ''));
+  return Boolean(match) && match.index === 0;
+}
+
+function disclosesYes(sentence, tied) {
+  const subjects = spans(SUBJECT, sentence).filter((s) => !pickedNo(sentence, s));
+  const memories = spans(MEMORY, sentence).filter((m) => memoryHolds(sentence, m));
+  const durations = spans(DURATION, sentence).filter((d) => unblocked(sentence, d));
+  const predicates = [...memories, ...durations];
+  if (subjects.some((s) => predicates.some((p) => joined(sentence, s, p)))) return true;
+  return tied && (durations.length > 0 || memories.some((m) => SESSION_SCOPE.test(clauseAfter(sentence, m.end))));
+}
+
+function remembersYes(text) {
+  const segments = String(text || '').split('|');
+  return segments.some((segment, i) => {
+    const tied = i > 0 && startsWith(segments[i - 1], YES_LABEL) && ![YES_LABEL, NO_LABEL, AUTOPILOT_LABEL].some((label) => startsWith(segment, label));
+    return segment.split(/(?<=[.!?;])\s+|\n+/).some((sentence) => disclosesYes(sentence, tied));
+  });
+}
+
 const NEEDLES = [
   ['the Yes label', YES_LABEL],
   ['the No label', NO_LABEL],
-  ['a Yes is remembered for the session', /\b(yes|choice|answer)\b[^.|]{0,80}\b(remember|saved|stored|kept)|\b(remember(ed)?|saved|stored|kept)\b[^.|]{0,60}\b(rest of|this|the) session/i],
+  ['a Yes is remembered for the session', { test: remembersYes }],
   ['later approved plans included', /approved plans?|plans? (that )?(you )?approve|plan[- ]approval/i],
   ['one Bash call to allow', /\bBash (call|command)\b/i],
   ['a No decides this request only', /\b(this|the) request only\b|\bonly (affects|applies to|covers|decides|for) (this|the) request\b|(\bnot|n['’]t) (be )?(remembered|saved|stored|recorded)\b/i],

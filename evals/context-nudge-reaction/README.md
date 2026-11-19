@@ -28,7 +28,9 @@ suite covers the non-deterministic complement: the model's behaviour.
 - **Live + advisory.** Running this costs API credits and can flake on model variance — NOT a CI gate.
   Only the deterministic shape pin
   [`tests/structure/test-promptfoo-context-nudge-reaction.sh`](../../tests/structure/test-promptfoo-context-nudge-reaction.sh)
-  runs in `tests/run-all.sh` (no API).
+  runs in `tests/run-all.sh` (no API). The scheduled, advisory
+  [`live-evals.yml`](../../.github/workflows/live-evals.yml) runs the live suite every night on the
+  newest Claude Code release; no pull request or release waits for it.
 
 ## Run
 

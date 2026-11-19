@@ -1,0 +1,89 @@
+name: Live evals
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: Suites to run
+        type: choice
+        default: all
+        options:
+          - all
+          - zen-mode-reaction
+          - context-nudge-reaction
+      model:
+        description: Model alias or id for every eval session; empty uses the EVAL_CLAUDE_MODEL repository variable, or the account default when that is unset
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: live-evals
+  cancel-in-progress: false
+
+jobs:
+  live-evals:
+    name: Live evals on the newest Claude Code
+    runs-on: ubuntu-latest
+    environment: live-evals
+    timeout-minutes: 150
+    env:
+      DISABLE_AUTOUPDATER: '1'
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+      EVAL_CLAUDE_MODEL: ${{ inputs.model || vars.EVAL_CLAUDE_MODEL }}
+      EVAL_SUITES: ${{ inputs.suites || 'all' }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Install the newest Claude Code release
+        id: claude
+        timeout-minutes: 10
+        run: bash .github/scripts/live-evals-install-claude-code.sh
+      - name: Probe the Claude credential and usage limit
+        id: probe
+        timeout-minutes: 5
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: bash .github/scripts/live-evals.sh probe
+      - name: Run the live eval suites
+        if: steps.probe.outputs.ready == 'true'
+        timeout-minutes: 120
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: bash .github/scripts/live-evals.sh run
+      - name: Summarize the run
+        if: always()
+        env:
+          CLAUDE_CODE_VERSION: ${{ steps.claude.outputs.version }}
+        run: bash .github/scripts/live-evals.sh summary
+      - name: Remove credentials from the results
+        id: scrub
+        if: always()
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: bash .github/scripts/live-evals.sh scrub
+      - name: Upload the eval results
+        if: always() && steps.scrub.outputs.scrubbed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: live-evals-${{ github.run_id }}
+          path: ${{ runner.temp }}/live-evals-upload/
+          retention-days: 14
+          if-no-files-found: ignore

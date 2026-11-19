@@ -250,7 +250,8 @@ sees a request. MEASURED with 0.1.23 and 0.1.24: a service-worker registration r
 `undefined`, no worker is registered and its script is never fetched. A server REDIRECT to another
 origin is NOT refused by the browser (recorded as measured in `docs/gates.md`, and measured again
 with 0.1.23 and 0.1.24), so the skill reads the `Page URL` line after every navigating call —
-prose, not a boundary. Skill and doc text depends on the service-worker block: a criterion that
+prose, not a boundary. A WebSocket and a shared worker's fetch are not refused either (below, and
+Known gaps). Skill and doc text depends on the service-worker block: a criterion that
 needs a service worker is `partial` with the cause driver fence, at the sites
 `.claude/rules/acceptance-verification-gate.md` lists under "A driver fence is a cause of its
 own". `P10o` in `tests/structure/test-verify-feature-skill.sh` fails once the helper stops writing
@@ -440,7 +441,7 @@ one-directional and deliberate:** `parsePolicyTargets` accepts a target with exa
 (`LEGACY_POLICY_TARGET_KEYS`); `legacyRoutesFault` still shape-checks that list at
 `MAX_POLICY_ROUTES`, so a malformed legacy list still invalidates the policy, and a well-formed
 one is then dropped rather than enforced. What still binds per call is unchanged: the floor (no credentials,
-query or fragment in a navigation), `network.allowedOrigins`, the resolver pins and the
+no query or fragment in a navigation outside loopback), `network.allowedOrigins`, the resolver pins and the
 redirect check. **Version: `patch`.** No schema field, attestation, hook or matcher moves, and
 the gate denies strictly less. The one entry that reads close is the strict key set:
 `parsePolicyTargets` is one, but it reads the launch environment, which no runtime writes, and
@@ -474,7 +475,8 @@ before the skill can stop. **WebSockets are outside the browser fence for every 
 measured with playwright-cli 0.1.21 and Chrome 154, and again with 0.1.23 and with 0.1.24 and
 Chrome 156, where a page on an allowed origin opened one to a loopback origin outside
 `allowedOrigins` and received its message: `context.route` does not intercept them —
-so the docs say "every HTTP(S) request"; fencing them is a separate change. The decisions and the
+so the docs say "every HTTP(S) request" and name each exception beside it; fencing them is a
+separate change, and so is fencing a shared worker's fetch (Known gaps). The decisions and the
 security analysis live in §11 of `docs/verify-feature-consent-spec.md`. **Version for this
 delta: `patch`**, by the route-retirement argument above — the policy is read from the launch
 environment, which no runtime writes, and an installation that predates the key refuses a policy
@@ -654,6 +656,18 @@ announces a prompt rather than a capability the plugin hands itself.
   `Zensu capability gate (reviewer-capability-v1) deny:` reason stays deterministic (`scripts/session-control-claude-wrapper.sh`,
   `evals/session-control/lib/live-evidence.js`, `evals/session-control/tests/wrapper-selftest.sh`,
   `tests/structure/test-windows-portability-guards.sh`).
+- The three exceptions to "the browser refuses every HTTP(S) request outside the run config" — a
+  WebSocket connection, a followed server redirect and a shared worker's fetch — are stated
+  together at each of these sites: `docs/gates.md` (the floor paragraph and the fence bullet of the
+  known gaps), `docs/verify-feature.md` ("How the browser is fenced", the consent-mode floor
+  bullet, the redirect sentence, the network-only limits and the local-mode API bullet),
+  the "Redirects are not filtered by the browser" paragraph of `skills/verify-feature/SKILL.md`,
+  section 1 of `skills/verify-feature/rules/browser-verification.md`,
+  `skills/autopilot/rules/config.md`, §11 and §12 of `docs/verify-feature-consent-spec.md` and the
+  scope and residual rows of `docs/verify-feature-auth-state-spec.md`. A new exception, or the day
+  one closes, edits all of them with `V73` and `P10q`. `SKILL.md` sits at its allowlist
+  (`.claude/rules/skill-text-budget.md`), so its sentence stays a bare list and the measurement
+  lives in the rule file.
 
 **The release signal (`.github/workflows/playwright-cli-drift.yml`).** No live tier runs
 `playwright-cli`, and none is needed: the parser port is pinned by a fixture recorded from the
@@ -737,6 +751,17 @@ for its `@playwright/cli` install pins.
   a network-only origin renders inside that page, so its content reaches that page's snapshot and
   screenshot; the skill reads it as that page's content, like fetched data, which is why
   `NETWORK_ONLY_NAVIGATION` denies evidence only to a page the browser lands on there.
+- **A shared worker's fetch is outside the browser fence, like a WebSocket and a followed
+  redirect.** Measured on 2026-11-17 on macOS with playwright-cli 0.1.24 driving Google Chrome
+  157.0.8103.52, headless, on loopback `http` origins, once through playwright-core directly and
+  once through the real CLI with a run-config-shaped file: with the routes from
+  `network.allowedOrigins`, `serviceWorkers: 'block'` and `--no-proxy-server`, a page's fetch and
+  navigation to an origin outside `allowedOrigins` were blocked, a dedicated worker's fetch was
+  blocked, and a shared worker's fetch reached that origin's server. Not measured: `https` and
+  `wss` targets, a real remote host, Windows, Linux and other Chrome channels. Every doc and skill
+  text that says the browser refuses "every HTTP(S) request" names all three exceptions beside it;
+  `V73` pins the two operator docs and `P10q` the skill text. Closing the gap is a separate,
+  larger change that this text correction does not start.
 - **`localhost` rests on a browser property no suite exercises.** The source reading is of Chromium
   `main` and the measurements of two Chrome builds (154.0.8037.57 with playwright-cli 0.1.21,
   156.0.8078.81 with 0.1.23 and 0.1.24); no suite drives a real browser, so a Chromium that
@@ -865,6 +890,56 @@ policy, consent and consent-no-recipe rows, and the operator accounts listed abo
 `patch`** — the gate asks where it denied, the new refusals hit only inputs denied before, and no
 schema field, `decidedBy` value, key set, hook, matcher, config key or attestation moves; a new
 `decidedBy` value would force `minor`.
+
+**A query or fragment on a loopback navigation (2026-11-18).** The floor refused every navigation
+target that carried one, which also refused a fixture switch such as
+`http://localhost:4200/?scenario=empty` on the run's own dev server. `checkNavigationTarget` now
+refuses one only when `isLocalHost` is false, after the scheme and credentials checks and in the
+same position as before, so every non-loopback target keeps `FLOOR_REASONS.QUERY_OR_FRAGMENT` and
+its precedence over the host classification: `http://10.0.0.5/?x` and `http://app.localhost:4200/#x`
+are still refused for the query. A remote URL's query can carry a signed-preview token, which is
+why it stays refused. Both the query and the fragment are admitted on loopback, because a fragment
+never reaches a server and a hash-routed app would meet the same refusal. Nothing else moves:
+`judgeOrigin` and `judgeCall` call the floor as before, consent and policy decide on the origin
+alone, and the recorder keeps storing `(origin, route, decidedBy, at)` with the route taken from
+`pathname`, which carries no query or fragment, so no query value reaches the consent memory, a
+prompt, a deny reason or the report. `checkOrigin` in the run-config helper and `policyOriginEntry`
+judge ORIGINS and keep refusing a query or fragment there, the helper with its own reason
+`FLOOR_REASONS.ORIGIN_QUERY_OR_FRAGMENT`, because an origin operand is no navigation target. A
+network-only origin stays unnavigable with a query or fragment too: `judgeOrigin` keys that denial
+on the origin alone, and the loopback case of `verify-consent-v1.test.js` pins it for `goto`,
+`tab-new` and `open`. An unquoted `?` stays a shape denial (`ARGUMENT_UNEXPANDED`), so the URL must
+be single-quoted, which section 1 of `skills/verify-feature/rules/browser-verification.md` says,
+together with the rule that a query or fragment value comes from the recipe or the criterion and
+never from a page, a console line, a request log or a file the run read.
+`skills/verify-feature/SKILL.md` is unchanged, its remote Phase 0 URL rules included, and
+`rules/acceptance-consent.md` still names no query (`A0k`). Sites that move together: the condition
+in `checkNavigationTarget`, and `ORIGIN_QUERY_OR_FRAGMENT` with its use in `checkOrigin`; the
+loopback, remote and origin cases of `verify-navigation-floor-v1.test.js`,
+`verify-consent-v1.test.js` and `verify-browser-config.test.js` and `H9` to `H9k` in
+`test-verify-consent.sh`; the accounts in `docs/gates.md`,
+`docs/verify-feature.md`, the hook row of `docs/configuration.md`, the dated note and AC-003 of
+`docs/verify-feature-consent-spec.md`, the threat row of `docs/verify-feature-auth-state-spec.md`
+and the navigation sentence of `skills/autopilot/rules/config.md`; and two texts no suite pins,
+section 1 of `skills/verify-feature/rules/browser-verification.md`, which the model reads, and the
+remote qualifier in `.claude/rules/acceptance-verification-gate.md`. MEASURED on 2026-11-18 with
+playwright-cli 0.1.24 driving Google Chrome 157.0.8103.52, on a plain session outside the gate with
+the run config `buildConfig` writes: a run allowing `http://127.0.0.1:<port>` and
+`http://localhost:<port>` loaded `/?scenario=empty#top` and `/#/dashboard` on the first and
+`/?scenario=empty` on the second, each with its query and fragment intact in the `Page URL` line;
+the server logged the query and never the fragment; and a `goto` with a query to an origin outside
+`allowedOrigins` failed with `net::ERR_BLOCKED_BY_CLIENT` and exit 1. That is the browser half; the
+suites hold the gate half. Residual: a query or fragment can now carry data from the model to an
+approved loopback origin, which is the local service the run drives. `allowedOrigins` bounds the
+HTTP(S) requests the browser issues itself, not a server redirect and not a WebSocket, which stay
+the open gaps recorded above: an approved origin that redirects (an open redirect such as
+`/login?next=`, a mock identity provider that honours `redirect_uri`, a dev-server proxy) carries
+that query to an origin nobody approved, and a fragment survives a redirect that names none. The
+`Page URL` read after each navigating call is prose, not a boundary. The path of a navigation URL was
+never judged either, because consent decides on the origin alone, so this adds the usual shape of a
+redirect parameter to a channel that already existed. **Version: `patch`.** No schema field, key
+set, hook, matcher, config key or attestation moves, and the gate denies strictly less; relaxing an
+existing deny is not on the breaking list of §"Runtime Lineage".
 
 **The 0.1.23 measurement (2026-11-09).** The fixture was re-recorded from the npm package,
 installed with `--ignore-scripts`; the recorder raised no refusal, and the recording differs

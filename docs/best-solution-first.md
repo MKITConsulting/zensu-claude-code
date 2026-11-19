@@ -119,10 +119,14 @@ that fixes output shape, **or another hook that prescribes an option list on the
 channel**. That last case is not hypothetical: `hooks/user-prompt-tdd-reminder.sh`
 injects on the `UserPromptSubmit` event that carries this rule's reminder and names the options
 it wants offered. Where
-two directives arrive together on one channel, the more SPECIFIC one decides the set — a
-hook that names its options has already made the ranking decision for its own subject — and
-this rule still requires that the option you would defend as best is not silently demoted
-inside whatever set survives.
+two directives arrive together on one channel, the more SPECIFIC one decides the set, and an
+order it fixes stands. The reminder fixes the set and two limits on its first slot: with a
+person present Autopilot leads only a whole user-visible feature meant to reach a pull request,
+and without one confirmed present the Zensu workflow always leads, because a host that answers
+the question itself takes the first or the recommended option. Otherwise it asks for the option
+the agent recommends first, its label ending in ` (Recommended)`, which is this rule's own
+ranking, so within those limits this rule decides the order. Whatever set survives, this rule
+still requires that the option you would defend as best is not silently demoted inside it.
 `skills/pilot/SKILL.md` derives its offers from a decision table and prescribes their
 sequence; where the two disagree, the skill's order wins and this rule still requires that
 the option the agent would defend as best be present. The block says so itself, so the

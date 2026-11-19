@@ -18,6 +18,8 @@ DATA="$SANDBOX/plugin-data"
 NO_CONFIG="$SANDBOX/no-such-config.json"
 SEQ=0
 SID=""
+ENTRY=""
+NL=$'\n'
 
 session_start() {
   local root="$1" cfg="$2"
@@ -32,7 +34,7 @@ fire() {
   local root="$1" hook="$2" cfg="$3" prompt="$4" raw rc
   node -e 'process.stdout.write(JSON.stringify({session_id:process.argv[1],cwd:process.argv[2],permission_mode:"default",hook_event_name:"UserPromptSubmit",prompt:process.argv[3]}))' "$SID" "$PROJ" "$prompt" \
     > "$SANDBOX/payload.json" || { printf '<<route-eval:PAYLOAD>>'; return 0; }
-  raw="$(env CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$DATA" CLAUDE_PROJECT_DIR="$PROJ" ZENSU_CONFIG="$cfg" \
+  raw="$(env ${ENTRY:+CLAUDE_CODE_ENTRYPOINT="$ENTRY"} CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$DATA" CLAUDE_PROJECT_DIR="$PROJ" ZENSU_CONFIG="$cfg" \
     bash "$root/hooks/$hook" < "$SANDBOX/payload.json" 2>/dev/null)"
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -83,7 +85,7 @@ field_of() {
 }
 
 capture() {
-  local source="$1" root="$2" out="$3" prompt="$4" hook="" cfg="$NO_CONFIG" shape="" field="n/a" head="" first second
+  local source="$1" root="$2" out="$3" prompt="$4" hook="" cfg="$NO_CONFIG" shape="" field="n/a" head="" human="" first second kept
   [ -d "$out" ] || die "the output directory does not exist" 64
   case "$source" in
     none) write_capture "$out" none "" none n/a ""; return 0 ;;
@@ -96,6 +98,14 @@ capture() {
       hook=user-prompt-tdd-reminder.sh; shape=ask-short
       cfg="$SANDBOX/ask.json"; printf '%s' '{"hooks":{"tddImplementation":false}}' > "$cfg"
       head='Zensu workflow reminder, vanilla implementation mode (the full reminder given earlier in this context still applies): ' ;;
+    ask-attended)
+      hook=user-prompt-tdd-reminder.sh; shape=ask-short; ENTRY=cli; human=yes
+      cfg="$SANDBOX/ask.json"; printf '%s' '{"hooks":{"tddImplementation":false}}' > "$cfg"
+      head='Zensu workflow reminder, vanilla implementation mode (the full reminder given earlier in this context still applies): ' ;;
+    ask-full-attended)
+      hook=user-prompt-tdd-reminder.sh; shape=ask-full; ENTRY=cli; human=yes
+      cfg="$SANDBOX/ask.json"; printf '%s' '{"hooks":{"tddImplementation":false}}' > "$cfg"
+      head='Zensu workflow reminder (vanilla implementation mode is in effect for this session' ;;
     tdd-config)
       hook=user-prompt-tdd-reminder.sh; shape=decided-tdd
       cfg="$SANDBOX/tdd.json"; printf '%s' '{"hooks":{"tddImplementation":false,"defaultDeliveryRoute":"build"}}' > "$cfg"
@@ -114,19 +124,25 @@ capture() {
   first="$(fire "$root" "$hook" "$cfg" "$prompt")"
   second="$(fire "$root" "$hook" "$cfg" "$prompt")"
   [ -n "$second" ] || die "$hook emitted nothing on the second prompt for '$source'"
+  kept="$second"
+  [ "$shape" = ask-full ] && kept="$first"
+  [ -n "$kept" ] || die "$hook emitted nothing on the first prompt for '$source'"
   case "$first$second" in *"<<route-eval:"*) die "$hook emitted malformed output for '$source'" ;; esac
-  case "$second" in "$head"*) ;; *) die "$hook's second output for '$source' does not open with the expected shape" ;; esac
-  case "$second" in *__ZENSU_*) die "$hook left a placeholder unsubstituted for '$source'" ;; esac
+  case "$kept" in "$head"*) ;; *) die "$hook's kept output for '$source' does not open with the expected shape" ;; esac
+  case "$kept" in *__ZENSU_*) die "$hook left a placeholder unsubstituted for '$source'" ;; esac
   case "$shape" in
-    ask-short|router-short) [ "$first" != "$second" ] || die "$hook gave the same text twice for '$source', so the ledger never marked the full text" ;;
+    ask-short|ask-full|router-short) [ "$first" != "$second" ] || die "$hook gave the same text twice for '$source', so the ledger never marked the full text" ;;
     *) [ "$first" = "$second" ] || die "$hook changed the decided line between two prompts for '$source'" ;;
   esac
+  if [ -n "$human" ]; then
+    case "$kept" in *"${NL}ZENSU HUMAN PRESENT: ${human}${NL}"*) ;; *) die "the $source capture does not read the human-present field '$human'" ;; esac
+  fi
   case "$shape" in
-    ask-short) field="$(field_of "$second")"; [ "$field" = "ask" ] || die "the ask capture reads route field '$field'" ;;
+    ask-short|ask-full) field="$(field_of "$kept")"; [ "$field" = "ask" ] || die "the ask capture reads route field '$field'" ;;
     decided-tdd) field="$(field_of "$second")"; [ "$field" = "build (hooks.defaultDeliveryRoute)" ] || die "the tdd capture reads route field '$field'" ;;
     decided-direct) field="$(field_of "$second")"; [ "$field" = "direct (hooks.defaultDeliveryRoute)" ] || die "the direct capture reads route field '$field'" ;;
   esac
-  write_capture "$out" "$source" "${hook%.sh}" "$shape" "$field" "$second"
+  write_capture "$out" "$source" "${hook%.sh}" "$shape" "$field" "$kept"
 }
 
 silence() {
