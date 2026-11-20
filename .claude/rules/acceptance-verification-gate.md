@@ -405,7 +405,8 @@ active run" and its 5 to the unreadable-state refusal; those two, another run's 
 all exit 2, like every misuse. It reads the run's facts through the module's `run-facts` mode,
 which takes a recorded pull-request head only within the 7 to 64 hex digits of
 `RECORDED_HEAD_RE`, so the shell carries no second parser of the run record; `V16` checks that the
-state machine's `sha` agrees with that bound. The bind and the `--accept-partial` parse run before
+state machine's `sha` agrees with that bound, and `V16b` drives the two fault refusals of that
+call: status 3, a run record it cannot parse, and a status outside 0, 3, 4 and 5. The bind and the `--accept-partial` parse run before
 the phase library is loaded, so both name the module through `_zensu_avr_module_path`, which
 renders the plugin's `hooks/lib` with `zensu-host-path.sh` as `--evidence-run` does, never through
 `_tdd_native_path`: the suite sources that library and exports its functions to every child, which
@@ -442,7 +443,10 @@ cause and leaves the decision to the user without naming the escape (§"Standalo
 `plan: .zensu/state/<stem>.md` (`expectedPlanRel`), and the standalone escaped-receipt path skips
 run-copy stems. A work-order run reads `.zensu/plans/<order-id>.md`: when a person approved the
 plan (`approvedPlanSha256` differs from `workOrder.specHash`) its digest is checked, otherwise the
-verb discloses `ACCEPTANCE PLAN UNAPPROVED`. No plan gate sees a work-order plan, so
+verb discloses `ACCEPTANCE PLAN UNAPPROVED`. `record` and `status` look the plan up before the head
+check and print that line on every answer after the lookup, a refusal included (`recordInChain`
+runs every check after it). The verdict checks the head and the clean tree before its lookup, so
+its head or dirty-tree refusal carries no such line. No plan gate sees a work-order plan, so
 `planCriteriaRefusal` in `work-order-v1.js` takes the place of `PLAN_CRITERIA_UNUSABLE`:
 `--bind-spec` of a run that validates refuses with `plan-criteria-unusable` and exit 8 while that
 file carries no active `AC-###` row, reading it through the module's `planFor` and `readCriteria`,
@@ -549,7 +553,8 @@ would let a second VALIDATE visit at an unchanged head report success while the 
 `VALIDATE` from another stage: a retry inside one visit replays idempotently, a new visit gets a
 new id.
 
-**Coupled sites of run mode:** `runFacts`, `runChain`, `runHead`, `runHeadCheck`, `prCommit`,
+**Coupled sites of run mode:** `runFacts`, `bindFacts`, `RECORDED_HEAD_RE`, the `run-facts` mode
+of `main()` with its exits 0, 3, 4 and 5, `runChain`, `runHead`, `runHeadCheck`, `prCommit`,
 `gitLines`, `changeList`, `pathList`, `chainCriteria`, `unfingerprintedCause`, `runOutcome`,
 `runVerdict`, `runRemedyContext`, the `run` texts of `REMEDY_TEXTS`, `consentDecision`,
 `manualAcceptanceIds`, `manualAcceptanceRead`, `isRunCopyStem` (which also requires `approvedPlanStem` to rebuild the stem),
@@ -570,10 +575,11 @@ fsyncs the state directory after the rename on every host but win32, in `approve
 `skills/autopilot/rules/validate.md` and the `partial` sentence of `skills/autopilot/rules/drivers.md`;
 the `VALIDATE_FEATURE` line and `planCopyNote` of `hooks/session-start-autopilot-resume.sh`;
 `planCriteriaRefusal` in `work-order-v1.js` and the `plan-criteria-unusable` paragraph of
-`skills/autopilot/rules/work-order.md` §4. Pins: `V1`-`V21`, `V7b`, `V13b` and `V20b` in
+`skills/autopilot/rules/work-order.md` §4. Pins: `V1`-`V21`, `V7b`, `V13b`, `V16b` and `V20b` in
 `test-acceptance-gate.sh` (`V7b` the ended run, `V10` the advisory ledger entry, `V13b` a run of
 another session in the same project, `V15` the pending head update and a third visit's event ids,
-`V16` the head bound, `V17` a branch named after an abbreviated head, `V18` an unexpected passing
+`V16` the head bound, `V16b` the bind's refusals for a run record the `run-facts` call cannot parse
+and for a call that fails another way, `V17` a branch named after an abbreviated head, `V18` an unexpected passing
 state under a required gate, `V19` a copy the plan-approval hook itself stored, validated through
 the records and the verb, and a tracked `.zensu/logs/` change that leaves the tree clean, and `V20`
 a work-order plan no person approved, whose validation records `acceptance-plan-unapproved` before
