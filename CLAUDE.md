@@ -84,9 +84,8 @@ Full policy, exemptions and known gaps: `.claude/rules/runtime-lineage.md`.
 
 ## Shell Portability
 
-macOS ships bash 3.2 as `/bin/bash`. Inside a command substitution `$( ... )`, write every `case`
-pattern with the optional leading paren, `(pattern)`. The bare `pattern)` form closes the substitution
-early on bash 3.2, and `bash -n` does not catch it. Details: `.claude/rules/bash32-command-substitution.md`.
+macOS ships bash 3.2 as `/bin/bash`. Inside a command substitution `$( ... )`, write every `case` pattern with the optional leading paren, `(pattern)`.
+The bare `pattern)` form closes the substitution early on bash 3.2, and `bash -n` does not catch it. Details: `.claude/rules/bash32-command-substitution.md`.
 
 ## Pull Request Workflow
 
@@ -122,6 +121,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Evidence Runner and Full-Suite Gate (`hooks/lib/evidence-run-v1.js` + `zensu-log.sh --evidence-run` / `--chain-done`)** — the plugin-run full suite, its tree-bound record and the terminus gate: `.claude/rules/evidence-runner.md`
 - **Full Suite in CI (`ci-contract-v1.js` + `full-suite-policy-v1.js` + `/zensu:full-suite`)** — leaving a chain's full suite to the verified CI pull-request pipeline, the asymmetric ladder and the chain snapshot: `.claude/rules/full-suite-ci-deferral.md`
 - **Acceptance Verification Gate (`hooks/lib/acceptance-verify-v1.js` + `zensu-log.sh --acceptance-record` / `--acceptance-status` / `--chain-done` / `--autopilot-validate`)** — per-criterion live verification records, the receipt-anchored plan, the terminus refusal, the standalone close on the user's consent with its Stop hand-off, and the Autopilot run mode that reads the approved plan copy and is the only way past VALIDATE: `.claude/rules/acceptance-verification-gate.md`
+- **Evidence Report Core (`hooks/lib/evidence-report-v1.js` + `zensu-log.sh --report-*`)** — the host-agnostic report owner, its verbs and transport, the store and its placement, containment, the text screen, the fault codes, the corpus and retention: `.claude/rules/evidence-report.md`
 - **Windows Budget for `best-solution-first`** — why a Windows shard budget, not a suite cap, binds: `.claude/rules/windows-budget-best-solution-first.md`
 - **Runtime Lineage (`version_type` is load-bearing)** — the full `version_type` policy and its breaking-change list: `.claude/rules/runtime-lineage.md`
 - **Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)** — `/zensu:adopt-session` and the pruned-installation state: `.claude/rules/session-adoption.md`

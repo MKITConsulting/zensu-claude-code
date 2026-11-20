@@ -1,0 +1,15 @@
+{
+  "description": "A criterion recorded pass through the browser whose steps link no image.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "criterion.no-image",
+        "at": "coverage.criteria[0]"
+      }
+    ]
+  }
+}

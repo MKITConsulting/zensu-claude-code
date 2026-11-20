@@ -1,0 +1,10 @@
+{
+  "description": "Matrix mode with two criteria, an image, a text file, a request and a signal; verdict PASS.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "rendering": "sha256:5cd0a1cbc4a808ea40c980208d7ef07c32f7920c34877b1889fb0b7f99e2daf1"
+  }
+}

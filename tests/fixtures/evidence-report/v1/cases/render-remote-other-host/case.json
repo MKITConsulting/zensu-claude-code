@@ -1,0 +1,9 @@
+{
+  "description": "A remote run attached to an origin, written by another host, with no git identity and no plugin version.",
+  "inScope": [
+    "AC-001"
+  ],
+  "expect": {
+    "rendering": "sha256:590c13f2c09ce89e93e73f27a0d5be79062016354d687bc4c7e0bf067ffcf3a0"
+  }
+}

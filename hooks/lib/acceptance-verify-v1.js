@@ -1805,6 +1805,7 @@ module.exports = {
   manualAcceptanceIds,
   consentDecision,
   hasChanges,
+  chainTree,
   citedRun,
   resolveChain,
   runChain,

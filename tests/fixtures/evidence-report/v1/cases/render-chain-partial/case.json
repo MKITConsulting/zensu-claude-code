@@ -1,0 +1,12 @@
+{
+  "description": "Chain mode with pass, stale, missing, deprecated and partial criteria, a lossless WebP and an unlinked run item; verdict PARTIAL.",
+  "inScope": [
+    "AC-001",
+    "AC-002",
+    "AC-003",
+    "AC-005"
+  ],
+  "expect": {
+    "rendering": "sha256:4dc3ac8b79d8bcd01fe4f709218e87cf84072846c613f77ba29313362de57e8e"
+  }
+}
