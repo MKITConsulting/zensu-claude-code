@@ -333,6 +333,18 @@ hs_refused_early "HS20 an empty review payload is refused before ssh -G and the 
 hs_lookup_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/no-such-review.json"
 hs_refused_early "HS20b a missing review payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
   "post-review refused: the payload file is missing or empty"
+mkdir -p "$WORK/hostpin/dash"
+cp "$CPAY" "$WORK/hostpin/dash/-"
+cd "$WORK/hostpin/dash" || exit 1
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 - < "$CPAY"
+cd "$OLDPWD" || exit 1
+hs_refused_early "HS21 a comment payload path of - is refused before ssh -G and any gh call, though the directory holds a usable file of that name and standard input a usable payload" \
+  "post-comment refused: the payload path is -, which names standard input"
+cd "$WORK/hostpin/dash" || exit 1
+hs_lookup_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 - < "$CPAY"
+cd "$OLDPWD" || exit 1
+hs_refused_early "HS21b a review payload path of - is refused on GitHub before ssh -G and any gh call, though the directory holds a usable file of that name and standard input a usable payload" \
+  "post-review refused: the payload path is -, which names standard input"
 refused_with() {
   local l="$1" reason="$2" o rc e; shift 2
   o="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1 bash "$LIB" "$@" 2>"$WORK/hostpin/refused.err")"; rc=$?
@@ -359,6 +371,15 @@ printf '%s' '{"event":"COMMENT","body":"cut off' > "$WORK/hostpin/truncated.json
 refused_with "G19d post-review on GitLab refuses a payload that is not a JSON object in dry-print mode too" \
   "post-review refused: the payload file is not a JSON object" \
   --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 "$WORK/hostpin/truncated.json"
+refused_with "G20 post-comment refuses the payload path - in dry-print mode too" \
+  "post-comment refused: the payload path is -, which names standard input" \
+  --post-comment --provider github --repo-id acme/widget 42 -
+refused_with "G20b post-review on GitHub refuses the payload path - in dry-print mode too" \
+  "post-review refused: the payload path is -, which names standard input" \
+  --post-review --provider github --repo-id acme/widget 42 -
+refused_with "G20c post-review on GitLab refuses the payload path - in dry-print mode too" \
+  "post-review refused: the payload path is -, which names standard input" \
+  --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 -
 
 # ---- normalizers (source + fixtures) ----
 source "$LIB" >/dev/null 2>&1
@@ -926,6 +947,39 @@ else
   fi
 fi
 chmod 600 "$WORK/live/payload-refusal/unreadable.json"
+mkdir -p "$WORK/live/dash/state"
+cp "$WORK/live/payload.json" "$WORK/live/dash/-"
+DASH_OUT="$(cd "$WORK/live/dash" && FAKE_DIR="$WORK/live/dash/state" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 - < "$WORK/live/payload.json" 2>"$WORK/live/dash/stderr")"
+DASH_RC=$?
+DASH_ERR="$(cat "$WORK/live/dash/stderr")"
+if [ "$DASH_RC" -eq 1 ] && [ -z "$DASH_OUT" ] && [ ! -e "$WORK/live/dash/state/calls" ]; then
+  has "LV43 a review payload path of - is refused on GitLab before any glab call, though the directory holds a usable file of that name and standard input a usable payload" \
+    "$DASH_ERR" "post-review refused: the payload path is -, which names standard input"
+else
+  check "LV43 a review payload path of - is refused on GitLab before any glab call, though the directory holds a usable file of that name and standard input a usable payload (rc=$DASH_RC out='$DASH_OUT' calls='$(cat "$WORK/live/dash/state/calls" 2>/dev/null)')" FAIL
+fi
+mkdir -p "$WORK/live/copyfail/bin" "$WORK/live/copyfail/state"
+cat > "$WORK/live/copyfail/bin/mktemp" <<'FAKE'
+#!/bin/bash
+printf '%s\n' "$*" >> "$FAKE_MKTEMP_LOG"
+printf '%s\n' "$FAKE_MKTEMP_DIR/gone/zensu-vcs-payload.FAKE"
+FAKE
+chmod +x "$WORK/live/copyfail/bin/mktemp"
+CF_OUT="$(FAKE_MKTEMP_LOG="$WORK/live/copyfail/mktemp.log" FAKE_MKTEMP_DIR="$WORK/live/copyfail" FAKE_DIR="$WORK/live/copyfail/state" \
+  PATH="$WORK/live/copyfail/bin:$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" 2>"$WORK/live/copyfail/stderr")"
+CF_RC=$?
+CF_ERR="$(cat "$WORK/live/copyfail/stderr")"
+if [ "$CF_RC" -eq 1 ] && [ -z "$CF_OUT" ] && [ -s "$WORK/live/copyfail/mktemp.log" ] && [ ! -e "$WORK/live/copyfail/state/calls" ]; then
+  case "$CF_ERR" in
+    *"cannot be read"*) check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload (err='$CF_ERR')" FAIL ;;
+    *"post-review failed: the payload could not be copied into its temporary file"*) check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload" PASS ;;
+    *) check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload (err='$CF_ERR')" FAIL ;;
+  esac
+else
+  check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload (rc=$CF_RC out='$CF_OUT' mktemp=$(grep -c . "$WORK/live/copyfail/mktemp.log" 2>/dev/null) calls='$(cat "$WORK/live/copyfail/state/calls" 2>/dev/null)')" FAIL
+fi
 
 mkdir -p "$WORK/live/foreign-src" "$WORK/live/foreign"
 if FAKE_DIR="$WORK/live/foreign-src" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \

@@ -273,20 +273,32 @@ keeps its `gh auth status` readiness check.
   `HP21`-`HP30c` drive `--pr-diff` and `--edit-pr-body`: `HP28` requires the diff byte for byte,
   `HP29` that a failed read prints no partial diff, and `HP30`-`HP30c` that the body file reaches
   gh and that an empty or missing one is refused before any gh call, and `EB1` that the refusal
-  names itself on stderr before the login lookup of a GitHub Enterprise host. `ST1` stops a
+  names itself on stderr before the login lookup of a GitHub Enterprise host. `E5`, `E5b`,
+  `EB2` and `EB2b` require that `--edit-pr-body` refuses the body path `-` on both forges, in
+  dry-print mode too and, in a directory that holds a body file of that name with a body on
+  standard input, before `ssh -G` and any gh or glab call; `O9` and `O9b` require the same of
+  `--open-pr` before its dry print, and `O10` and `O10b` before `ssh -G` and any gh or glab call.
+  `O11` requires that the GitLab arm of `--open-pr` reads a body file whose name starts with a
+  dash from that file, never as options followed by standard input, and `O11b` that it refuses
+  a body file it cannot read with a reason before any glab call. `ST1` stops a
   `--pr-diff` read with `TERM` and requires exit status 143, the flag file the fake gh writes
   right before it sends the signal, and both temporary files of `_zensu_vcs_stream` gone.
   `HS10`-`HS16` drive `--post-comment` and both `--fetch-review` reads, and `HS17` and `HS18`
   require that `--post-comment` and `--post-review` refuse an empty payload file with a reason
   and post nothing. `HS19b`-`HS20b` require that both verbs refuse a missing or empty payload
   before `ssh -G` and the login lookup of an SSH GitHub Enterprise remote, against the `HS19`
-  control that a usable payload runs both; `G19`-`G19d` that dry-print mode refuses an empty
-  payload and one that is not a JSON object too; `LV37`-`LV40` that the GitLab arm of
+  control that a usable payload runs both, and `HS21` and `HS21b` that they refuse the payload
+  path `-` there, though the directory holds a usable file of that name and standard input a
+  usable payload; `G19`-`G20c` that dry-print mode refuses an empty payload, one that is not a
+  JSON object and the path `-` too; `LV37`-`LV40` that the GitLab arm of
   `--post-review` refuses a missing or empty payload, one that is not a JSON object (cut short,
   an array, a scalar, `null`) and one it cannot read before any glab call; `LV41` that it
   plans every request from one private copy of the payload, so a payload cut short during the
-  run still posts the review it checked; and `LV42`-`LV42c` that the copy is gone after a post,
-  against the control that glab saw it in `TMPDIR` during the run, and after each refusal.
+  run still posts the review it checked; `LV42`-`LV42c` that the copy is gone after a post,
+  against the control that glab saw it in `TMPDIR` during the run, and after each refusal;
+  `LV43` that the arm refuses the path `-` as `HS21` does; and `LV44`, with a fake `mktemp`
+  that hands out a path in a missing directory, that a copy the arm cannot write fails with
+  its own reason, never the unreadable one, and reaches no glab.
   `NR1`-`NR3` in `test-vcs-publish.sh` hold the
   review normalizer to the requested review id and count each comment once across pages, and
   `GD1`-`GD4` and `GB1`-`GB4` in `test-vcs-pr-ops.sh` drive the GitLab arms with a fake glab: the
@@ -470,7 +482,11 @@ specified in `skills/autopilot/rules/conventions.md`.
     swallowed). It infers the repo from **cwd** (caller `cd "$REPO"`) — no `--repo-id`, matching
     `scout_pr`/`pr_state`. Dry-printable (`ZENSU_VCS_PRINT_ARGV=1`); live `gh` execution untested
     (hermetic argv seam, same stance as Phases 1-3), while glab `--open-pr` runs live (Step 5). `--pr-state` (Phase 2) is REUSED for the pre-push
-    guard — no new state op. Test: `test-vcs-pr-ops.sh` (open-pr assertions O1-O8),
+    guard — no new state op. `--open-pr` refuses the body path `-`, which
+    `gh pr create --body-file` and `cat` read as standard input, before its dry print. Its GitLab
+    arm reads the body file through an input redirect, so a path that starts with a dash names a
+    file, and refuses a body file it cannot read before any glab call. Test: `test-vcs-pr-ops.sh`
+    (open-pr assertions O1-O11b),
     `tests/integration/gitlab/test-vcs-gitlab-live.sh` (GL60, GL61).
   - `autopilot`: Step 0 resolves the driver; Phase 0.A.1 detects the forge (carries
     `PROVIDER`/`REPOID`/`CLIREADY`, `cliReady=false` stop, `unknown` ask); Phase 1 step 3 opens the
@@ -569,7 +585,11 @@ specified in `skills/autopilot/rules/conventions.md`.
     and `--post-review` refuse a missing or empty payload file with a reason before any gh or
     glab call, the host lookup included, and the GitLab arm of `--post-review` also refuses a
     payload it cannot read or that is not a JSON object and plans every request from one
-    private copy of it, so a failed payload build posts nothing;
+    private copy of it, so a failed payload build posts nothing; `--edit-pr-body`,
+    `--post-comment`, `--post-review` and `--open-pr` refuse the path `-`, which names standard
+    input to gh and cat, before the host lookup and the dry print, and a copy the GitLab arm of
+    `--post-review` cannot write into its temporary file fails with its own reason, never the
+    unreadable one;
     `--fetch-review` prints `{id,state,author,submittedAt,url,comments}`,
     `comments` counting the review's inline comments over every page. `skills/pr-team-review`
     runs them for the GitHub anchor-validation diff read (on GitLab the driver's own anchor
@@ -578,9 +598,10 @@ specified in `skills/autopilot/rules/conventions.md`.
     and the PR-state check; `skills/autopilot/rules/pr-open.md` §4 refreshes the body with
     `--edit-pr-body`; `skills/cover` step 0.B reads a pull request's diff with the repo-context
     form on GitHub, which leaves the base repository to gh as before, and with `--repo-id` on
-    GitLab. Tests: `D1`-`D4i`, `E1`-`E4h`, `HP21`-`HP30c`, `EB1`, `ST1`, `PD1`, `PD2`, `GD1`-`GD4`,
-    `GB1`-`GB5`, `SK1`-`SK1d` and `EX1`-`EX2b` in `test-vcs-pr-ops.sh`; `A18`-`A19c`, `G17`-`G19d`,
-    `HS10`-`HS20b`, `LV37`-`LV42c` and `NR1`-`NR3` in `test-vcs-publish.sh`; `GL58`-`GL59b`,
+    GitLab. Tests: `D1`-`D4i`, `E1`-`E5b`, `HP21`-`HP30c`, `EB1`-`EB2b`, `O9`-`O11b`, `ST1`, `PD1`,
+    `PD2`, `GD1`-`GD4`, `GB1`-`GB5`, `SK1`-`SK1d` and `EX1`-`EX2b` in `test-vcs-pr-ops.sh`;
+    `A18`-`A19c`, `G17`-`G20c`, `HS10`-`HS21b`, `LV37`-`LV44` and `NR1`-`NR3` in
+    `test-vcs-publish.sh`; `GL58`-`GL59b`,
     `GL73` and `GL74` in `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
 
 ---

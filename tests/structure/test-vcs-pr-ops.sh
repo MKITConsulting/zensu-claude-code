@@ -109,6 +109,26 @@ fails "O5 open-pr requires --base"       --open-pr --provider github --head feat
 fails "O6 open-pr requires --head"       --open-pr --provider github --base main --title T --body-file "$OPBF"
 fails "O7 open-pr requires --body-file"  --open-pr --provider github --base main --head feat --title T
 fails "O8 open-pr requires --title"      --open-pr --provider github --base main --head feat --body-file "$OPBF"
+RR_ERR="$(mktemp)"
+refused_reason() {
+  local l="$1" reason="$2" o rc e; shift 2
+  o="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1 bash "$LIB" "$@" 2>"$RR_ERR")"; rc=$?
+  e="$(cat "$RR_ERR")"
+  if [ -z "$o" ] && [ "$rc" -eq 1 ]; then
+    case "$e" in
+      *"$reason"*) check "$l" PASS ;;
+      *) check "$l (err='$e')" FAIL ;;
+    esac
+  else
+    check "$l (out='$o' rc=$rc)" FAIL
+  fi
+}
+refused_reason "O9 open-pr github refuses the body path - before its dry print" \
+  "open-pr refused: the body path is -, which names standard input" \
+  --open-pr --provider github --base main --head feat --title T --body-file -
+refused_reason "O9b open-pr gitlab refuses the body path - before its dry print" \
+  "open-pr refused: the body path is -, which names standard input" \
+  --open-pr --provider gitlab --base main --head feat --title T --body-file -
 rm -f "$OPBF"
 
 refused() { local l="$1"; shift; local o rc; o="$(argv "$@" 2>/dev/null)"; rc=$?; { [ -z "$o" ] && [ "$rc" -eq 1 ]; } && check "$l" PASS || check "$l (out='$o' rc=$rc)" FAIL; }
@@ -148,7 +168,13 @@ refused "E4e edit-pr-body github refuses an invalid repo-id"  --edit-pr-body --p
 refused "E4f edit-pr-body refuses an unknown flag"            --edit-pr-body --provider github --title T --body-file "$EBF" 42
 refused "E4g edit-pr-body gitlab refuses an empty body file"  --edit-pr-body --provider gitlab --repo-id grp%2Fproj --body-file "$EBE" 7
 refused "E4h edit-pr-body unknown provider"                   --edit-pr-body --provider bogus --body-file "$EBF" 42
-rm -f "$EBF" "$EBE"
+refused_reason "E5 edit-pr-body github refuses the body path - in dry-print mode too" \
+  "edit-pr-body refused: the body path is -, which names standard input" \
+  --edit-pr-body --provider github --body-file - 42
+refused_reason "E5b edit-pr-body gitlab refuses the body path - in dry-print mode too" \
+  "edit-pr-body refused: the body path is -, which names standard input" \
+  --edit-pr-body --provider gitlab --repo-id grp%2Fproj --body-file - 7
+rm -f "$EBF" "$EBE" "$RR_ERR"
 
 eq    "R1 review-summary github argv" "$(argv --review-summary --provider github 42)" "env GH_HOST=github.com GH_REPO= gh pr view --json reviewDecision,latestReviews -- 42"
 eq    "R1b review-summary github pins the repository given as --repo-id, on the remote's host" "$(argv --review-summary --provider github --repo-id acme/widgets 42)" "gh pr view -R github.com/acme/widgets --json reviewDecision,latestReviews -- 42"
@@ -746,6 +772,12 @@ if [ "$PD_RC" -eq 1 ]; then has "PD2 gitlab --pr-diff names its refusal of a mis
 else check "PD2 gitlab --pr-diff names its refusal of a missing --repo-id (rc=$PD_RC)" FAIL; fi
 
 EB="$(mktemp -d "${TMPDIR:-/tmp}/vcs-edit-refusal.XXXXXXXX")"
+if [ -z "$EB" ] || [ ! -d "$EB" ]; then
+  check "EB setup: a private temporary directory for the refusal fixtures" FAIL
+  echo "----"
+  echo "test-vcs-pr-ops: $PASS PASS / $FAIL FAIL"
+  exit 1
+fi
 mkdir -p "$EB/bin"
 : > "$EB/empty.md"
 gh_host_fake_write "$EB/bin/gh" <<'FAKE'
@@ -759,6 +791,82 @@ if [ "$EB_RC" -eq 1 ] && [ ! -s "$EB/config" ] && [ ! -s "$EB/hosts" ]; then
 else
   check "EB1 an empty body file is refused with a reason before any gh call, the login lookup included (rc=$EB_RC config='$(cat "$EB/config" 2>/dev/null)')" FAIL
 fi
+mkdir -p "$EB/dash"
+printf 'PR body content\n' > "$EB/dash/-"
+cat > "$EB/bin/ssh" <<'FAKE'
+#!/bin/bash
+printf '%s\n' "$*" >> "$EB_SSH_LOG"
+[ "${1:-}" = -G ] || exit 255
+shift
+[ "${1:-}" = -- ] && shift
+printf 'user git\nhostname %s\nport 22\n' "${1:-}"
+FAKE
+cat > "$EB/bin/glab" <<'FAKE'
+#!/bin/bash
+printf '%s\n' "$*" >> "$EB_GLAB_LOG"
+[ -z "${EB_GLAB_URL:-}" ] || { printf '%s\n' "$EB_GLAB_URL"; exit 0; }
+exit 2
+FAKE
+chmod +x "$EB/bin/ssh" "$EB/bin/glab"
+EB_ERR="$(cd "$EB/dash" && env PATH="$EB/bin:$PATH" GH_HOST=example.invalid ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git \
+  FAKE_GH_LOGINS=ghe.example.com FAKE_GH_CONFIG_LOG="$EB/config2" FAKE_GH_HOSTS_LOG="$EB/hosts2" EB_SSH_LOG="$EB/ssh.log" \
+  bash "$LIB" --edit-pr-body --provider github --body-file - 42 2>&1 >/dev/null < "$EB/dash/-")"; EB_RC=$?
+if [ "$EB_RC" -eq 1 ] && [ ! -s "$EB/config2" ] && [ ! -s "$EB/hosts2" ] && [ ! -e "$EB/ssh.log" ]; then
+  has "EB2 a body path of - is refused on GitHub before ssh -G and any gh call, though the directory holds a body file of that name and standard input a body" \
+    "$EB_ERR" "edit-pr-body refused: the body path is -, which names standard input"
+else
+  check "EB2 a body path of - is refused on GitHub before ssh -G and any gh call, though the directory holds a body file of that name and standard input a body (rc=$EB_RC config='$(cat "$EB/config2" 2>/dev/null)' ssh='$(cat "$EB/ssh.log" 2>/dev/null)')" FAIL
+fi
+EB_ERR="$(cd "$EB/dash" && env PATH="$EB/bin:$PATH" EB_GLAB_LOG="$EB/glab.log" \
+  bash "$LIB" --edit-pr-body --provider gitlab --repo-id grp%2Fproj --body-file - 7 2>&1 >/dev/null < "$EB/dash/-")"; EB_RC=$?
+if [ "$EB_RC" -eq 1 ] && [ ! -e "$EB/glab.log" ]; then
+  has "EB2b a body path of - is refused on GitLab before any glab call, though the directory holds a body file of that name and standard input a body" \
+    "$EB_ERR" "edit-pr-body refused: the body path is -, which names standard input"
+else
+  check "EB2b a body path of - is refused on GitLab before any glab call, though the directory holds a body file of that name and standard input a body (rc=$EB_RC glab='$(cat "$EB/glab.log" 2>/dev/null)')" FAIL
+fi
+EB_ERR="$(cd "$EB/dash" && env PATH="$EB/bin:$PATH" GH_HOST=example.invalid ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git \
+  FAKE_GH_LOGINS=ghe.example.com FAKE_GH_CONFIG_LOG="$EB/config3" FAKE_GH_HOSTS_LOG="$EB/hosts3" EB_SSH_LOG="$EB/ssh3.log" \
+  bash "$LIB" --open-pr --provider github --base main --head feat --title T --body-file - 2>&1 >/dev/null < "$EB/dash/-")"; EB_RC=$?
+if [ "$EB_RC" -eq 1 ] && [ ! -s "$EB/config3" ] && [ ! -s "$EB/hosts3" ] && [ ! -e "$EB/ssh3.log" ]; then
+  has "O10 open-pr refuses a body path of - on GitHub before ssh -G and any gh call, though the directory holds a body file of that name and standard input a body" \
+    "$EB_ERR" "open-pr refused: the body path is -, which names standard input"
+else
+  check "O10 open-pr refuses a body path of - on GitHub before ssh -G and any gh call, though the directory holds a body file of that name and standard input a body (rc=$EB_RC config='$(cat "$EB/config3" 2>/dev/null)' ssh='$(cat "$EB/ssh3.log" 2>/dev/null)')" FAIL
+fi
+EB_ERR="$(cd "$EB/dash" && env PATH="$EB/bin:$PATH" EB_GLAB_LOG="$EB/glab3.log" EB_GLAB_URL=https://gitlab.example.com/grp/proj/-/merge_requests/7 \
+  bash "$LIB" --open-pr --provider gitlab --base main --head feat --title T --body-file - 2>&1 >/dev/null < "$EB/dash/-")"; EB_RC=$?
+if [ "$EB_RC" -eq 1 ] && [ ! -e "$EB/glab3.log" ]; then
+  has "O10b open-pr refuses a body path of - on GitLab before any glab call, though the directory holds a body file of that name and standard input a body" \
+    "$EB_ERR" "open-pr refused: the body path is -, which names standard input"
+else
+  check "O10b open-pr refuses a body path of - on GitLab before any glab call, though the directory holds a body file of that name and standard input a body (rc=$EB_RC glab='$(cat "$EB/glab3.log" 2>/dev/null)')" FAIL
+fi
+printf 'Body from the file\n' > "$EB/dash/-n"
+printf 'Body from standard input\n' > "$EB/stdin-body"
+EB_OUT="$(cd "$EB/dash" && env PATH="$EB/bin:$PATH" EB_GLAB_LOG="$EB/glab4.log" EB_GLAB_URL=https://gitlab.example.com/grp/proj/-/merge_requests/7 \
+  bash "$LIB" --open-pr --provider gitlab --base main --head feat --title T --body-file -n 2>/dev/null < "$EB/stdin-body")"; EB_RC=$?
+EB_GL="$(cat "$EB/glab4.log" 2>/dev/null)"
+case "$EB_RC:$EB_OUT:$EB_GL" in
+  "0:https://gitlab.example.com/grp/proj/-/merge_requests/7:"*"--description Body from the file --source-branch feat"*)
+    check "O11 open-pr on GitLab reads a body file whose name starts with a dash from that file, never options and standard input" PASS ;;
+  *) check "O11 open-pr on GitLab reads a body file whose name starts with a dash from that file, never options and standard input (rc=$EB_RC out='$EB_OUT' glab='$EB_GL')" FAIL ;;
+esac
+printf 'Body from the file\n' > "$EB/dash/locked.md"
+chmod 000 "$EB/dash/locked.md"
+if [ -r "$EB/dash/locked.md" ]; then
+  echo "  SKIP  O11b open-pr refuses an unreadable GitLab body file before any glab call (this host reads a mode-000 file)"
+else
+  EB_ERR="$(cd "$EB/dash" && env PATH="$EB/bin:$PATH" EB_GLAB_LOG="$EB/glab5.log" EB_GLAB_URL=https://gitlab.example.com/grp/proj/-/merge_requests/7 \
+    bash "$LIB" --open-pr --provider gitlab --base main --head feat --title T --body-file locked.md 2>&1 >/dev/null < "$EB/stdin-body")"; EB_RC=$?
+  if [ "$EB_RC" -eq 1 ] && [ ! -e "$EB/glab5.log" ]; then
+    has "O11b open-pr refuses an unreadable GitLab body file with a reason before any glab call" \
+      "$EB_ERR" "open-pr refused: the body file cannot be read, so no forge call was made"
+  else
+    check "O11b open-pr refuses an unreadable GitLab body file with a reason before any glab call (rc=$EB_RC glab='$(cat "$EB/glab5.log" 2>/dev/null)')" FAIL
+  fi
+fi
+chmod 600 "$EB/dash/locked.md"
 rm -rf "$EB"
 
 eq "GB5 the driver spells the GitLab JSON-body argv once, in _zensu_vcs_gitlab_send_json" \
@@ -791,7 +899,7 @@ EX_LIST="$(grep '^export -f' "$LIB" | tr ' ' '\n' | grep -E '^_zensu_vcs_[A-Za-z
 EX_ABSENT=""
 for EX_F in _zensu_vcs_stream _zensu_vcs_render_gitlab_diff _zensu_vcs_pr_diff _zensu_vcs_edit_pr_body \
             _zensu_vcs_post_comment _zensu_vcs_normalize_review _zensu_vcs_fetch_review _zensu_vcs_gitlab_send_json \
-            _zensu_vcs_require_file; do
+            _zensu_vcs_require_file _zensu_vcs_require_path; do
   case " $EX_LIST" in *" $EX_F "*) ;; *) EX_ABSENT="$EX_ABSENT $EX_F" ;; esac
 done
 eq "EX1 the export line names the four new verbs and their helpers" "$EX_ABSENT" ""
