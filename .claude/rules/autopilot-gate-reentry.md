@@ -69,7 +69,8 @@ from the gate evidence. The skill body sits on the shrink-only allowlist of
 **The body refresh.** The PR body's `Gates bypassed during build:` line is rendered from the
 plan artifact's build union, and a re-entry fix chain can change that union after the PR exists.
 `rules/pr-open.md` §4 applies the body again on every push to an open PR/MR, the re-entry
-included, with `gh pr edit` or `glab mr update`, because the driver has no body verb.
+included, through the driver's `--edit-pr-body`, which pins the pull request's host on GitHub as
+every other GitHub verb does.
 
 **Version: `minor`.** No key set, payload schema or event type moves. But an older installation
 of the 0.36 lineage refuses two record shapes this change can write: the gate edges
@@ -124,4 +125,3 @@ the next green Windows figure replaces it.
   again and changes nothing else.
 - A `requested` PR-open effect can now sit through CONVERGE and a fix loop; the resume hook and
   the doctor only render its status.
-- The body edit names the forge CLIs directly, because the driver has no body verb.

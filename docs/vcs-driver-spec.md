@@ -146,7 +146,7 @@ run the matching auth check — `gh auth status` / `glab auth status` — to set
 > loop (§7) live in ONE hermetically-testable place instead of being re-encoded in
 > markdown. The skill now issues zero raw `gh`/`glab` publish calls.
 
-### Step 2 — Driver operation set (the interface both forges satisfy)
+### Step 2 — Driver operation set (one interface for both forges; a GitHub-only operation names its GitLab refusal)
 
 | Op | Consumed by | GitHub | GitLab |
 |----|-------------|--------|--------|
@@ -165,6 +165,10 @@ run the matching auth check — `gh auth status` / `glab auth status` — to set
 | `post_review(id, payload)` | team-review | 1× `gh api -X POST …/pulls/<n>/reviews --input` | 1× summary note + N× inline discussions (see §7) |
 | `reconcile_review(id, payload, operation, head)` | team-review (Autopilot-delegated) | 1× marker-tagged `gh api -X POST …/pulls/<n>/reviews --input -`, only when no review carries the operation's marker | the parts of the summary note + N× inline discussions that no note carries yet (see Phase 3) |
 | `reply_and_resolve(thread,body)` | fix | reply comment + GraphQL `resolveReviewThread` | `POST …/discussions/:id/notes` + `PUT …/discussions/:id?resolved=true` |
+| `pr_diff(id)` | team-review (GitHub anchor validation), cover | `gh pr diff -R <host>/<repo-id> --color never -- <n>`, or the repo-context form without `--repo-id` | every page of `GET …/merge_requests/:iid/diffs`, rebuilt as a unified diff |
+| `edit_pr_body(id, body_file)` | autopilot (body refresh) | `gh pr edit -R <host>/<repo-id> --body-file <f> -- <n>`, or the repo-context form without `--repo-id` | 1× `PUT …/merge_requests/:iid` with `{"description": …}` on stdin |
+| `post_comment(id, payload)` | team-review (standalone per-comment fallback) | 1× `gh api -X POST …/pulls/<n>/comments --input` | refused: every GitLab comment is its own discussion through `post_review` |
+| `fetch_review(id, review)` | team-review (verification) | `gh api …/pulls/<n>/reviews/<review>` + every page of `…/reviews/<review>/comments` | refused: GitLab has no review object |
 
 **The GitHub host (`_zensu_vcs_gh_host`).** Every GitHub verb pins the pull request's own
 host, because gh otherwise answers from `GH_HOST` or from the only host it is logged in to:
@@ -296,15 +300,58 @@ keeps its `gh auth status` readiness check.
   whose probe answers none beside a CI marker; `D1b`, `C1b` in `test-vcs-reconcile.sh` and `P4i`
   in `test-doctor.sh` show that
   the older `--detect` drives with SSH remotes reach an identity ssh stub, never the machine's ssh
-  configuration; `HP1`-`HP20b` in `test-vcs-pr-ops.sh`, `HS1`-`HS9`
+  configuration; `HP1`-`HP30c` in `test-vcs-pr-ops.sh`, `HS1`-`HS18`
   in `test-vcs-publish.sh` and `HR1`-`HR5` in `test-vcs-review-marker-reconcile.sh` run every
   GitHub verb under
   `GH_HOST=example.invalid`, against a github.com remote, a GitHub Enterprise remote gh is
   logged in to and one it is not. The GitHub Enterprise run of every GitHub verb sets all four
   token variables and requires that no call to a host accepted for its stored login alone
-  carries one (`HP8b`, `HP12b`-`HP16b`, `HP17`, `HP17b`, `HS6b`-`HS8b`, `HS9`, `HR4b` and `HR5`);
-  `HP18` and `HP19` require that github.com and the `GH_HOST` host keep them; `HP20` and
-  `HP20b` set `GH_REPO=other.example/acme/x`. Every fake gh of those suites starts with the
+  carries one (`HP8b`, `HP12b`-`HP16b`, `HP17`, `HP17b`, `HP26`-`HP26d`, `HS6b`-`HS8b`, `HS9`,
+  `HS14`, `HS14b`, `HR4b` and `HR5`); `HP18`, `HP19`, `HP26e` and `HS14c` require that
+  github.com and the `GH_HOST` host keep them; `HP20`, `HP20b`, `HP27` and `HP27b` set
+  `GH_REPO=other.example/acme/x`.
+  `HP21`-`HP30c` drive `--pr-diff` and `--edit-pr-body`: `HP28` requires the diff byte for byte,
+  `HP29` that a failed read prints no partial diff, and `HP30`-`HP30c` that the body file reaches
+  gh and that an empty or missing one is refused before any gh call, and `EB1` that the refusal
+  names itself on stderr before the login lookup of a GitHub Enterprise host. `E5`, `E5b`,
+  `EB2` and `EB2b` require that `--edit-pr-body` refuses the body path `-` on both forges, in
+  dry-print mode too and, in a directory that holds a body file of that name with a body on
+  standard input, before `ssh -G` and any gh or glab call; `O9` and `O9b` require the same of
+  `--open-pr` before its dry print, and `O10` and `O10b` before `ssh -G` and any gh or glab call.
+  `O11` requires that the GitLab arm of `--open-pr` reads a body file whose name starts with a
+  dash from that file, never as options followed by standard input, and `O11b` that it refuses
+  a body file it cannot read with a reason before any glab call. `ST1` stops a
+  `--pr-diff` read with `TERM` and requires exit status 143, the flag file the fake gh writes
+  right before it sends the signal, and both temporary files of `_zensu_vcs_stream` gone.
+  `HS10`-`HS16` drive `--post-comment` and both `--fetch-review` reads, and `HS17` and `HS18`
+  require that `--post-comment` and `--post-review` refuse an empty payload file with a reason
+  and post nothing. `HS19b`-`HS20b` require that both verbs refuse a missing or empty payload
+  before `ssh -G` and the login lookup of an SSH GitHub Enterprise remote, against the `HS19`
+  control that a usable payload runs both, and `HS21` and `HS21b` that they refuse the payload
+  path `-` there, though the directory holds a usable file of that name and standard input a
+  usable payload; `G19`-`G20c` that dry-print mode refuses an empty payload, one that is not a
+  JSON object and the path `-` too; `LV37`-`LV40` that the GitLab arm of
+  `--post-review` refuses a missing or empty payload, one that is not a JSON object (cut short,
+  an array, a scalar, `null`) and one it cannot read before any glab call; `LV41` that it
+  plans every request from one private copy of the payload, so a payload cut short during the
+  run still posts the review it checked; `LV42`-`LV42c` that the copy is gone after a post,
+  against the control that glab saw it in `TMPDIR` during the run, and after each refusal;
+  `LV43` that the arm refuses the path `-` as `HS21` does; and `LV44`, with a fake `mktemp`
+  that hands out a path in a missing directory, that a copy the arm cannot write fails with
+  its own reason, never the unreadable one, and reaches no glab.
+  `NR1`-`NR3` in `test-vcs-publish.sh` hold the
+  review normalizer to the requested review id and count each comment once across pages, and
+  `GD1`-`GD4` and `GB1`-`GB4` in `test-vcs-pr-ops.sh` drive the GitLab arms with a fake glab: the
+  diff rebuilt from two pages of `/diffs`, a listing refused for a missing or unsafe path, a
+  non-boolean flag or a diff that is not text, a file GitLab withheld as too large or collapsed,
+  and the description sent verbatim in one JSON `PUT`; `PD1` and `PD2` require that `--pr-diff`
+  names its refusal of an unknown provider and of a GitLab call without `--repo-id`. `SK1` in
+  `test-vcs-pr-ops.sh` fails on a `gh api` call or any `gh pr` subcommand spelled in
+  `skills/pr-team-review`, `skills/autopilot`, `skills/cover`, `skills/pr-fix-findings` or
+  `skills/pilot`, except the one line of `skills/autopilot/SKILL.md` that names the
+  `gh pr create` that `--open-pr` runs; `SK1d` requires that exemption to match exactly one line,
+  and `SK1b` and `SK1c` bite the scan on a planted `gh pr diff` and `gh pr list`. `EX1`-`EX2b`
+  require that a child shell sees every function the export line names, the new verbs included. Every fake gh of those suites starts with the
   header of `tests/structure/lib-gh-host-fake.sh`, which selects the host as
   `tests/structure/fixtures/gh-api-stub.js` does (`--hostname`, else `GH_HOST`, else
   github.com, with the host of a `-R HOST/OWNER/REPO`, else of a three-part `GH_REPO`, first for
@@ -321,16 +368,12 @@ keeps its `gh auth status` readiness check.
   answers where the translation's did not is the host `apiBase` names while the verbs pin the
   translation. The walk does not stop at a file system boundary, where git stops unless
   `GIT_DISCOVERY_ACROSS_FILESYSTEM` is set, so a directory on another file system below a work
-  tree, where git finds no repository, reads as inside one, and the verb refuses. The pin covers the
-  driver's verbs only: the gh calls the skills run themselves carry no host, so gh picks one
-  as it would without the driver. They are the diff
-  read for anchor validation in `skills/pr-team-review/rules/github-publish.md`, which
-  publishes the review body alone when that read comes back empty, the fallback `gh pr review`
-  and `gh api -X POST …/comments` writes and the verification reads in the same file and in
-  `skills/pr-team-review/references/publish.md`, `gh pr edit <id> --body-file` in
-  `skills/autopilot/rules/pr-open.md` and `gh pr diff` in `skills/cover/SKILL.md`; driver
-  verbs for a pull request's diff and body, pinned the same way, are the standing fix. A verb
-  takes no `--repo DIR`, so a caller outside the pull request's work tree has only
+  tree, where git finds no repository, reads as inside one, and the verb refuses. `SK1` is a
+  text scan of five skills: it does not see a call spelled another way, such as through a
+  variable that holds `gh`, and `skills/session-trail/SKILL.md` and its copy in
+  `plugins/session-hub/` still tell the reader to run `gh pr view <number>` by hand for a pull
+  request's state; the companion plugin ships no driver, so that read needs a fix of its own in
+  both copies. A verb takes no `--repo DIR`, so a caller outside the pull request's work tree has only
   `ZENSU_VCS_REMOTE`. The host carries no port, as `apiBase` carries none, so a GitHub
   Enterprise server that answers only on a non-default HTTPS port is not reached; `ssh -G`
   evaluates the user's ssh configuration, `Match exec` included, as gh does, for `--detect` as
@@ -479,7 +522,11 @@ specified in `skills/autopilot/rules/conventions.md`.
     swallowed). It infers the repo from **cwd** (caller `cd "$REPO"`) — no `--repo-id`, matching
     `scout_pr`/`pr_state`. Dry-printable (`ZENSU_VCS_PRINT_ARGV=1`); live `gh` execution untested
     (hermetic argv seam, same stance as Phases 1-3), while glab `--open-pr` runs live (Step 5). `--pr-state` (Phase 2) is REUSED for the pre-push
-    guard — no new state op. Test: `test-vcs-pr-ops.sh` (open-pr assertions O1-O8),
+    guard — no new state op. `--open-pr` refuses the body path `-`, which
+    `gh pr create --body-file` and `cat` read as standard input, before its dry print. Its GitLab
+    arm reads the body file through an input redirect, so a path that starts with a dash names a
+    file, and refuses a body file it cannot read before any glab call. Test: `test-vcs-pr-ops.sh`
+    (open-pr assertions O1-O11b),
     `tests/integration/gitlab/test-vcs-gitlab-live.sh` (GL60, GL61).
   - `autopilot`: Step 0 resolves the driver; Phase 0.A.1 detects the forge (carries
     `PROVIDER`/`REPOID`/`CLIREADY`, `cliReady=false` stop, `unknown` ask); Phase 1 step 3 opens the
@@ -563,6 +610,39 @@ specified in `skills/autopilot/rules/conventions.md`.
   - `pilot`: detection, PR lookup, review state, thread count and PR creation go through
     `--detect`, `--locate-pr`, `--review-summary`, `--review-markers`, `--fetch-threads` and
     `--open-pr`.
+- **Phase 6 — DONE**: the skills' own GitHub calls behind pinned driver verbs.
+  - `--pr-diff --provider <p> [--repo-id R] <id>`, `--edit-pr-body --provider <p> [--repo-id R]
+    --body-file <f> <id>`, `--post-comment --provider github --repo-id R <id> <payload>` and
+    `--fetch-review --provider github --repo-id R <id> <review-id>` give the skills a pinned verb
+    for every GitHub call they used to run themselves. `--pr-diff` prints the diff `gh pr diff`
+    serves and nothing when gh fails, and names its refusal of an unknown provider; on GitLab it
+    rebuilds the unified diff from every page of `/diffs`, requires `--repo-id`, and fails closed
+    on a file GitLab withheld as too large or collapsed and on an entry it cannot render.
+    `--edit-pr-body` refuses an empty or missing body file with a reason before any gh or glab
+    call and prints the PR/MR URL; on GitLab it requires `--repo-id` and sends
+    `{"description": …}` in one JSON `PUT` on stdin. `--post-comment` and `--fetch-review` are
+    GitHub-only and refuse `--provider gitlab` with a message that says why; `--post-comment`
+    and `--post-review` refuse a missing or empty payload file with a reason before any gh or
+    glab call, the host lookup included, and the GitLab arm of `--post-review` also refuses a
+    payload it cannot read or that is not a JSON object and plans every request from one
+    private copy of it, so a failed payload build posts nothing; `--edit-pr-body`,
+    `--post-comment`, `--post-review` and `--open-pr` refuse the path `-`, which names standard
+    input to gh and cat, before the host lookup and the dry print, and a copy the GitLab arm of
+    `--post-review` cannot write into its temporary file fails with its own reason, never the
+    unreadable one;
+    `--fetch-review` prints `{id,state,author,submittedAt,url,comments}`,
+    `comments` counting the review's inline comments over every page. `skills/pr-team-review`
+    runs them for the GitHub anchor-validation diff read (on GitLab the driver's own anchor
+    preflight decides), the body-only and per-comment fallbacks, which build each request from
+    the validated payload file so no path or body reaches a command line, the verification read
+    and the PR-state check; `skills/autopilot/rules/pr-open.md` §4 refreshes the body with
+    `--edit-pr-body`; `skills/cover` step 0.B reads a pull request's diff with the repo-context
+    form on GitHub, which leaves the base repository to gh as before, and with `--repo-id` on
+    GitLab. Tests: `D1`-`D4i`, `E1`-`E5b`, `HP21`-`HP30c`, `EB1`-`EB2b`, `O9`-`O11b`, `ST1`, `PD1`,
+    `PD2`, `GD1`-`GD4`, `GB1`-`GB5`, `SK1`-`SK1d` and `EX1`-`EX2b` in `test-vcs-pr-ops.sh`;
+    `A18`-`A19c`, `G17`-`G20c`, `HS10`-`HS21b`, `LV37`-`LV44` and `NR1`-`NR3` in
+    `test-vcs-publish.sh`; `GL58`-`GL59b`,
+    `GL73` and `GL74` in `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
 
 ---
 
@@ -593,8 +673,10 @@ Consequences to spec explicitly:
   (`glab api --method POST projects/:id/merge_requests/:iid/discussions --header 'Content-Type: application/json' --input -`).
   glab up to 1.122 sends an `--input` body without any Content-Type, which GitLab rejects
   with HTTP 415, and glab 1.123 and later refuse bracketed field names such as
-  `-f 'position[base_sha]=…'` in a JSON body, so every GitLab body POST goes through
-  `_zensu_vcs_gitlab_post_json`.
+  `-f 'position[base_sha]=…'` in a JSON body, so every GitLab JSON body write goes through
+  `_zensu_vcs_gitlab_send_json`, which alone spells that argv: the POSTs through
+  `_zensu_vcs_gitlab_post_json`, and the description `PUT` of `--edit-pr-body` directly
+  (`GB5` counts the spelling).
 - **`iid` not `number`**, and project id = **URL-encoded** `namespace/project`.
 
 > **Decision — GitLab "approve" semantics.** Default: post the review as

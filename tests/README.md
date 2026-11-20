@@ -246,10 +246,11 @@ the container and runs `test-vcs-gitlab-live.sh` once per glab version. Each run
 project and merge request with an added, a removed, a context, a renamed and an out-of-diff line,
 drives every verb that reaches glab (`--post-review`, `--fetch-threads`, `--resolve-thread`,
 `--reconcile-review`, `--diff-refs`, `--pr-state`, `--scout-pr`, `--locate-pr`, `--review-markers`,
-`--review-summary` and `--open-pr`), and asserts what GitLab stored through its API. A second
-merge request, opened through `--open-pr`, starts with resolvable discussions only (`GL64`-`GL68`);
-its approval then adds a system note that `--fetch-threads` has to pass over (`GL71`, `GL72`). The summary line
-reads `N PASS / M FAIL / K XFAIL`.
+`--review-summary`, `--pr-diff`, `--open-pr` and `--edit-pr-body`), and asserts what GitLab stored
+through its API. A second merge request, opened through `--open-pr`, starts with resolvable
+discussions only (`GL64`-`GL68`); its approval then adds a system note that `--fetch-threads` has to
+pass over (`GL71`, `GL72`), and `--edit-pr-body` rewrites its description (`GL73`, `GL74`). The
+summary line reads `N PASS / M FAIL / K XFAIL`.
 
 - **Known bugs are XFAIL, strictly.** `xeq` takes the fixed result and the result the reported
   driver bug produces. The bug's result counts as `XFAIL`, the fixed result prints `XPASS` and

@@ -113,6 +113,29 @@ fails "G9 post-review github repo-id needs slash" --post-review --provider githu
 fails "G10 post-review non-numeric id rejected" --post-review --provider github --repo-id acme/widget abc "$PAY"
 fails "G11 post-review unknown provider"        --post-review --provider bogus --repo-id x/y 1 "$PAY"
 
+eq "A18 post-comment github posts one review comment, on the remote's host" \
+  "$(argv --post-comment --provider github --repo-id acme/widget 42 "$PAY")" "gh api -X POST repos/acme/widget/pulls/42/comments --input $PAY --hostname github.com"
+FR_ARGV="$(argv --fetch-review --provider github --repo-id acme/widget 42 7)"
+eq "A19 fetch-review github reads the review, on the remote's host" \
+  "$(printf '%s\n' "$FR_ARGV" | sed -n 1p)" "gh api repos/acme/widget/pulls/42/reviews/7 --hostname github.com"
+eq "A19b fetch-review github reads every page of the review's comments, on the remote's host" \
+  "$(printf '%s\n' "$FR_ARGV" | sed -n 2p)" "gh api --paginate --slurp repos/acme/widget/pulls/42/reviews/7/comments?per_page=100 --hostname github.com"
+eq "A19c fetch-review github makes exactly those two reads" "$(printf '%s\n' "$FR_ARGV" | grep -c .)" "2"
+refused() { local l="$1"; shift; local o rc; o="$(argv "$@" 2>/dev/null)"; rc=$?; { [ -z "$o" ] && [ "$rc" -eq 1 ]; } && check "$l" PASS || check "$l (out='$o' rc=$rc)" FAIL; }
+refused "G17 post-comment refuses gitlab, which posts every comment through --post-review" --post-comment --provider gitlab --repo-id grp%2Fproj 7 "$PAY"
+refused "G17b post-comment requires repo-id"          --post-comment --provider github 42 "$PAY"
+refused "G17c post-comment requires a payload"        --post-comment --provider github --repo-id acme/widget 42
+refused "G17d post-comment rejects a non-numeric id"  --post-comment --provider github --repo-id acme/widget abc "$PAY"
+refused "G17e post-comment refuses an unknown flag"   --post-comment --provider github --repo-id acme/widget --diff-refs-json '{}' 42 "$PAY"
+refused "G17f post-comment requires --provider"       --post-comment --repo-id acme/widget 42 "$PAY"
+refused "G17g post-comment refuses a third positional" --post-comment --provider github --repo-id acme/widget 42 "$PAY" extra
+refused "G18 fetch-review refuses gitlab"             --fetch-review --provider gitlab --repo-id grp%2Fproj 7 1
+refused "G18b fetch-review rejects a non-numeric review id" --fetch-review --provider github --repo-id acme/widget 42 'r?1'
+refused "G18c fetch-review requires a review id"      --fetch-review --provider github --repo-id acme/widget 42
+refused "G18d fetch-review requires a valid repo-id"  --fetch-review --provider github --repo-id noslash 42 7
+refused "G18e fetch-review refuses a third positional" --fetch-review --provider github --repo-id acme/widget 42 7 8
+refused "G18f fetch-review rejects a non-numeric id"  --fetch-review --provider github --repo-id acme/widget x 7
+
 . "$PLUGIN_DIR/tests/structure/lib-gh-host-fake.sh"
 mkdir -p "$WORK/hostpin/bin"
 gh_host_fake_write "$WORK/hostpin/bin/gh" <<'FAKE'
@@ -125,14 +148,35 @@ case "${1:-} ${2:-}" in
     esac
     exit 0 ;;
   "api -X")
-    [ "${3:-}" = POST ] && [ "${4:-}" = repos/acme/widget/pulls/42/reviews ] || exit 2
-    printf '%s' '{"html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-1"}'
+    [ "${3:-}" = POST ] || exit 2
+    case "${4:-}" in
+      repos/acme/widget/pulls/42/reviews)
+        printf '%s' '{"html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-1"}' ;;
+      repos/acme/widget/pulls/42/comments)
+        input="" previous=""
+        for arg in "$@"; do
+          [ "$previous" = --input ] && input="$arg"
+          previous="$arg"
+        done
+        [ -n "$input" ] && [ -s "$input" ] || exit 3
+        [ -z "${FAKE_GH_COMMENT_LOG:-}" ] || cat -- "$input" > "$FAKE_GH_COMMENT_LOG"
+        printf '%s' '{"id":901,"html_url":"https://github.test/acme/widget/pull/42#discussion_r901"}' ;;
+      *) exit 2 ;;
+    esac
+    exit 0 ;;
+  "api repos/acme/widget/pulls/42/reviews/7")
+    printf '%s' '{"id":7,"user":{"login":"zensu-bot"},"state":"COMMENTED","submitted_at":"2026-11-19T10:00:00Z","html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-7"}'
+    exit 0 ;;
+  "api --paginate")
+    [ "${3:-}" = --slurp ] && [ "${4:-}" = 'repos/acme/widget/pulls/42/reviews/7/comments?per_page=100' ] || exit 2
+    printf '%s' '[[{"id":1,"pull_request_review_id":7},{"id":2,"pull_request_review_id":7}],[{"id":3,"pull_request_review_id":7}]]'
     exit 0 ;;
 esac
 exit 2
 FAKE
 cat > "$WORK/hostpin/bin/ssh" <<'FAKE'
 #!/bin/bash
+[ -z "${FAKE_SSH_LOG:-}" ] || printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
 [ "${1:-}" = -G ] || exit 255
 shift
 [ "${1:-}" = -- ] && shift
@@ -147,10 +191,10 @@ hs_run() {
   HS_ERR="$(cat "$WORK/hostpin/err")"; HS_HOSTS="$(cat "$WORK/hostpin/hosts")"; HS_ENV="$(cat "$WORK/hostpin/env")"
 }
 hs_reached() {
-  local label="$1" want="$2" host="$3" count stray
+  local label="$1" want="$2" host="$3" calls="${4:-1}" count stray
   count="$(printf '%s\n' "$HS_HOSTS" | grep -c .)"
   stray="$(printf '%s\n' "$HS_HOSTS" | grep -v "^$host " | grep -c .)"
-  if [ "$HS_RC" -eq 0 ] && [ "$HS_OUT" = "$want" ] && [ "$count" = 1 ] && [ "$stray" = 0 ]; then check "$label" PASS
+  if [ "$HS_RC" -eq 0 ] && [ "$HS_OUT" = "$want" ] && [ "$count" = "$calls" ] && [ "$stray" = 0 ]; then check "$label" PASS
   else check "$label (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS' err='$HS_ERR')" FAIL; fi
 }
 hs_tokens() {
@@ -181,9 +225,186 @@ hs_reached "HS8 --diff-refs reaches the GitHub Enterprise host of the remote" '{
 hs_tokens "HS8b --diff-refs sends no environment token to that host"
 hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
 hs_tokens "HS9 --post-review to a host accepted for its stored login posts without the environment tokens"
+CPAY="$WORK/hostpin/comment.json"
+printf '%s' '{"path":"src/a.js","line":10,"side":"RIGHT","body":"fix `this` for $HOME","commit_id":"abc123"}' > "$CPAY"
+HS_COMMENT_URL='https://github.test/acme/widget/pull/42#discussion_r901'
+HS_REVIEW='{"id":"7","state":"COMMENTED","author":"zensu-bot","submittedAt":"2026-11-19T10:00:00Z","url":"https://github.test/acme/widget/pull/42#pullrequestreview-7","comments":3}'
+hs_run FAKE_GH_COMMENT_LOG="$WORK/hostpin/sent.json" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_reached "HS10 --post-comment posts to github.com while GH_HOST names another host and prints the comment URL" "$HS_COMMENT_URL" github.com
+if cmp -s "$CPAY" "$WORK/hostpin/sent.json"; then
+  check "HS10b --post-comment hands gh the payload file it was given" PASS
+else
+  check "HS10b --post-comment hands gh the payload file it was given" FAIL
+fi
+hs_run "${HS_GHE[@]}" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_reached "HS11 --post-comment posts to the GitHub Enterprise host of the remote" "$HS_COMMENT_URL" ghe.example.com
+hs_run ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com \
+  bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_reached "HS11b --post-comment posts to the GitHub Enterprise host of an SSH remote while GH_HOST names another host" "$HS_COMMENT_URL" ghe.example.com
+hs_run bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+hs_reached "HS12 --fetch-review reads the review and every page of its comments from github.com while GH_HOST names another host" "$HS_REVIEW" github.com 2
+hs_run "${HS_GHE[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+hs_reached "HS13 --fetch-review reads both from the GitHub Enterprise host of the remote" "$HS_REVIEW" ghe.example.com 2
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_tokens "HS14 --post-comment to a host accepted for its stored login posts without the environment tokens"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+if [ "$HS_RC" -eq 0 ] && gh_host_fake_env_all "$HS_ENV" ghe.example.com && [ "$(printf '%s\n' "$HS_ENV" | grep -c .)" = 2 ]; then
+  check "HS14b both --fetch-review reads to that host run without the environment tokens" PASS
+else
+  check "HS14b both --fetch-review reads to that host run without the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
+fi
+hs_run "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+HS_KEPT='github.com GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN'
+if [ "$HS_RC" -eq 0 ] && gh_host_fake_env_all "$HS_ENV" "$HS_KEPT" && [ "$(printf '%s\n' "$HS_ENV" | grep -c .)" = 2 ]; then
+  check "HS14c --fetch-review reads to github.com keep the environment tokens" PASS
+else
+  check "HS14c --fetch-review reads to github.com keep the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
+fi
+hs_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/no-such-comment.json"
+if [ "$HS_RC" -eq 1 ] && [ -z "$HS_HOSTS" ]; then
+  check "HS15 a missing comment payload is refused before any gh api call" PASS
+else
+  check "HS15 a missing comment payload is refused before any gh api call (rc=$HS_RC hosts='$HS_HOSTS')" FAIL
+fi
+hs_run FAKE_GH_PR_HOST=elsewhere.example bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+if [ "$HS_RC" -ne 0 ] && [ -z "$HS_OUT" ]; then
+  case "$HS_ERR" in
+    *"fetch-review"*"error connecting to github.com"*) check "HS16 a failed review read fails the verb with gh's message" PASS ;;
+    *) check "HS16 a failed review read fails the verb with gh's message (err='$HS_ERR')" FAIL ;;
+  esac
+else
+  check "HS16 a failed review read fails the verb with gh's message (rc=$HS_RC out='$HS_OUT')" FAIL
+fi
+: > "$WORK/hostpin/empty.json"
+hs_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+if [ "$HS_RC" -eq 1 ] && [ -z "$HS_OUT" ] && [ -z "$HS_HOSTS" ]; then
+  case "$HS_ERR" in
+    *"post-comment refused: the payload file is missing or empty"*) check "HS17 an empty comment payload is refused with a reason and posts nothing" PASS ;;
+    *) check "HS17 an empty comment payload is refused with a reason and posts nothing (err='$HS_ERR')" FAIL ;;
+  esac
+else
+  check "HS17 an empty comment payload is refused with a reason and posts nothing (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS')" FAIL
+fi
+hs_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+if [ "$HS_RC" -eq 1 ] && [ -z "$HS_OUT" ] && [ -z "$HS_HOSTS" ]; then
+  case "$HS_ERR" in
+    *"post-review refused: the payload file is missing or empty"*) check "HS18 an empty review payload is refused with a reason and posts nothing" PASS ;;
+    *) check "HS18 an empty review payload is refused with a reason and posts nothing (err='$HS_ERR')" FAIL ;;
+  esac
+else
+  check "HS18 an empty review payload is refused with a reason and posts nothing (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS')" FAIL
+fi
+HS_LOOKUP=(ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com
+  FAKE_GH_CONFIG_LOG="$WORK/hostpin/config" FAKE_SSH_LOG="$WORK/hostpin/ssh")
+hs_lookup_run() {
+  : > "$WORK/hostpin/config"; : > "$WORK/hostpin/ssh"
+  hs_run "${HS_LOOKUP[@]}" "$@"
+  HS_CONFIG="$(cat "$WORK/hostpin/config")"; HS_SSH="$(cat "$WORK/hostpin/ssh")"
+}
+hs_refused_early() {
+  local label="$1" reason="$2"
+  if [ "$HS_RC" -eq 1 ] && [ -z "$HS_OUT" ] && [ -z "$HS_HOSTS" ] && [ -z "$HS_CONFIG" ] && [ -z "$HS_SSH" ]; then
+    case "$HS_ERR" in
+      *"$reason"*) check "$label" PASS ;;
+      *) check "$label (err='$HS_ERR')" FAIL ;;
+    esac
+  else
+    check "$label (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS' config='$HS_CONFIG' ssh='$HS_SSH')" FAIL
+  fi
+}
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+if [ "$HS_RC" -eq 0 ] && [ "$HS_CONFIG" = ghe.example.com ] && [ "$HS_SSH" = '-G -- ghe.example.com' ]; then
+  check "HS19 control: a usable comment payload for an SSH GitHub Enterprise remote runs ssh -G and the login lookup" PASS
+else
+  check "HS19 control: a usable comment payload for an SSH GitHub Enterprise remote runs ssh -G and the login lookup (rc=$HS_RC config='$HS_CONFIG' ssh='$HS_SSH' err='$HS_ERR')" FAIL
+fi
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+hs_refused_early "HS19b an empty comment payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-comment refused: the payload file is missing or empty"
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/no-such-comment.json"
+hs_refused_early "HS19c a missing comment payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-comment refused: the payload file is missing or empty"
+hs_lookup_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+hs_refused_early "HS20 an empty review payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-review refused: the payload file is missing or empty"
+hs_lookup_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/no-such-review.json"
+hs_refused_early "HS20b a missing review payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-review refused: the payload file is missing or empty"
+mkdir -p "$WORK/hostpin/dash"
+cp "$CPAY" "$WORK/hostpin/dash/-"
+cd "$WORK/hostpin/dash" || exit 1
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 - < "$CPAY"
+cd "$OLDPWD" || exit 1
+hs_refused_early "HS21 a comment payload path of - is refused before ssh -G and any gh call, though the directory holds a usable file of that name and standard input a usable payload" \
+  "post-comment refused: the payload path is -, which names standard input"
+cd "$WORK/hostpin/dash" || exit 1
+hs_lookup_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 - < "$CPAY"
+cd "$OLDPWD" || exit 1
+hs_refused_early "HS21b a review payload path of - is refused on GitHub before ssh -G and any gh call, though the directory holds a usable file of that name and standard input a usable payload" \
+  "post-review refused: the payload path is -, which names standard input"
+refused_with() {
+  local l="$1" reason="$2" o rc e; shift 2
+  o="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1 bash "$LIB" "$@" 2>"$WORK/hostpin/refused.err")"; rc=$?
+  e="$(cat "$WORK/hostpin/refused.err")"
+  if [ -z "$o" ] && [ "$rc" -eq 1 ]; then
+    case "$e" in
+      *"$reason"*) check "$l" PASS ;;
+      *) check "$l (err='$e')" FAIL ;;
+    esac
+  else
+    check "$l (out='$o' rc=$rc)" FAIL
+  fi
+}
+refused_with "G19 post-comment refuses an empty payload file in dry-print mode too" \
+  "post-comment refused: the payload file is missing or empty" \
+  --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+refused_with "G19b post-review on GitHub refuses an empty payload file in dry-print mode too" \
+  "post-review refused: the payload file is missing or empty" \
+  --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+refused_with "G19c post-review on GitLab refuses an empty payload file in dry-print mode too" \
+  "post-review refused: the payload file is missing or empty" \
+  --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 "$WORK/hostpin/empty.json"
+printf '%s' '{"event":"COMMENT","body":"cut off' > "$WORK/hostpin/truncated.json"
+refused_with "G19d post-review on GitLab refuses a payload that is not a JSON object in dry-print mode too" \
+  "post-review refused: the payload file is not a JSON object" \
+  --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 "$WORK/hostpin/truncated.json"
+refused_with "G20 post-comment refuses the payload path - in dry-print mode too" \
+  "post-comment refused: the payload path is -, which names standard input" \
+  --post-comment --provider github --repo-id acme/widget 42 -
+refused_with "G20b post-review on GitHub refuses the payload path - in dry-print mode too" \
+  "post-review refused: the payload path is -, which names standard input" \
+  --post-review --provider github --repo-id acme/widget 42 -
+refused_with "G20c post-review on GitLab refuses the payload path - in dry-print mode too" \
+  "post-review refused: the payload path is -, which names standard input" \
+  --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 -
 
 # ---- normalizers (source + fixtures) ----
 source "$LIB" >/dev/null 2>&1
+
+nr() { { printf '%s' "$2"; printf '\0'; printf '%s' "$3"; } | _zensu_vcs_normalize_review "$1"; }
+NR_OK='{"id":7,"user":{"login":"alice"},"state":"COMMENTED","submitted_at":"2026-11-19T10:00:00Z","html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-7"}'
+eq "NR1 fetch-review normalizes the review and counts every page of its comments" \
+  "$(nr 7 "$NR_OK" '[[{"id":1,"pull_request_review_id":7},{"id":2}],[{"id":3,"pull_request_review_id":7}]]')" \
+  '{"id":"7","state":"COMMENTED","author":"alice","submittedAt":"2026-11-19T10:00:00Z","url":"https://github.test/acme/widget/pull/42#pullrequestreview-7","comments":3}'
+eq "NR2 a review without an author, a submission time or inline comments counts zero" \
+  "$(nr 7 '{"id":7,"user":null,"state":"APPROVED","submitted_at":null,"html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-7"}' '[[]]')" \
+  '{"id":"7","state":"APPROVED","author":"","submittedAt":"","url":"https://github.test/acme/widget/pull/42#pullrequestreview-7","comments":0}'
+eq "NR2b a comment listed on two pages counts once" \
+  "$(nr 7 "$NR_OK" '[[{"id":1}],[{"id":1},{"id":2}]]' | node -e 'var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){try{process.stdout.write(String(JSON.parse(s).comments));}catch(_){process.stdout.write("unparsed");}});')" "2"
+NR_BAD=""
+nr 7 "$NR_OK" '[[{"id":1}]]' >/dev/null 2>&1 || NR_BAD="$NR_BAD control-refused"
+nr 7 'not json' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD review-not-json"
+nr 8 "$NR_OK" '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD other-review-id"
+nr 7 '{"id":7,"user":{"login":"a"},"state":"COMMENTED","submitted_at":null,"html_url":"ftp://github.test/x"}' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD non-http-url"
+nr 7 '{"id":7,"user":{"login":"a"},"state":"","submitted_at":null,"html_url":"https://github.test/x"}' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD empty-state"
+nr 7 '{"id":7,"user":{"login":5},"state":"COMMENTED","submitted_at":null,"html_url":"https://github.test/x"}' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD author-not-text"
+nr 7 "$NR_OK" '{"id":1}' >/dev/null 2>&1 && NR_BAD="$NR_BAD comments-not-pages"
+nr 7 "$NR_OK" '[[{"id":"one"}]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD comment-id-not-integer"
+nr 7 "$NR_OK" '[[1,2]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD comment-not-object"
+nr 7 "$NR_OK" '[[{"id":1,"pull_request_review_id":8}]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD comment-of-another-review"
+printf '%s' "$NR_OK" | _zensu_vcs_normalize_review 7 >/dev/null 2>&1 && NR_BAD="$NR_BAD no-comments-document"
+[ -z "$NR_BAD" ] && check "NR3 the fetch-review normalizer accepts the control and fails closed on every malformed answer" PASS \
+  || check "NR3 the fetch-review normalizer:$NR_BAD" FAIL
 
 GH_SCOUT='{"number":42,"url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","headRefName":"feat","baseRefName":"main","author":{"login":"alice"},"labels":[{"name":"bug"},{"name":"p1"}]}'
 eq "N1 normalize_scout github" "$(printf '%s' "$GH_SCOUT" | _zensu_vcs_normalize_scout github)" '{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","base":"main","head":"feat","author":"alice","labels":["bug","p1"]}'
@@ -348,6 +569,8 @@ cat > "$WORK/live/bin/glab" <<'FAKE'
 #!/bin/bash
 set -u
 printf '%s\n' "$*" >> "$FAKE_DIR/calls"
+[ -z "${FAKE_CLOBBER:-}" ] || printf '%s' '{"event":"COMMENT","body":"cut' > "$FAKE_CLOBBER"
+[ -z "${FAKE_TMP_SEEN:-}" ] || ls "${TMPDIR:-/tmp}"/zensu-vcs-payload.* >> "$FAKE_TMP_SEEN" 2>/dev/null
 path="${*: -1}"
 if [ "${1:-}" = api ] && [ "$path" = 'projects/grp%2Fproj/merge_requests/7' ]; then
   printf '%s' '{"diff_refs":{"base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0"}}'
@@ -630,6 +853,130 @@ else
 fi
 has "LV35b the unparseable answer is reported under the post-review publisher id label" "$(cat "$WORK/live/user/stderr-html" 2>/dev/null)" "zensu-vcs: post-review publisher id failed: the glab api user answer is not JSON"
 eq "LV36 a refused publisher lookup posts nothing" "$(grep -c -- '--method POST' "$WORK/live/user/calls" || true)" "0"
+
+mkdir -p "$WORK/live/payload-refusal"
+: > "$WORK/live/payload-refusal/empty.json"
+printf '%s' '{"event":"COMMENT","body":"cut off' > "$WORK/live/payload-refusal/truncated.json"
+printf '%s' '[{"event":"COMMENT","body":"in an array"}]' > "$WORK/live/payload-refusal/array.json"
+lv_refused() {
+  local label="$1" reason="$2" payload="$3" state="$WORK/live/payload-refusal/$4" out rc err
+  mkdir -p "$state"
+  out="$(FAKE_DIR="$state" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$payload" 2>"$state/stderr")"
+  rc=$?
+  err="$(cat "$state/stderr")"
+  if [ "$rc" -eq 1 ] && [ -z "$out" ] && [ ! -e "$state/calls" ]; then
+    case "$err" in
+      *"$reason"*) check "$label" PASS ;;
+      *) check "$label (err='$err')" FAIL ;;
+    esac
+  else
+    check "$label (rc=$rc out='$out' calls='$(cat "$state/calls" 2>/dev/null)')" FAIL
+  fi
+}
+lv_refused "LV37 an empty review payload on GitLab is refused with a reason before any glab call" \
+  "post-review refused: the payload file is missing or empty" "$WORK/live/payload-refusal/empty.json" empty
+lv_refused "LV38 a missing review payload on GitLab is refused with a reason before any glab call" \
+  "post-review refused: the payload file is missing or empty" "$WORK/live/payload-refusal/no-such.json" missing
+lv_refused "LV39 a truncated review payload on GitLab is refused as not a JSON object before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/truncated.json" truncated
+lv_refused "LV39b a review payload that is a JSON array is refused on GitLab before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/array.json" array
+printf '%s' '42' > "$WORK/live/payload-refusal/scalar.json"
+printf '%s' 'null' > "$WORK/live/payload-refusal/null.json"
+lv_refused "LV39c a review payload that is a JSON scalar is refused on GitLab before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/scalar.json" scalar
+lv_refused "LV39d a review payload that is JSON null is refused on GitLab before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/null.json" null
+cp "$WORK/live/payload.json" "$WORK/live/payload-refusal/unreadable.json"
+chmod 000 "$WORK/live/payload-refusal/unreadable.json"
+if [ -r "$WORK/live/payload-refusal/unreadable.json" ]; then
+  echo "  SKIP  LV40 an unreadable review payload is refused as unreadable (this host reads a mode-000 file)"
+else
+  lv_refused "LV40 an unreadable review payload is refused on GitLab as unreadable before any glab call" \
+    "post-review refused: the payload file cannot be read" "$WORK/live/payload-refusal/unreadable.json" unreadable
+fi
+chmod 600 "$WORK/live/payload-refusal/unreadable.json"
+mkdir -p "$WORK/live/clobber"
+cp "$WORK/live/payload.json" "$WORK/live/clobber/payload.json"
+FAKE_CLOBBER="$WORK/live/clobber/payload.json" FAKE_DIR="$WORK/live/clobber" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/clobber/payload.json" >/dev/null 2>&1
+CLOBBER_RC=$?
+CLOBBER_POSTED="$(cat "$WORK/live/clobber/posted" 2>/dev/null)"
+if [ "$CLOBBER_RC" -eq 0 ] && [ "$(grep -c -- '--method POST' "$WORK/live/clobber/calls" 2>/dev/null)" = 6 ] \
+   && [ "$(cat "$WORK/live/clobber/payload.json")" = '{"event":"COMMENT","body":"cut' ]; then
+  has "LV41 a payload cut short by the first glab call still posts the review that was checked, from one private copy" \
+    "$(nth_json "$CLOBBER_POSTED" 1 request.body)" "Live review body."
+else
+  check "LV41 a payload cut short by the first glab call still posts the review that was checked, from one private copy (rc=$CLOBBER_RC posts=$(grep -c -- '--method POST' "$WORK/live/clobber/calls" 2>/dev/null))" FAIL
+fi
+mkdir -p "$WORK/live/tmp-post/tmp" "$WORK/live/tmp-refuse/tmp" "$WORK/live/tmp-unreadable/tmp"
+TMPDIR="$WORK/live/tmp-post/tmp" FAKE_TMP_SEEN="$WORK/live/tmp-post/seen" FAKE_DIR="$WORK/live/tmp-post" PATH="$WORK/live/bin:$PATH" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1
+TMP_RC=$?
+TMP_LEFT="$(find "$WORK/live/tmp-post/tmp" -name 'zensu-vcs-payload.*' | grep -c .)"
+if [ "$TMP_RC" -eq 0 ] && [ -s "$WORK/live/tmp-post/seen" ] && [ "$TMP_LEFT" = 0 ]; then
+  check "LV42 a live GitLab post removes its private payload copy, which glab saw in TMPDIR while the run lasted" PASS
+else
+  check "LV42 a live GitLab post removes its private payload copy, which glab saw in TMPDIR while the run lasted (rc=$TMP_RC seen=$(grep -c . "$WORK/live/tmp-post/seen" 2>/dev/null) left=$TMP_LEFT)" FAIL
+fi
+TMPDIR="$WORK/live/tmp-refuse/tmp" FAKE_DIR="$WORK/live/tmp-refuse" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload-refusal/truncated.json" >/dev/null 2>&1
+TMP_RC=$?
+TMP_LEFT="$(find "$WORK/live/tmp-refuse/tmp" -name 'zensu-vcs-payload.*' | grep -c .)"
+if [ "$TMP_RC" -eq 1 ] && [ "$TMP_LEFT" = 0 ]; then
+  check "LV42b a payload refused as not a JSON object leaves no private copy in TMPDIR" PASS
+else
+  check "LV42b a payload refused as not a JSON object leaves no private copy in TMPDIR (rc=$TMP_RC left=$TMP_LEFT)" FAIL
+fi
+chmod 000 "$WORK/live/payload-refusal/unreadable.json"
+if [ -r "$WORK/live/payload-refusal/unreadable.json" ]; then
+  echo "  SKIP  LV42c an unreadable payload leaves no private copy in TMPDIR (this host reads a mode-000 file)"
+else
+  TMPDIR="$WORK/live/tmp-unreadable/tmp" FAKE_DIR="$WORK/live/tmp-unreadable" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload-refusal/unreadable.json" >/dev/null 2>&1
+  TMP_RC=$?
+  TMP_LEFT="$(find "$WORK/live/tmp-unreadable/tmp" -name 'zensu-vcs-payload.*' | grep -c .)"
+  if [ "$TMP_RC" -eq 1 ] && [ "$TMP_LEFT" = 0 ]; then
+    check "LV42c an unreadable payload leaves no private copy in TMPDIR" PASS
+  else
+    check "LV42c an unreadable payload leaves no private copy in TMPDIR (rc=$TMP_RC left=$TMP_LEFT)" FAIL
+  fi
+fi
+chmod 600 "$WORK/live/payload-refusal/unreadable.json"
+mkdir -p "$WORK/live/dash/state"
+cp "$WORK/live/payload.json" "$WORK/live/dash/-"
+DASH_OUT="$(cd "$WORK/live/dash" && FAKE_DIR="$WORK/live/dash/state" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 - < "$WORK/live/payload.json" 2>"$WORK/live/dash/stderr")"
+DASH_RC=$?
+DASH_ERR="$(cat "$WORK/live/dash/stderr")"
+if [ "$DASH_RC" -eq 1 ] && [ -z "$DASH_OUT" ] && [ ! -e "$WORK/live/dash/state/calls" ]; then
+  has "LV43 a review payload path of - is refused on GitLab before any glab call, though the directory holds a usable file of that name and standard input a usable payload" \
+    "$DASH_ERR" "post-review refused: the payload path is -, which names standard input"
+else
+  check "LV43 a review payload path of - is refused on GitLab before any glab call, though the directory holds a usable file of that name and standard input a usable payload (rc=$DASH_RC out='$DASH_OUT' calls='$(cat "$WORK/live/dash/state/calls" 2>/dev/null)')" FAIL
+fi
+mkdir -p "$WORK/live/copyfail/bin" "$WORK/live/copyfail/state"
+cat > "$WORK/live/copyfail/bin/mktemp" <<'FAKE'
+#!/bin/bash
+printf '%s\n' "$*" >> "$FAKE_MKTEMP_LOG"
+printf '%s\n' "$FAKE_MKTEMP_DIR/gone/zensu-vcs-payload.FAKE"
+FAKE
+chmod +x "$WORK/live/copyfail/bin/mktemp"
+CF_OUT="$(FAKE_MKTEMP_LOG="$WORK/live/copyfail/mktemp.log" FAKE_MKTEMP_DIR="$WORK/live/copyfail" FAKE_DIR="$WORK/live/copyfail/state" \
+  PATH="$WORK/live/copyfail/bin:$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" 2>"$WORK/live/copyfail/stderr")"
+CF_RC=$?
+CF_ERR="$(cat "$WORK/live/copyfail/stderr")"
+if [ "$CF_RC" -eq 1 ] && [ -z "$CF_OUT" ] && [ -s "$WORK/live/copyfail/mktemp.log" ] && [ ! -e "$WORK/live/copyfail/state/calls" ]; then
+  case "$CF_ERR" in
+    *"cannot be read"*) check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload (err='$CF_ERR')" FAIL ;;
+    *"post-review failed: the payload could not be copied into its temporary file"*) check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload" PASS ;;
+    *) check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload (err='$CF_ERR')" FAIL ;;
+  esac
+else
+  check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload (rc=$CF_RC out='$CF_OUT' mktemp=$(grep -c . "$WORK/live/copyfail/mktemp.log" 2>/dev/null) calls='$(cat "$WORK/live/copyfail/state/calls" 2>/dev/null)')" FAIL
+fi
 
 mkdir -p "$WORK/live/foreign-src" "$WORK/live/foreign"
 if FAKE_DIR="$WORK/live/foreign-src" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \

@@ -143,9 +143,10 @@ The summary note and the discussions use the same Markdown as the GitHub path
 - **Suggestions.** Spell the fence info string `suggestion:-0+0`. The offsets count lines
   relative to the commented line, and the driver posts every inline discussion at one line,
   so emit single-line suggestions only — never a multi-line one on GitLab. The conditions in
-  `rules/github-publish.md` § Suggested changes apply unchanged. GitLab applies a suggestion
-  only in a diff thread: when the driver degrades a finding to a positionless discussion, the
-  author can no longer apply its block from the merge request.
+  `rules/github-publish.md` § Suggested changes apply, the anchor condition in the GitLab form
+  stated there. GitLab applies a suggestion only in a diff thread: when the driver degrades a
+  finding to a positionless discussion, the author can no longer apply its block from the
+  merge request.
 - **Permalinks.** File links take the form `<base>/-/blob/<sha>/<path>#L<a>-<b>` and the
   commit link `<base>/-/commit/<sha>`, where `<base>` is the MR `url` without its trailing
   `/-/merge_requests/<iid>` (`rules/workflow.md` Phase D).
