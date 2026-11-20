@@ -476,10 +476,9 @@ every other row follows `rules/drivers.md` section 8.
 - Add each capture to the evidence report right after you inspected it, and write each matrix
   row when it is finished (`rules/report.md` sections 2 and 3).
 
-Parallel execution is allowed only when each lane has its own run directory, run config and
-`zensu-verify` session, its own fixtures, and no shared mutable state. Otherwise execute
-sequentially. Parallelism never
-reduces the evidence requirements.
+Parallel execution is allowed only when no evidence report is begun and each lane has its own run
+directory, run config and `zensu-verify` session, its own fixtures, and no shared mutable state.
+Otherwise execute sequentially. Parallelism never reduces the evidence requirements.
 
 ## Phase 4 — Cleanup (always)
 
@@ -501,9 +500,8 @@ Run cleanup on PASS, FAIL, cancellation, and setup failure:
 
 ## Phase 5 — Report
 
-Render the evidence report first, as `rules/report.md` section 4 says, then write the report to
-the user in the format of its section 5, with the report's location on the line right above the
-final verdict line.
+Render the evidence report first (`rules/report.md` section 4), then write the report to the user
+in the format of its section 5, its location right above the final verdict line.
 
 Verdict rules:
 

@@ -267,7 +267,7 @@ before the first capture with `mkdir -p "$RUN_DIR/shots"`:
   header or a body never enters.
 - `cli`, `library`, `async`, `iac` and `custom`: the bounded output a row asserts, written to a
   file beneath `$RUN_DIR` and added as `--kind text`; a log signal only as
-  `--report-add --report <id> --kind signal --source log --class <class>` with a sanitized
+  `--report-add --report <id> --kind signal --source log --class '<class>'` with a sanitized
   message on stdin.
 - chain mode: an observed check as `--report-add --report <id> --kind run --evidence-run er1_…`,
   the id `--evidence-run --scope acceptance` printed.

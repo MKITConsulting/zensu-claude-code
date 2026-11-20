@@ -9,6 +9,7 @@ paths:
   - "docs/verify-feature-evidence-report-spec.md"
   - "skills/verify-feature/rules/report.md"
   - "tests/structure/test-verify-feature-skill.sh"
+  - "docs/verify-feature.md"
 ---
 
 # Evidence Report Core (`hooks/lib/evidence-report-v1.js` + `zensu-log.sh --report-*`)
@@ -285,9 +286,15 @@ pointers, the verdict rules and the verdict line. A begin that exits 1 or 2 leav
 with its verdict unchanged and `Evidence report: none — <cause>` above the verdict line, exit 3
 leaves no location line, and the skill never edits an ignore file to satisfy a remedy: the plugin
 writes no consuming repository's `.gitignore`. A `verdict.*` refusal is answered with the verdict
-the core's remedy opens with (`state FAIL` or `state PARTIAL`), stated in the chat report too, so
-the report and the chat never disagree; `criterion.no-image` is answered by linking an inspected
-image through one more row, else in matrix mode by a `skip` row and PARTIAL. Only a file beneath
+the core's remedy opens with (`state FAIL` or `state PARTIAL`), with one exception: a criterion the
+message lists as `missing` in matrix mode that the run passed gets its row first, because only a
+criterion no row names can still change state; the verdict that renders is stated in the chat
+report too, so the report and the chat never disagree. `criterion.no-image` is answered by linking
+an inspected image through one more row, else in matrix mode by a `skip` row and PARTIAL. While a
+report is begun the run drives every row in one lane (`SKILL.md` Phase 3), because `--report-add`
+takes only files beneath the report's own run directory and each lane has a run directory of its
+own; one report per lane, which splits a run's evidence over several reports, and a core that
+accepts files from sibling lane directories, which widens the file boundary, were rejected. Only a file beneath
 the run directory enters, so a host tool's in-conversation screenshot needs a file capture beside
 it; the capture commands are in `rules/drivers.md` §8 and `rules/browser-verification.md` §5, and
 a browser screenshot is 1440 by 900 at scale 1 after `resize` (measured, spec Appendix A). Rule
@@ -319,11 +326,19 @@ in the same commit. The wiring adds: `VERB_ARGUMENTS` and the report arm's flag 
 the opening words of the `verdict.*` remedies and the `criterion.no-image` remedy, which
 `rules/report.md` §4 follows (`P11e`); begin's exit-3 line (`P11d`); `ROUTE_RE`, which admits
 shell characters in a request path, so every `--path` value in the three rule files stays
-single-quoted (`P11g`); `ALLOWED_COMMANDS` of
-`verify-consent-v1.js`, which must keep admitting `resize` and `screenshot --full-page` (`P11f`);
-the begin, add, step and render blocks of `rules/report.md`, which `R22` in
-`tests/structure/test-evidence-report.sh` runs as written; and the `verify-feature` entry of
-`tests/structure/test-skill-text-budget.sh`.
+single-quoted, and so does every `--recipe`, `--origin` and `--class` value, while the chain-mode
+`--log` value is double-quoted like `--run-dir`, because it is an absolute path below the project
+root, which `zensu-log.sh --project-root` screens for the four characters double quotes cannot
+carry and which may hold an apostrophe (`P11g`);
+`evaluate` of `verify-consent-v1.js`, which must keep admitting the documented `resize 1440 900`,
+`screenshot` and `screenshot --full-page` calls (`P11f`); the begin, add, step and render blocks
+of `rules/report.md`, which `R22` in `tests/structure/test-evidence-report.sh` runs as written and
+`R22a` judges through `decide` of `verify-auth-guard-v1.js` and `evaluate`, neither of which may
+deny or ask; the `criterion.no-image` and `verdict.contradiction` answers of `rules/report.md`
+§4, which `R23` runs against the core; the `verify-feature` entry of
+`tests/structure/test-skill-text-budget.sh`; and section 7 of `docs/verify-feature.md`, which
+restates the retention defaults (`keep` 30, `maxBytes` 2 GiB, the 14-day spare of an unrendered
+report), the PASS refusals with the scope of `verdict.tree-changed`, and the one-lane rule.
 
 **Version: `patch`.** A new module, new verbs, a new private store and sidecar, and a new config
 subtree read permissively. No context-record or workflow-state field moves, no strict key set an

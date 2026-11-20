@@ -730,6 +730,12 @@ the run sends it nowhere ([the evidence report spec](verify-feature-evidence-rep
   `Evidence report: <path>/index.html`. The store is `evidence-report/v1/` in the plugin's data
   directory, unless your user configuration's `evidence.report.dir` names another directory
   ([Evidence Reports](configuration.md#evidence-reports)).
+- **How long it stays.** The store keeps the newest 30 reports of each repository
+  (`evidence.report.keep`) and at most 2 GiB in all (`evidence.report.maxBytes`); each
+  `--report-begin` deletes the oldest reports beyond those limits, sparing an unrendered report
+  touched in the last 14 days. No verb deletes one report: remove its `<id>` directory and the
+  `<id>.binding.json` beside it in the store. Setting `evidence.report.enabled` to `false` deletes
+  none of the reports already stored.
 - **What it holds.** The screenshots and text captures the run wrote beneath its run directory and
   inspected, the requests and console signals of an unauthenticated target, and every matrix row
   with its expected and observed text. A screenshot that a host tool returns only to the
@@ -739,8 +745,19 @@ the run sends it nowhere ([the evidence report spec](verify-feature-evidence-rep
   As a backstop a text that matches a secret pattern is refused and local paths are replaced
   before anything is stored, but nothing scans a screenshot or finds personal data in free text,
   so a signed-in run uses the dedicated test account with synthetic data of section 6.
-- **Its verdict is the run's verdict.** The report refuses a verdict its own rows contradict, and
-  the run then states the verdict the refusal names, in the report and in the chat alike.
+- **Its verdict is the run's verdict.** The report refuses a verdict its own records contradict,
+  and the run then renders the verdict the refusal names, unless it only lacked the row of a
+  criterion it passed, which it writes first; the report and the chat state the same verdict. A
+  PASS is refused when a criterion or a P0 row failed or did not pass (`verdict.contradiction`),
+  when nothing passed (`verdict.empty`), in a local run in matrix mode when the working tree
+  changed between begin and render or could not be fingerprinted (`verdict.tree-changed`; a file
+  that a runtime, fixture or authentication step writes outside `.zensu/` and git does not ignore
+  is enough, and a project that was outside git at begin is exempt), and when a criterion passed
+  through `browser`, `mobile` or `desktop` without an image (`criterion.no-image`; a `desktop`
+  criterion off macOS has no file capture, so in matrix mode it ends partial). Setting
+  `evidence.report.enabled` to `false` turns the report and these refusals off together.
+- **One lane.** While a report is begun, the run drives every row in one lane, because a report
+  takes only the files of its own run directory; parallel lanes run only when no report is begun.
 - **When there is none.** With `evidence.report.enabled` set to `false` no report is written, and
   the report to you has no location line. When a report cannot begin, for example because git
   does not ignore the run directory, the run goes on with its verdict unchanged, writes

@@ -471,5 +471,174 @@ else
   show
 fi
 
+DOC_GATES="$(node -e '
+  const fs = require("fs");
+  const path = require("path");
+  const [dir, consentFile, guardFile, run, cwd] = process.argv.slice(1);
+  const consent = require(consentFile);
+  const guard = require(guardFile);
+  const judge = (command) => {
+    const payload = { tool_name: "Bash", tool_input: { command }, permission_mode: "default", cwd };
+    return {
+      consent: consent.evaluate({ command, payload, env: {}, records: [], policy: null, platform: process.platform }).verdict,
+      guard: guard.decide({ payload, raw: JSON.stringify(payload), cwd }).deny,
+    };
+  };
+  const out = [];
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((name) => /^[1-5]\.sh$/.test(name)).sort() : [];
+  if (files.length !== 5) out.push(`${files.length} filled blocks`);
+  for (const name of files) {
+    const verdict = judge(fs.readFileSync(path.join(dir, name), "utf8"));
+    if (verdict.consent !== "none" || verdict.guard !== false) out.push(`${name}: consent ${verdict.consent}, guard ${verdict.guard ? "deny" : "allow"}`);
+  }
+  const cli = ["play", "wright", "-cli"].join("");
+  if (judge(`${cli} -s=other screenshot --filename ${run}/browser/x.png`).consent !== "deny") out.push("the consent control was not denied");
+  if (judge(`cat "${[run, ["au", "th"].join(""), "storage-state.json"].join("/")}"`).guard !== true) out.push("the guard control was not denied");
+  process.stdout.write(out.length === 0 ? "ok" : out.join("; "));
+' "$DOC_BLOCKS" "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" "$PLUGIN_DIR/hooks/lib/verify-auth-guard-v1.js" "$DOC_RUN" "$PROJ" 2>&1)"
+if [ "$DOC_GATES" = ok ]; then
+  check "R22a the consent gate and the verify-auth guard neither deny nor ask for any filled rules/report.md block, while each denies its control" PASS
+else
+  check "R22a the consent gate and the verify-auth guard neither deny nor ask for any filled rules/report.md block, while each denies its control ($DOC_GATES)" FAIL
+fi
+
+R23=""
+NOIMG_RUN="$PROJ/.zensu/verify-feature-runs/r3"
+mkdir -p "$NOIMG_RUN"
+bash "$LOG" --report-begin --run-dir "$NOIMG_RUN" --mode local --drivers browser >"$OUT" 2>"$ERRF" <<'EOF'
+feature: The settings page saves the chosen locale
+AC-001: The locale persists after a reload
+EOF
+NOIMG_ID="$(sed -n 's/^zensu evidence report: begun \(vr1_[0-9]*_[0-9a-f]*\) .*/\1/p' "$OUT")"
+[ -n "$NOIMG_ID" ] || R23="$R23 no-image-begin"
+bash "$LOG" --report-step --report "$NOIMG_ID" --priority P0 --driver browser --result pass --criteria AC-001 >"$OUT" 2>"$ERRF" <<'EOF'
+title: AC-001 — Save the locale
+expected: The page shows the new locale after a reload
+observed: The page shows the new locale after a reload
+EOF
+[ "$?" -eq 0 ] || R23="$R23 no-image-pass-row"
+bash "$LOG" --report-render --report "$NOIMG_ID" --verdict PASS --console clean --network clean >"$OUT" 2>"$ERRF" </dev/null
+RC=$?
+cat "$OUT" "$ERRF" > "$WORK/r23-no-image.txt"
+if [ "$RC" -eq 0 ] || ! grep -q 'REPORT REFUSED — criterion.no-image' "$WORK/r23-no-image.txt"; then R23="$R23 no-image-refusal($RC)"; fi
+bash "$LOG" --report-step --report "$NOIMG_ID" --priority P0 --driver browser --result skip --criteria AC-001 >"$OUT" 2>"$ERRF" <<'EOF'
+title: AC-001 — Screenshot of the saved locale
+expected: An inspected screenshot shows the saved locale
+observed: No image was captured
+EOF
+[ "$?" -eq 0 ] || R23="$R23 no-image-skip-row"
+bash "$LOG" --report-render --report "$NOIMG_ID" --verdict PARTIAL --console clean --network clean >"$OUT" 2>"$ERRF" </dev/null
+RC=$?
+NOIMG_HTML="$(sed -n 's/^Evidence report: \(.*\/index\.html\)$/\1/p' "$OUT")"
+if [ "$RC" -ne 0 ] || [ -z "$NOIMG_HTML" ] || ! node -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  process.exit(m.verdict === "PARTIAL" && m.coverage.criteria.map((c) => `${c.id}:${c.state}`).join(",") === "AC-001:partial" ? 0 : 1);
+' "$(dirname "$NOIMG_HTML")/manifest.json"; then R23="$R23 partial-render($RC)"; fi
+FAILED_RUN="$PROJ/.zensu/verify-feature-runs/r4"
+mkdir -p "$FAILED_RUN"
+bash "$LOG" --report-begin --run-dir "$FAILED_RUN" --mode local --drivers api >"$OUT" 2>"$ERRF" <<'EOF'
+feature: The settings API stores the chosen locale
+AC-001: The API answers 200
+EOF
+FAILED_ID="$(sed -n 's/^zensu evidence report: begun \(vr1_[0-9]*_[0-9a-f]*\) .*/\1/p' "$OUT")"
+[ -n "$FAILED_ID" ] || R23="$R23 failed-begin"
+bash "$LOG" --report-step --report "$FAILED_ID" --priority P0 --driver api --result fail --criteria AC-001 >"$OUT" 2>"$ERRF" <<'EOF'
+title: AC-001 — The API stores the locale
+expected: The request answers 200
+observed: The request answered 500
+EOF
+[ "$?" -eq 0 ] || R23="$R23 failed-row"
+bash "$LOG" --report-render --report "$FAILED_ID" --verdict PASS --console clean --network clean >"$OUT" 2>"$ERRF" </dev/null
+RC=$?
+cat "$OUT" "$ERRF" > "$WORK/r23-contradiction.txt"
+if [ "$RC" -eq 0 ] || ! grep -q 'REPORT REFUSED — verdict.contradiction .*| remedy: state FAIL' "$WORK/r23-contradiction.txt"; then R23="$R23 contradiction-refusal($RC)"; fi
+bash "$LOG" --report-render --report "$FAILED_ID" --verdict FAIL --console clean --network clean >"$OUT" 2>"$ERRF" </dev/null
+RC=$?
+FAILED_HTML="$(sed -n 's/^Evidence report: \(.*\/index\.html\)$/\1/p' "$OUT")"
+if [ "$RC" -ne 0 ] || [ -z "$FAILED_HTML" ] || ! node -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  process.exit(m.verdict === "FAIL" && m.coverage.criteria.map((c) => `${c.id}:${c.state}`).join(",") === "AC-001:fail" ? 0 : 1);
+' "$(dirname "$FAILED_HTML")/manifest.json"; then R23="$R23 fail-render($RC)"; fi
+MISSING_RUN="$PROJ/.zensu/verify-feature-runs/r5"
+mkdir -p "$MISSING_RUN"
+bash "$LOG" --report-begin --run-dir "$MISSING_RUN" --mode local --drivers api >"$OUT" 2>"$ERRF" <<'EOF'
+feature: The settings API stores and returns the chosen locale
+AC-001: The API stores the locale
+AC-002: The API returns the stored locale
+EOF
+MISSING_ID="$(sed -n 's/^zensu evidence report: begun \(vr1_[0-9]*_[0-9a-f]*\) .*/\1/p' "$OUT")"
+[ -n "$MISSING_ID" ] || R23="$R23 missing-begin"
+bash "$LOG" --report-step --report "$MISSING_ID" --priority P0 --driver api --result pass --criteria AC-001 >"$OUT" 2>"$ERRF" <<'EOF'
+title: AC-001 — The API stores the locale
+expected: The write answers 200
+observed: The write answered 200
+EOF
+[ "$?" -eq 0 ] || R23="$R23 missing-first-row"
+bash "$LOG" --report-render --report "$MISSING_ID" --verdict PASS --console clean --network clean >"$OUT" 2>"$ERRF" </dev/null
+RC=$?
+cat "$OUT" "$ERRF" > "$WORK/r23-missing.txt"
+if [ "$RC" -eq 0 ] || ! grep -q 'REPORT REFUSED — verdict.contradiction .*AC-002 missing.*| remedy: state PARTIAL' "$WORK/r23-missing.txt"; then R23="$R23 missing-refusal($RC)"; fi
+bash "$LOG" --report-step --report "$MISSING_ID" --priority P1 --driver api --result pass --criteria AC-002 >"$OUT" 2>"$ERRF" <<'EOF'
+title: AC-002 — The API returns the stored locale
+expected: The read answers the stored locale
+observed: The read answered the stored locale
+EOF
+[ "$?" -eq 0 ] || R23="$R23 missing-second-row"
+bash "$LOG" --report-render --report "$MISSING_ID" --verdict PASS --console clean --network clean >"$OUT" 2>"$ERRF" </dev/null
+RC=$?
+MISSING_HTML="$(sed -n 's/^Evidence report: \(.*\/index\.html\)$/\1/p' "$OUT")"
+if [ "$RC" -ne 0 ] || [ -z "$MISSING_HTML" ] || ! node -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  process.exit(m.verdict === "PASS" && m.coverage.criteria.map((c) => `${c.id}:${c.state}`).join(",") === "AC-001:pass,AC-002:pass" ? 0 : 1);
+' "$(dirname "$MISSING_HTML")/manifest.json"; then R23="$R23 missing-pass-render($RC)"; fi
+SKIPPED_RUN="$PROJ/.zensu/verify-feature-runs/r6"
+mkdir -p "$SKIPPED_RUN"
+bash "$LOG" --report-begin --run-dir "$SKIPPED_RUN" --mode local --drivers api >"$OUT" 2>"$ERRF" <<'EOF'
+feature: The settings API stores the chosen locale
+AC-001: The API stores the locale
+EOF
+SKIPPED_ID="$(sed -n 's/^zensu evidence report: begun \(vr1_[0-9]*_[0-9a-f]*\) .*/\1/p' "$OUT")"
+[ -n "$SKIPPED_ID" ] || R23="$R23 skipped-begin"
+bash "$LOG" --report-step --report "$SKIPPED_ID" --priority P0 --driver api --result pass --criteria AC-001 >"$OUT" 2>"$ERRF" <<'EOF'
+title: AC-001 — The API stores the locale
+expected: The write answers 200
+observed: The write answered 200
+EOF
+[ "$?" -eq 0 ] || R23="$R23 skipped-pass-row"
+bash "$LOG" --report-step --report "$SKIPPED_ID" --priority P0 --driver api --result skip >"$OUT" 2>"$ERRF" <<'EOF'
+title: The API rejects an unknown locale
+expected: The write answers 422
+observed: Not driven: the fixture has no unknown locale
+EOF
+[ "$?" -eq 0 ] || R23="$R23 skipped-skip-row"
+bash "$LOG" --report-render --report "$SKIPPED_ID" --verdict PASS --console clean --network clean >"$OUT" 2>"$ERRF" </dev/null
+RC=$?
+cat "$OUT" "$ERRF" > "$WORK/r23-skipped.txt"
+if [ "$RC" -eq 0 ] || ! grep -q 'REPORT REFUSED — verdict.contradiction .*step 2 skip.*| remedy: state PARTIAL' "$WORK/r23-skipped.txt"; then R23="$R23 skipped-refusal($RC)"; fi
+bash "$LOG" --report-step --report "$SKIPPED_ID" --priority P0 --driver api --result pass >"$OUT" 2>"$ERRF" <<'EOF'
+title: The API rejects an unknown locale
+expected: The write answers 422
+observed: The write answered 422
+EOF
+[ "$?" -eq 0 ] || R23="$R23 skipped-later-row"
+bash "$LOG" --report-render --report "$SKIPPED_ID" --verdict PASS --console clean --network clean >"$OUT" 2>"$ERRF" </dev/null
+RC=$?
+cat "$OUT" "$ERRF" >> "$WORK/r23-skipped.txt"
+if [ "$RC" -eq 0 ] || ! grep -q 'REPORT REFUSED — verdict.contradiction .*step 2 skip.*| remedy: state PARTIAL' "$OUT" "$ERRF"; then R23="$R23 skipped-repeat($RC)"; fi
+bash "$LOG" --report-render --report "$SKIPPED_ID" --verdict PARTIAL --console clean --network clean >"$OUT" 2>"$ERRF" </dev/null
+RC=$?
+SKIPPED_HTML="$(sed -n 's/^Evidence report: \(.*\/index\.html\)$/\1/p' "$OUT")"
+if [ "$RC" -ne 0 ] || [ -z "$SKIPPED_HTML" ] || ! node -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  process.exit(m.verdict === "PARTIAL" && m.steps.map((s) => `${s.n}:${s.result}`).join(",") === "1:pass,2:skip,3:pass" ? 0 : 1);
+' "$(dirname "$SKIPPED_HTML")/manifest.json"; then R23="$R23 skipped-partial-render($RC)"; fi
+if [ -z "$R23" ]; then
+  check "R23 the rules/report.md answers to a criterion.no-image and a verdict.contradiction refusal render: a skip row and PARTIAL, FAIL, a missing matrix row written first and PASS, and PARTIAL for a P0 skip row a later row cannot clear" PASS
+else
+  check "R23 the rules/report.md answers to a criterion.no-image and a verdict.contradiction refusal render: a skip row and PARTIAL, FAIL, a missing matrix row written first and PASS, and PARTIAL for a P0 skip row a later row cannot clear ($R23)" FAIL
+  cat "$WORK/r23-no-image.txt" "$WORK/r23-contradiction.txt" "$WORK/r23-missing.txt" "$WORK/r23-skipped.txt" 2>/dev/null
+  show
+fi
+
 unit_check_done "R0z every unit file the registry gives this suite was graded"
 finish

@@ -235,7 +235,7 @@ section 2, right after you inspected it:
 - A request or a console item enters only for an unauthenticated target, under the same rule that
   admits `console` and `requests`: `--report-add --report <id> --kind request --method <METHOD> --path '<path>' --status <code>`
   for every request the row asserts, and
-  `--report-add --report <id> --kind signal --source console --class <class>` with the sanitized
+  `--report-add --report <id> --kind signal --source console --class '<class>'` with the sanitized
   message on stdin.
 - The semantic snapshot is read, not added: write its fact into the row's `observed:` line.
 
