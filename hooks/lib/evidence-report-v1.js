@@ -1591,7 +1591,7 @@ function storeRoot(options, config, create) {
 
 function storePlacement(root) {
   const top = evidenceRun.workTreeTop(root);
-  if (top.reason) return { ok: false, reason: `whether the store ${root} lies in a git work tree could not be determined (${top.reason})` };
+  if (top.reason) return { ok: false, undetermined: true, reason: `whether the store ${root} lies in a git work tree could not be determined (${top.reason})` };
   if (top.top === null) return { ok: true, ignored: false };
   const topDirectory = top.top;
   const relative = path.relative(topDirectory, root).split(path.sep).join('/');
@@ -1603,7 +1603,7 @@ function storePlacement(root) {
   if (probe.ignored === false) {
     return { ok: false, reason: `the store ${root} lies inside the git work tree ${topDirectory} and git does not report it ignored; move evidence.report.dir outside every git work tree, or have git ignore ${relative}/` };
   }
-  return { ok: false, reason: `whether git ignores the store could not be determined (${probe.reason})` };
+  return { ok: false, undetermined: true, reason: `whether git ignores the store could not be determined (${probe.reason})` };
 }
 
 function repositoryKey(projectRoot) {
@@ -1871,11 +1871,11 @@ function checkRunDirectory(given, projectRoot, root, chainRoot = null) {
   try {
     stat = fs.lstatSync(runDirectory);
   } catch {
-    refuse(`the run directory ${runDirectory} does not exist`);
+    refuse(`the run directory ${runDirectory} does not exist${runRootHint(runDirectory, projectRoot)}`);
   }
   if (stat.isSymbolicLink()) refuse(`the run directory ${runDirectory} is a symlink; pass its physical path`);
   if (!stat.isDirectory()) refuse(`the run directory ${runDirectory} is not a directory`);
-  if (!linkFree(runDirectory)) refuse(`the run directory ${runDirectory} runs through a symlink; pass its physical path`);
+  if (!linkFree(runDirectory)) refuse(`the run directory ${runDirectory} runs through a symlink; pass its physical path${runRootHint(runDirectory, projectRoot)}`);
   const real = fs.realpathSync.native(runDirectory);
   const top = evidenceRun.workTreeTop(projectRoot);
   if (top.reason) unavailable(`whether the run directory lies in the project's work tree could not be determined (${top.reason})`);
@@ -1939,20 +1939,24 @@ function isRunRoot(directory, tree, projectRoot) {
   return [tree, projectRoot].some((root) => samePath(directory, path.resolve(root, RUN_ROOT)));
 }
 
+function isZensuRoot(directory, tree, projectRoot) {
+  return [tree, projectRoot].some((root) => samePath(directory, path.join(root, '.zensu')));
+}
+
 function ignoreTarget(tree, real, projectRoot, relative) {
   if (SINGLE_LINE_FORBIDDEN_RE.test(relative.join('/'))) return null;
   const spelled = `${relative.join('/')}/`;
   const parent = `${relative.slice(0, -1).join('/')}/`;
   const above = path.dirname(real);
-  if (relative.length >= 2 && !holdsPath(above, projectRoot) && untracked(tree, parent) && (isRunRoot(above, tree, projectRoot) || holdsOnly(tree, parent, spelled))) return parent;
-  return !holdsPath(real, projectRoot) && untracked(tree, spelled) ? spelled : null;
+  if (relative.length >= 2 && !holdsPath(above, projectRoot) && !isZensuRoot(above, tree, projectRoot) && untracked(tree, parent) && (isRunRoot(above, tree, projectRoot) || holdsOnly(tree, parent, spelled))) return parent;
+  return !holdsPath(real, projectRoot) && !isZensuRoot(real, tree, projectRoot) && untracked(tree, spelled) ? spelled : null;
 }
 
 function ignoreLine(spelled) {
   return `/${spelled.replace(/[\\*?[]/g, (character) => `\\${character}`)}`;
 }
 
-function linkedRunRoot(root) {
+function runRootObstacle(root) {
   if (!isString(root)) return null;
   const segments = RUN_ROOT.split('/').filter((segment) => segment !== '');
   for (let count = 1; count <= segments.length; count += 1) {
@@ -1963,18 +1967,27 @@ function linkedRunRoot(root) {
       return null;
     }
     if (stat === undefined) return null;
-    if (stat.isSymbolicLink()) return segments.slice(0, count).join('/');
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return { entry: segments.slice(0, count).join('/'), link: stat.isSymbolicLink() };
   }
   return null;
 }
 
+function runRootHint(runDirectory, projectRoot) {
+  const top = evidenceRun.workTreeTop(projectRoot);
+  if (top.reason) return '';
+  const base = top.top || realDirectory(projectRoot);
+  const obstacle = runRootObstacle(base);
+  return obstacle !== null && holdsPath(path.join(base, ...obstacle.entry.split('/')), runDirectory) ? `; ${runRootRemedy(top.top, base)}` : '';
+}
+
 function runRootRemedy(tree, projectRoot) {
   const outside = !isString(tree);
-  const linked = linkedRunRoot(outside ? projectRoot : tree);
-  if (linked !== null) {
+  const obstacle = runRootObstacle(outside ? projectRoot : tree);
+  if (obstacle !== null) {
+    const blocked = `${RUN_ROOT} cannot hold it, because ${obstacle.entry} ${outside ? 'in the project root' : 'at the top of the work tree'} ${obstacle.link ? 'is a symbolic link; replace that link' : 'is not a directory; replace it'} with a directory`;
     return outside
-      ? `${RUN_ROOT} cannot hold it, because ${linked} in the project root is a symbolic link; replace that link with a directory, or create the run directory in another directory of the project root`
-      : `${RUN_ROOT} cannot hold it, because ${linked} at the top of the work tree is a symbolic link; replace that link with a directory that git ignores, or create the run directory in another directory of the work tree that git ignores`;
+      ? `${blocked}, or create the run directory in another directory of the project root that lies outside every git work tree`
+      : `${blocked} and, unless git already ignores ${RUN_ROOT}, add the line /${RUN_ROOT} to the repository's .gitignore, or create the run directory in another directory of the work tree that git ignores`;
   }
   if (outside) return `create it under ${RUN_ROOT} in the project root, which lies outside git`;
   const probe = checkIgnore(tree, RUN_ROOT);
@@ -2074,6 +2087,7 @@ function begin(options) {
   }
   const root = storeRoot(options, config, true);
   const placement = storePlacement(root);
+  if (placement.undetermined) unavailable(placement.reason);
   if (!placement.ok) refuse(placement.reason);
   const chainRoot = chain !== null && options.chain && isString(options.chain.workTree) && options.chain.workTree !== ''
     ? evidenceRun.fingerprintRoot(options.chain.workTree, options.projectRoot, evidenceRun.LIMITS)

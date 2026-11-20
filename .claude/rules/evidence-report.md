@@ -80,7 +80,10 @@ report's directories and writes the binding, so another call's sweep never meets
 report without its lock.
 
 **Placement (AC-010)** is checked at every begin, for the default store too: outside every work
-tree is fine, inside one only when `git check-ignore` reports the store ignored.
+tree is fine, inside one only when `git check-ignore` reports the store ignored. A git fault that
+leaves either question open, in the work-tree probe or in the check-ignore probe, marks the answer
+undetermined (`storePlacement`), and begin refuses it with exit 2, the code of an environment fault,
+as it does for the run-directory probes.
 
 **Containment (AC-006).** The run directory must be a physical directory strictly inside the work
 tree (the project root outside git) and apart from the store. Inside a work tree it must lie
@@ -91,11 +94,14 @@ the report fingerprints, in the same work tree and outside that tree's `.zensu` 
 the project root, and in chain mode also the chain's fingerprint root, which is canonicalized with
 `fs.realpathSync.native` and compared through `samePath`, because `fingerprintRoot` returns git's
 spelling. The remedy names the run directory's parent when that parent lies below the top of the
-work tree that holds the run directory, neither is nor holds the project root, and holds nothing
-git tracks and, unless it is `RUN_ROOT` at the top of that work tree or of the project root,
-whose other entries are run directories (`isRunRoot`), no untracked, unignored file outside the
-run directory (`ignoreTarget`), else the run directory itself when it neither is nor holds the project root and git tracks nothing under
-it. The line it suggests is that path anchored at the work tree's top, `/` plus the spelling with
+work tree that holds the run directory, neither is nor holds the project root, is not `.zensu` at
+the top of that work tree or of the project root (`isZensuRoot`), and holds nothing git tracks
+and, unless it is `RUN_ROOT` at the top of that work tree or of the project root, whose other
+entries are run directories (`isRunRoot`), no untracked, unignored file outside the run directory
+(`ignoreTarget`), else the run directory itself when it neither is nor holds the project root, is
+not that `.zensu`, and git tracks nothing under it. So a run directory directly below `.zensu`,
+`RUN_ROOT` itself included, gets a line for itself, and `.zensu` itself gets the run-root remedy
+below. The line it suggests is that path anchored at the work tree's top, `/` plus the spelling with
 `\`, `*`, `?` and `[` escaped (`ignoreLine`), because an unanchored pattern matches a directory of
 that name at any depth; a spelling with a control character gets no line. When no directory
 qualifies, and for a run directory that is itself the top of a work tree, which that tree cannot
@@ -104,13 +110,21 @@ work tree, and says whether git ignores it: only an exit status of 1 from the pr
 ignore line, and any other answer, such as a timeout, says that this could not be determined and
 names the probe's reason. For a project outside git it names `RUN_ROOT` in the project root, which
 lies outside git and needs no ignore line (`runRootRemedy`, which the `.git` refusal shares). When
-`.zensu` or `RUN_ROOT` there is a symbolic link, the remedy says so before any probe and asks for a
-directory in place of the link or for another run directory (`linkedRunRoot`): `linkFree` refuses
-a run directory reached through the link, its physical path lies wherever the link points, and
-git's probe exits 128 there. It therefore never asks to ignore the project root, a directory that
-holds it, or a directory with a tracked file, never asks to ignore a run root whose probe failed,
-never names a run root that no run directory can use, and never names a work tree that a project
-outside git lacks.
+`.zensu` or `RUN_ROOT` there is a symbolic link or not a directory, the remedy says so before any
+probe and asks for a directory in its place or for another run directory (`runRootObstacle`):
+`linkFree` refuses a run directory reached through a link, its physical path lies wherever the link
+points, git's probe exits 128 there, and no directory can be created below a file. Inside git it
+names the anchored line for `RUN_ROOT` alone, unless git already ignores it, because a consuming
+repository commits `.zensu/plans/` and `.zensu/logs/`, and the other run directory is one of the
+work tree that git ignores; outside git it is one of the project root that lies outside every git
+work tree, since one inside a nested work tree is refused again unless that tree ignores it. A run
+directory at or below such an entry that does not exist, because lstat answers ENOTDIR or ENOENT
+through it, or that runs through the link gets the same remedy after its refusal (`runRootHint`);
+one that no such entry holds, and one whose work-tree probe fails, keeps the plain refusal. It
+therefore never asks to ignore the project root, a directory that holds it, a directory with a
+tracked file or all of `.zensu`, never asks to ignore a run root whose probe failed, never names a
+run root that no run directory can use, and never names a work tree that a project outside git
+lacks.
 Every check-ignore probe, the store placement and `runRootRemedy` included, goes
 through `checkIgnore`, which classifies git's answer for every caller (exit 0 ignored, exit 1 not
 ignored, anything else undetermined with its reason) and prefixes the spelling with `./`:

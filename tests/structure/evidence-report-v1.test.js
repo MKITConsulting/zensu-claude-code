@@ -500,7 +500,7 @@ test('begin accepts only a run directory inside the work tree that git ignores, 
   const fx = fixture();
   const outsideTree = [`the run directory must lie inside the project's work tree ${fx.root}`];
   assert.deepEqual(refused(call(fx, 'begin', { 'run-dir': tempDir('elsewhere'), drivers: 'browser' }, FEATURE), /^the run directory must lie inside the project's work tree /).errors, outsideTree);
-  refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, 'missing'), drivers: 'browser' }, FEATURE), /does not exist/);
+  assert.deepEqual(refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, 'missing'), drivers: 'browser' }, FEATURE), /does not exist/).errors, [`the run directory ${path.join(fx.root, 'missing')} does not exist`]);
   assert.deepEqual(refused(call(fx, 'begin', { 'run-dir': fx.root, drivers: 'browser' }, FEATURE), /^the run directory must lie inside the project's work tree /).errors, outsideTree);
   const source = path.join(fx.root, 'src');
   fs.mkdirSync(source);
@@ -535,16 +535,19 @@ test('begin accepts only a run directory inside the work tree that git ignores, 
   }
   const beginRow = fs.readFileSync(path.join(ROOT, 'docs', 'configuration.md'), 'utf8').split('\n').find((line) => line.startsWith('| `--report-begin` |'));
   assert.ok(beginRow.includes("which must be a physical directory inside the project's work tree, or inside the project root for a project outside git, that lies outside `.git` and that the work tree holding it, if any, ignores, so no capture can be committed or move the tree fingerprint."), beginRow);
-  assert.ok(beginRow.includes("The refusal suggests an ignore line anchored at the top of the work tree that holds the run directory, with `\\`, `*`, `?` and `[` escaped: for the run directory's parent when it lies below that top, neither is nor holds the project root, and holds nothing git tracks and, unless it is `.zensu/verify-feature-runs/` at the top of that work tree or of the project root, no untracked, unignored file outside the run directory, else for the run directory itself when it neither is nor holds the project root and holds nothing git tracks. When neither qualifies or the spelling holds a control character, which gets no line, and for a run directory inside `.git` or at the top of a work tree, it asks for a run directory under `.zensu/verify-feature-runs/` at the top of the project's work tree and says whether git ignores that directory (or, when its probe fails with anything but exit status 1, that this could not be determined and why), or, for a project outside git, under `.zensu/verify-feature-runs/` in the project root, which lies outside git. When `.zensu` or `.zensu/verify-feature-runs/` there is a symbolic link, which no run directory may run through, it says so instead and asks for a directory in place of the link or for a run directory elsewhere."), beginRow);
+  assert.ok(beginRow.includes("The refusal suggests an ignore line anchored at the top of the work tree that holds the run directory, with `\\`, `*`, `?` and `[` escaped: for the run directory's parent when it lies below that top, neither is nor holds the project root, is not `.zensu` at the top of that work tree or of the project root, and holds nothing git tracks and, unless it is `.zensu/verify-feature-runs/` at the top of that work tree or of the project root, no untracked, unignored file outside the run directory, else for the run directory itself when it neither is nor holds the project root, is not that `.zensu`, and holds nothing git tracks. When neither qualifies or the spelling holds a control character, which gets no line, and for a run directory inside `.git` or at the top of a work tree, it asks for a run directory under `.zensu/verify-feature-runs/` at the top of the project's work tree and says whether git ignores that directory (or, when its probe fails with anything but exit status 1, that this could not be determined and why), or, for a project outside git, under `.zensu/verify-feature-runs/` in the project root, which lies outside git. When `.zensu` or `.zensu/verify-feature-runs/` there is a symbolic link, which no run directory may run through, or is not a directory, it says so instead and asks for a directory in its place or for a run directory elsewhere, and a run directory at or below that entry that does not exist or runs through the link gets the same remedy after its refusal. Inside git, the replacement needs the line `/.zensu/verify-feature-runs/` unless git already ignores that directory, and elsewhere means another directory of the work tree that git ignores; for a project outside git, elsewhere means another directory of the project root that lies outside every git work tree. No refusal asks git to ignore all of `.zensu`, because a repository may commit `.zensu/plans/` and `.zensu/logs/`."), beginRow);
   refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git'), drivers: 'browser' }, FEATURE), /^the run directory .+ lies inside \.git; create it under \.zensu\/verify-feature-runs\/ at the top of the work tree, which git ignores$/);
   refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git', 'objects'), drivers: 'browser' }, FEATURE), /lies inside \.git/);
   if (process.platform !== 'win32') {
     const linkedRoot = repo({ label: 'linked' });
     fs.symlinkSync(tempDir('linked-target'), path.join(linkedRoot, '.zensu'));
     const linked = fixture({ root: linkedRoot });
-    refused(call(linked, 'begin', { 'run-dir': linked.runDir, drivers: 'browser' }, FEATURE), /^the run directory .+ runs through a symlink; pass its physical path$/);
+    const throughLink = "; \\.zensu\\/verify-feature-runs\\/ cannot hold it, because \\.zensu at the top of the work tree is a symbolic link; replace that link with a directory and, unless git already ignores \\.zensu\\/verify-feature-runs\\/, add the line \\/\\.zensu\\/verify-feature-runs\\/ to the repository's \\.gitignore, or create the run directory in another directory of the work tree that git ignores$";
+    refused(call(linked, 'begin', { 'run-dir': linked.runDir, drivers: 'browser' }, FEATURE), new RegExp(`^the run directory .+ runs through a symlink; pass its physical path${throughLink}`));
     refused(call(linked, 'begin', { 'run-dir': fs.realpathSync.native(linked.runDir), drivers: 'browser' }, FEATURE), /^the run directory must lie inside the project's work tree /);
-    const throughLink = '; \\.zensu\\/verify-feature-runs\\/ cannot hold it, because \\.zensu at the top of the work tree is a symbolic link; replace that link with a directory that git ignores, or create the run directory in another directory of the work tree that git ignores$';
+    const danglingRoot = repo({ label: 'dangling' });
+    fs.symlinkSync(path.join(tempDir('gone'), 'missing'), path.join(danglingRoot, '.zensu'));
+    refused(call({ ...linked, root: danglingRoot }, 'begin', { 'run-dir': path.join(danglingRoot, '.zensu', 'verify-feature-runs', 'r1'), drivers: 'browser' }, FEATURE), new RegExp(`^the run directory .+ does not exist${throughLink}`));
     refused(call(linked, 'begin', { 'run-dir': path.join(linkedRoot, '.git'), drivers: 'browser' }, FEATURE), new RegExp(`^the run directory .+ lies inside \\.git${throughLink}`));
     const linkedNested = path.join(linkedRoot, 'nested');
     fs.mkdirSync(linkedNested);
@@ -558,14 +561,15 @@ test('begin accepts only a run directory inside the work tree that git ignores, 
     const deepRoot = repo({ label: 'deep' });
     fs.mkdirSync(path.join(deepRoot, '.zensu'));
     fs.symlinkSync(tempDir('deep-target'), path.join(deepRoot, '.zensu', 'verify-feature-runs'));
-    refused(call(fixture({ root: deepRoot }), 'begin', { 'run-dir': path.join(deepRoot, '.git'), drivers: 'browser' }, FEATURE), /^the run directory .+ lies inside \.git; \.zensu\/verify-feature-runs\/ cannot hold it, because \.zensu\/verify-feature-runs at the top of the work tree is a symbolic link; replace that link with a directory that git ignores, or create the run directory in another directory of the work tree that git ignores$/);
+    refused(call(fixture({ root: deepRoot }), 'begin', { 'run-dir': path.join(deepRoot, '.git'), drivers: 'browser' }, FEATURE), /^the run directory .+ lies inside \.git; \.zensu\/verify-feature-runs\/ cannot hold it, because \.zensu\/verify-feature-runs at the top of the work tree is a symbolic link; replace that link with a directory and, unless git already ignores \.zensu\/verify-feature-runs\/, add the line \/\.zensu\/verify-feature-runs\/ to the repository's \.gitignore, or create the run directory in another directory of the work tree that git ignores$/);
     const looseRoot = tempDir('loose');
     fs.symlinkSync(tempDir('loose-target'), path.join(looseRoot, '.zensu'));
     const looseInner = path.join(looseRoot, 'app');
     fs.mkdirSync(looseInner);
     git(looseInner, 'init', '-q');
     const loose = fixture({ root: looseRoot });
-    const looseLink = '; \\.zensu\\/verify-feature-runs\\/ cannot hold it, because \\.zensu in the project root is a symbolic link; replace that link with a directory, or create the run directory in another directory of the project root$';
+    const looseLink = '; \\.zensu\\/verify-feature-runs\\/ cannot hold it, because \\.zensu in the project root is a symbolic link; replace that link with a directory, or create the run directory in another directory of the project root that lies outside every git work tree$';
+    refused(call(loose, 'begin', { 'run-dir': loose.runDir, drivers: 'browser' }, FEATURE), new RegExp(`^the run directory .+ runs through a symlink; pass its physical path${looseLink}`));
     refused(call(loose, 'begin', { 'run-dir': path.join(looseInner, '.git'), drivers: 'browser' }, FEATURE), new RegExp(`^the run directory .+ lies inside \\.git${looseLink}`));
     refused(call(loose, 'begin', { 'run-dir': looseInner, drivers: 'browser' }, FEATURE), new RegExp(`^the run directory .+ is the top of a git work tree, which that work tree cannot ignore${looseLink}`));
     const looseSource = path.join(looseInner, 'src');
@@ -574,10 +578,62 @@ test('begin accepts only a run directory inside the work tree that git ignores, 
     git(looseInner, 'add', 'src/app.js');
     refused(call(loose, 'begin', { 'run-dir': looseSource, drivers: 'browser' }, FEATURE), new RegExp(`^git does not ignore the run directory .+, so its captures could be committed${looseLink}`));
   }
+  const notDirectory = (entry) => `; .zensu/verify-feature-runs/ cannot hold it, because ${entry} at the top of the work tree is not a directory; replace it with a directory and, unless git already ignores .zensu/verify-feature-runs/, add the line /.zensu/verify-feature-runs/ to the repository's .gitignore, or create the run directory in another directory of the work tree that git ignores`;
+  const plain = fixture({ root: repo({ label: 'plain' }) });
+  fs.rmSync(path.join(plain.root, '.zensu'), { recursive: true });
+  fs.writeFileSync(path.join(plain.root, '.zensu'), 'not a directory\n');
+  assert.deepEqual(refused(call(plain, 'begin', { 'run-dir': plain.runDir, drivers: 'browser' }, FEATURE), /does not exist/).errors, [`the run directory ${plain.runDir} does not exist${notDirectory('.zensu')}`]);
+  assert.deepEqual(refused(call(plain, 'begin', { 'run-dir': path.join(plain.root, '.git'), drivers: 'browser' }, FEATURE), /is not a directory/).errors, [`the run directory ${path.join(plain.root, '.git')} lies inside .git${notDirectory('.zensu')}`]);
+  const plainSource = path.join(plain.root, 'src');
+  fs.mkdirSync(plainSource);
+  fs.writeFileSync(path.join(plainSource, 'app.js'), 'export {};\n');
+  git(plain.root, 'add', 'src/app.js');
+  assert.deepEqual(refused(call(plain, 'begin', { 'run-dir': plainSource, drivers: 'browser' }, FEATURE), /is not a directory/).errors, [`git does not ignore the run directory ${plainSource}, so its captures could be committed and every capture would move the tree fingerprint${notDirectory('.zensu')}`]);
+  const flat = fixture({ root: repo({ label: 'flat' }) });
+  fs.rmSync(path.dirname(flat.runDir), { recursive: true });
+  fs.writeFileSync(path.dirname(flat.runDir), 'not a directory\n');
+  assert.deepEqual(refused(call(flat, 'begin', { 'run-dir': flat.runDir, drivers: 'browser' }, FEATURE), /does not exist/).errors, [`the run directory ${flat.runDir} does not exist${notDirectory('.zensu/verify-feature-runs')}`]);
+  const flatOther = path.join(flat.root, '.zensu', 'other', 'r1');
+  assert.deepEqual(refused(call(flat, 'begin', { 'run-dir': flatOther, drivers: 'browser' }, FEATURE), /does not exist/).errors, [`the run directory ${flatOther} does not exist`]);
+  assert.deepEqual(refused(call(flat, 'begin', { 'run-dir': path.join(flat.root, '.git'), drivers: 'browser' }, FEATURE), /is not a directory/).errors, [`the run directory ${path.join(flat.root, '.git')} lies inside .git${notDirectory('.zensu/verify-feature-runs')}`]);
+  const plainLoose = fixture({ root: tempDir('plain-loose') });
+  fs.rmSync(path.join(plainLoose.root, '.zensu'), { recursive: true });
+  fs.writeFileSync(path.join(plainLoose.root, '.zensu'), 'not a directory\n');
+  const plainInner = path.join(plainLoose.root, 'app');
+  fs.mkdirSync(plainInner);
+  git(plainInner, 'init', '-q');
+  const looseNotDirectory = '; .zensu/verify-feature-runs/ cannot hold it, because .zensu in the project root is not a directory; replace it with a directory, or create the run directory in another directory of the project root that lies outside every git work tree';
+  assert.deepEqual(refused(call(plainLoose, 'begin', { 'run-dir': path.join(plainInner, '.git'), drivers: 'browser' }, FEATURE), /is not a directory/).errors, [`the run directory ${path.join(plainInner, '.git')} lies inside .git${looseNotDirectory}`]);
+  assert.deepEqual(refused(call(plainLoose, 'begin', { 'run-dir': plainInner, drivers: 'browser' }, FEATURE), /is not a directory/).errors, [`the run directory ${plainInner} is the top of a git work tree, which that work tree cannot ignore${looseNotDirectory}`]);
+  assert.deepEqual(refused(call(plainLoose, 'begin', { 'run-dir': plainLoose.runDir, drivers: 'browser' }, FEATURE), /does not exist/).errors, [`the run directory ${plainLoose.runDir} does not exist${looseNotDirectory}`]);
+  const bare = fixture({ root: repo({ label: 'bare', ignore: 'node_modules/\n' }) });
+  const bareRunRoot = path.dirname(bare.runDir);
+  assert.deepEqual(refused(call(bare, 'begin', { 'run-dir': bareRunRoot, drivers: 'browser' }, FEATURE), /does not ignore/).errors, [`git does not ignore the run directory ${bareRunRoot}, so its captures could be committed; have git ignore .zensu/verify-feature-runs/, for example with the line /.zensu/verify-feature-runs/ in the repository's .gitignore`]);
+  const bareChild = path.join(bare.root, '.zensu', 'shots');
+  fs.mkdirSync(bareChild);
+  assert.deepEqual(refused(call(bare, 'begin', { 'run-dir': bareChild, drivers: 'browser' }, FEATURE), /does not ignore/).errors, [`git does not ignore the run directory ${bareChild}, so its captures could be committed; have git ignore .zensu/shots/, for example with the line /.zensu/shots/ in the repository's .gitignore`]);
+  const bareZensu = path.join(bare.root, '.zensu');
+  assert.deepEqual(refused(call(bare, 'begin', { 'run-dir': bareZensu, drivers: 'browser' }, FEATURE), /does not ignore/).errors, [`git does not ignore the run directory ${bareZensu}, so its captures could be committed; create it under .zensu/verify-feature-runs/ at the top of the work tree and have git ignore that directory, for example with the line /.zensu/verify-feature-runs/ in the repository's .gitignore`]);
+  const monoTop = repo({ label: 'mono-zensu', ignore: 'node_modules/\n' });
+  const site = fixture({ root: path.join(monoTop, 'apps', 'site') });
+  const notIgnored = (run, remedy) => [`git does not ignore the run directory ${run}, so its captures could be committed; ${remedy}`];
+  const siteShots = path.join(site.root, '.zensu', 'shots');
+  fs.mkdirSync(siteShots);
+  assert.deepEqual(refused(call(site, 'begin', { 'run-dir': siteShots, drivers: 'browser' }, FEATURE), /does not ignore/).errors, notIgnored(siteShots, "have git ignore apps/site/.zensu/shots/, for example with the line /apps/site/.zensu/shots/ in the repository's .gitignore"));
+  const siteRunRoot = path.dirname(site.runDir);
+  assert.deepEqual(refused(call(site, 'begin', { 'run-dir': siteRunRoot, drivers: 'browser' }, FEATURE), /does not ignore/).errors, notIgnored(siteRunRoot, "have git ignore apps/site/.zensu/verify-feature-runs/, for example with the line /apps/site/.zensu/verify-feature-runs/ in the repository's .gitignore"));
+  const siteZensu = path.join(site.root, '.zensu');
+  assert.deepEqual(refused(call(site, 'begin', { 'run-dir': siteZensu, drivers: 'browser' }, FEATURE), /does not ignore/).errors, notIgnored(siteZensu, "create it under .zensu/verify-feature-runs/ at the top of the work tree and have git ignore that directory, for example with the line /.zensu/verify-feature-runs/ in the repository's .gitignore"));
+  const topShots = path.join(monoTop, '.zensu', 'shots');
+  fs.mkdirSync(topShots, { recursive: true });
+  assert.deepEqual(refused(call(site, 'begin', { 'run-dir': topShots, drivers: 'browser' }, FEATURE), /does not ignore/).errors, notIgnored(topShots, "have git ignore .zensu/shots/, for example with the line /.zensu/shots/ in the repository's .gitignore"));
   const gitRead = evr.git;
   const slowProbe = t.mock.method(evr, 'git', (root, args, options) => (args[0] === 'check-ignore' && args.includes('./.zensu/verify-feature-runs/') ? { ok: false, code: 'ETIMEDOUT', reason: 'git timed out' } : gitRead(root, args, options)));
   assert.deepEqual(refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git'), drivers: 'browser' }, FEATURE), /could not be determined \(git timed out\)$/).errors, [`the run directory ${path.join(fx.root, '.git')} lies inside .git; create it under .zensu/verify-feature-runs/ at the top of the work tree; whether git ignores that directory could not be determined (git timed out)`]);
   slowProbe.mock.restore();
+  const runProbe = t.mock.method(evr, 'git', (root, args, options) => (args[0] === 'check-ignore' && args.includes('./.zensu/verify-feature-runs/r1/') ? { ok: false, status: 128, reason: 'git check-ignore failed: fatal: probe refused' } : gitRead(root, args, options)));
+  assert.deepEqual(refused(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser' }, FEATURE), /could not be determined/, 2).errors, ['whether git ignores the run directory could not be determined (git check-ignore failed: fatal: probe refused)']);
+  runProbe.mock.restore();
   const store = path.join(fx.root, 'reports');
   fs.writeFileSync(path.join(fx.root, '.gitignore'), '.zensu/\nreports/\n');
   refused(call(fx, 'begin', { 'run-dir': path.join(store), drivers: 'browser' }, FEATURE, { config: { user: { dir: store } } }), /does not exist|must not overlap the report store/);
@@ -846,7 +902,7 @@ test('a text evidence file is screened and redacted before it is stored', () => 
   ok(call(fx, 'render', { report: id, verdict: 'PARTIAL' }));
 });
 
-test('the default store lies outside every git work tree and a store inside one is refused unless git ignores it', () => {
+test('the default store lies outside every git work tree and a store inside one is refused unless git ignores it', (t) => {
   const fx = fixture();
   begin(fx);
   const store = path.join(fx.root, 'reports');
@@ -856,6 +912,16 @@ test('the default store lies outside every git work tree and a store inside one 
   assert.equal(path.dirname(accepted.bundle), path.join(fs.realpathSync.native(store), er.STORE_VERSION, er.repositoryKey(fx.root)), 'a configured store holds the same versioned layout as the default one');
   assert.deepEqual(fs.readdirSync(store), [er.STORE_VERSION]);
   assert.equal(ok(call(fx, 'list', {}, '', { config: { user: { dir: store } } })).reports[0].id, accepted.id);
+  const storeTop = path.join(fs.realpathSync.native(store), er.STORE_VERSION);
+  const gitRead = evr.git;
+  const storeProbe = t.mock.method(evr, 'git', (root, args, options) => (args[0] === 'check-ignore' && args.includes(`./reports/${er.STORE_VERSION}/`) ? { ok: false, code: 'ENOENT', reason: 'git unavailable (ENOENT)' } : gitRead(root, args, options)));
+  assert.deepEqual(refused(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser' }, FEATURE, { config: { user: { dir: store } } }), /could not be determined/, 2).errors, ['whether git ignores the store could not be determined (git unavailable (ENOENT))']);
+  storeProbe.mock.restore();
+  const topRead = evr.workTreeTop;
+  const storeTree = t.mock.method(evr, 'workTreeTop', (directory, limits) => (er.samePath(directory, storeTop) ? { top: null, reason: 'git timed out' } : topRead(directory, limits)));
+  assert.deepEqual(refused(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser' }, FEATURE, { config: { user: { dir: store } } }), /could not be determined/, 2).errors, [`whether the store ${storeTop} lies in a git work tree could not be determined (git timed out)`]);
+  storeTree.mock.restore();
+  ok(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser' }, FEATURE, { config: { user: { dir: store } } }));
   const tracked = repo({ label: 'data-in-repo' });
   const data = path.join(tracked, 'plugin-data');
   fs.mkdirSync(data);
@@ -1613,6 +1679,16 @@ test('a git fault other than a missing work tree refuses begin instead of fallin
   fs.writeFileSync(path.join(root, '.git'), 'not a gitfile\n');
   const fx = fixture({ root });
   refused(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'api' }, FEATURE), /whether the run directory lies in the project's work tree could not be determined \(git rev-parse failed: fatal: invalid gitfile format/, 2);
+  fs.rmSync(path.join(root, '.zensu'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.zensu'), 'not a directory\n');
+  assert.deepEqual(refused(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'api' }, FEATURE), /does not exist/).errors, [`the run directory ${fx.runDir} does not exist`]);
+  if (process.platform !== 'win32') {
+    fs.rmSync(path.join(root, '.zensu'));
+    const target = tempDir('broken-target');
+    fs.mkdirSync(path.join(target, 'verify-feature-runs', 'r1'), { recursive: true });
+    fs.symlinkSync(target, path.join(root, '.zensu'));
+    assert.deepEqual(refused(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'api' }, FEATURE), /runs through a symlink/).errors, [`the run directory ${fx.runDir} runs through a symlink; pass its physical path`]);
+  }
 });
 
 test('add records a completed evidence run of this session and refuses every other run', async () => {
