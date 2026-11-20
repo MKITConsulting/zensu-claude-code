@@ -16,7 +16,16 @@ const CONFIG_FLAG = /^(--(global|system|local|worktree|show-origin|show-scope|na
 const CONFIG_STDIN = /^-?$|(^|\/)(dev|proc)(\/|$)/;
 const CONFIG_GLOB = /[*?[\]]/;
 const VERSION_PROGRAM = /^[\w.+-]+$/;
-const NAME_FLAG = /^(test|\[|printf)\s(.*\s)?-[vR](\s|$)/;
+const NAME_FLAG = /^(test|\[)\s(.*\s)?-[vR](\s|$)|^printf\s(.*\s)?-v/;
+const TREE_WRITE = /^tree\s(.*\s)?-[A-Za-z]*[oR]/;
+const TREE_FLAG = /^-[A-Za-z]*[oR]/;
+const FILE_WRITE = /^file\s(.*\s)?(-[A-Za-z0-9]*C|--compile(=|\s|$))/;
+const FILE_FLAG = /^(-[A-Za-z0-9]*C|--compile(=|$))/;
+const NODE_TEST = /^node\s+--test(?=\s|$)/;
+const SCRIPT_TEST = /^(npm|pnpm)\s+(run\s+)?test(?=\s|$)/;
+const SCRIPT_FLAG = /^(--silent|-s|--quiet|-q|--if-present)$/;
+const TEST_FLAG = /^--test-(name-pattern|skip-pattern|only|concurrency|timeout|shard|force-exit|coverage-(include|exclude|lines|branches|functions))(=.*)?$|^--experimental-test-coverage$|^--test-reporter=(spec|tap|dot|junit|lcov)$/;
+const WORD_END = /[ \t\r\n;&|<>()]/;
 const UNSAFE_FLAG = /(^|\s)(--output|--ext-diff|--pre|--watch|--stdin|--test-reporter-destination|--test-update-snapshots|-exec|-execdir|-delete|-ok|-okdir|-fprint|-fprint0|-fprintf|-fls)(=|\s|$)/;
 const FOLLOW = /^tail\s(.*\s)?(-[A-Za-z0-9]*[fF][A-Za-z0-9]*|--follow)(=|\s|$)/;
 const SETUP_COMMAND = /^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?(worktree|checkout|switch|branch)(\s|$)/;
@@ -179,10 +188,33 @@ function expands(part) {
   return false;
 }
 
+function testWords(words) {
+  return words.every((word) => !word.startsWith('-') || TEST_FLAG.test(word));
+}
+
+function scriptWords(words) {
+  const end = words.indexOf('--');
+  return (end < 0 ? words : words.slice(0, end)).every((word) => !word.startsWith('-') || SCRIPT_FLAG.test(word));
+}
+
+function testRead(part) {
+  const script = SCRIPT_TEST.exec(part);
+  if (script) return scriptWords(part.slice(script[0].length).split(/\s+/).filter(Boolean));
+  const head = NODE_TEST.exec(part);
+  return !head || testWords(part.slice(head[0].length).split(/\s+/).filter(Boolean));
+}
+
+function unquote(word) {
+  return word.replace(/"((?:[^"\\]|\\[\s\S])*)"|'([^']*)'|\\([\s\S])/g, (m, double, single, escaped) => {
+    if (double !== undefined) return double;
+    return single !== undefined ? single : escaped;
+  });
+}
+
 function bashPart(raw) {
   const part = raw.replace(QUIET, '');
   if (!PLAIN.test(part) || expands(part)) return 'other';
-  if ((READ_COMMAND.test(part) || configPart(part)) && !UNSAFE_FLAG.test(part) && !FOLLOW.test(part) && !NAME_FLAG.test(part)) return 'read';
+  if ((READ_COMMAND.test(part) || configPart(part)) && !UNSAFE_FLAG.test(part) && !FOLLOW.test(part) && !NAME_FLAG.test(part) && !TREE_WRITE.test(part) && !FILE_WRITE.test(part) && testRead(part)) return 'read';
   if (SETUP_COMMAND.test(part)) return 'setup';
   return 'other';
 }
@@ -251,6 +283,28 @@ function lex(text, base) {
     signals.push(...inner.signals);
     return end < 0 ? text.length : end + 1;
   };
+  const quoted = (from) => {
+    let k = from;
+    while (k < text.length && text[k] !== '"') {
+      if (text[k] === '\\') k += 2;
+      else if (text[k] === '$' && text[k + 1] === '(') k = nested(k + 2, closing(text, k + 2));
+      else if (text[k] === '`') k = nested(k + 1, backtick(text, k + 1));
+      else k += 1;
+    }
+    return k + 1;
+  };
+  const shellWord = (from) => {
+    let k = from;
+    while (k < text.length && !WORD_END.test(text[k])) {
+      if (text[k] === '\\') k += 2;
+      else if (text[k] === "'") k = text.indexOf("'", k + 1) < 0 ? text.length : text.indexOf("'", k + 1) + 1;
+      else if (text[k] === '"') k = quoted(k + 1);
+      else if (text[k] === '$' && text[k + 1] === '(') k = nested(k + 2, closing(text, k + 2));
+      else if (text[k] === '`') k = nested(k + 1, backtick(text, k + 1));
+      else k += 1;
+    }
+    return Math.min(k, text.length);
+  };
   let i = 0;
   while (i < text.length) {
     const c = text[i];
@@ -311,27 +365,19 @@ function lex(text, base) {
       let j = i + (text.startsWith('<<<', i) ? 3 : 1);
       if (text[j] === '&') j += 1;
       while (text[j] === ' ' || text[j] === '\t') j += 1;
-      const source = /^("[^"]*"|'[^']*'|[^\s;&|<>()])*/.exec(text.slice(j))[0];
-      for (let k = j; k < j + source.length; k += 1) {
-        if (text[k] === '$' && text[k + 1] === '(') k = nested(k + 2, closing(text, k + 2)) - 1;
-        else if (text[k] === '`') k = nested(k + 1, backtick(text, k + 1)) - 1;
-      }
-      i = j + source.length;
+      i = shellWord(j);
     } else if (c === '>' || (c === '&' && next === '>')) {
       if (c === '>') descriptor();
       else take();
       let j = c === '&' ? i + 2 : i + 1;
       if (text[j] === '>' || text[j] === '|') j += 1;
-      if (text[j] === '&') {
-        j += 1;
-        while (j < text.length && /[0-9-]/.test(text[j])) j += 1;
-      } else {
-        while (text[j] === ' ' || text[j] === '\t') j += 1;
-        const target = /^[^\s;&|<>()]*/.exec(text.slice(j))[0];
-        if (target.replace(/^["']|["']$/g, '') !== '/dev/null') flag('redirect', i, text.slice(i, j + target.length));
-        j += target.length;
-      }
-      i = j;
+      const copies = text[j] === '&';
+      if (copies) j += 1;
+      while (text[j] === ' ' || text[j] === '\t') j += 1;
+      const end = shellWord(j);
+      const target = unquote(text.slice(j, end));
+      if (target !== '/dev/null' && !(copies && /^(\d+-?|-)$/.test(target))) flag('redirect', i, text.slice(i, end));
+      i = end;
     } else if (c === '&' && next === '&') {
       cut();
       i += 2;
@@ -385,9 +431,13 @@ function partSignal(all) {
   if (VERSION_PROGRAM.test(program) && rest.length === 1 && (rest[0] === '--version' || (program === 'npx' && rest[0] === '-v'))) return null;
   if (program.includes('/') && !READ_PROGRAMS.has(name)) return `program:${program}`;
   if (WRITE_PROGRAMS.has(name) || RUN_PROGRAMS.has(name)) return `program:${name}`;
-  if (name === 'node') return rest[0] === '--test' || (rest.length === 1 && VERSION.includes(rest[0])) ? null : 'program:node';
+  if (name === 'node') return (rest[0] === '--test' && testWords(rest.slice(1))) || (rest.length === 1 && VERSION.includes(rest[0])) ? null : 'program:node';
+  if (name === 'tree') return rest.some((w) => TREE_FLAG.test(w)) ? 'program:tree' : null;
+  if (name === 'file') return rest.some((w) => FILE_FLAG.test(w)) ? 'program:file' : null;
   if (PACKAGE_MANAGERS.has(name)) {
-    const quiet = rest[0] === 'test' || (rest[0] === 'run' && rest[1] === 'test') || (rest.length === 1 && VERSION.includes(rest[0]))
+    const script = rest[0] === 'test' ? rest.slice(1) : rest[0] === 'run' && rest[1] === 'test' ? rest.slice(2) : null;
+    if (script && name !== 'yarn' && !scriptWords(script)) return `program:${name}`;
+    const quiet = script || (rest.length === 1 && VERSION.includes(rest[0]))
       || PACKAGE_READS.has(rest[0]) || (rest[0] === 'config' && (rest[1] === 'get' || rest[1] === 'list'));
     return quiet ? null : `program:${name}`;
   }
@@ -443,7 +493,9 @@ function bashVerdict(command) {
   const runsHelper = (s) => CAPTURE_COMMAND.test(s.part) || (s.code === 'program:node' && held.has((NODE_VARIABLE.exec(s.part) || [])[1]));
   const deciding = signals.filter((s) => !SETUP_SIGNALS.has(s.code) && !(capture && runsHelper(s)));
   if (capture && !deciding.length) return { decision: 'SETUP', code: 'capture', part: '' };
-  const proven = signals.some((s) => s.code === 'git:config') ? null : provenDecision(text);
+  const proof = provenDecision(text);
+  const misread = signals.some((s) => (s.code.startsWith('git:') || s.code === 'redirect') && (proof === 'ALLOW' || !SETUP_SIGNALS.has(s.code)));
+  const proven = misread ? null : proof;
   if (proven) return { decision: proven, code: proven === 'ALLOW' ? 'read' : 'setup', part: '' };
   if (deciding.length) return { decision: 'END', code: deciding[0].code, part: deciding[0].part };
   if (signals.length && /[\r\n]/.test(text)) return { decision: 'END', code: 'multi-line', part: text.split(/\r?\n/)[0] };

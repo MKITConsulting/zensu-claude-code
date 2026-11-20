@@ -846,6 +846,87 @@ test('the probe reads a git config command word by word as the shell does, so no
   assert.deepEqual(probe.bashVerdict('git worktree add w -b b && git config user.name ""'), { decision: 'END', code: 'git:config', part: 'git config user.name ' });
 });
 
+test('a git subcommand the second reading finds overrides a first-reading proof, any one an ALLOW proof and one that is no setup command a SETUP proof', () => {
+  const ended = [
+    ['git -C "x config --list" commit -am y', 'git:commit', 'git -C x config --list commit -am y'],
+    ['git -C "" init status', 'git:init', 'git -C  init status'],
+    ['git -C "" tag show', 'git:tag', 'git -C  tag show'],
+    ['git worktree add w -b b && git -C "" init status', 'git:init', 'git -C  init status'],
+  ];
+  for (const [command, code, part] of ended) assert.deepEqual(probe.bashVerdict(command), { decision: 'END', code, part }, command);
+  assert.deepEqual(probe.bashVerdict('git -C "" branch status'), { decision: 'SETUP', code: 'setup', part: 'git -C  branch status' });
+  assert.deepEqual(probe.bashVerdict('git worktree add w -b b && git branch --list'), { decision: 'SETUP', code: 'setup', part: '' });
+  for (const command of ['git -C src status && git log -1', 'git -C src config --get user.name', 'grep -n "zensu create" src/cart.js']) {
+    assert.deepEqual(probe.bashVerdict(command), { decision: 'ALLOW', code: 'read', part: '' }, command);
+  }
+});
+
+test('a >& redirection to a file is a redirect, while a descriptor copy, a close or /dev/null is none', () => {
+  const written = [
+    ['git config --get user.name >&out.txt', '>&out.txt'],
+    ['git config --get user.name >& out.txt', '>& out.txt'],
+    ['ls >&1x', '>&1x'],
+    ['ls > 2', '> 2'],
+    ['ls >& "1 x"', '>& "1 x"'],
+    ["ls >&'1 x'", ">&'1 x'"],
+    ['ls > "/dev/null x"; rm -rf src', '> "/dev/null x"'],
+    ["ls >'/dev/null x' && rm -rf src", ">'/dev/null x'"],
+    ['ls 2>&"1 "; git config --global user.name ""', '>&"1 "'],
+    ['ls >"/dev/null "; git config --global user.name ""', '>"/dev/null "'],
+    ['cd ~; ls "2">&"1 y"', '>&"1 y"'],
+    ['ls x" "2>&"1 y"', '>&"1 y"'],
+    ['git branch --list "2">&"1 y"', '>&"1 y"'],
+    ['cd ~; ls "2">&1\u00a0y', '>&1\u00a0y'],
+    ['ls "2">&1\fy', '>&1\fy'],
+    ['ls >&2\\;rm', '>&2\\;rm'],
+    ['ls >&"\\2"', '>&"\\2"'],
+    ['ls > "a\\" b"', '> "a\\" b"'],
+    ['sort x > $(rm -rf src)', '> $(rm -rf src)'],
+    ['sort x > `rm -rf src`', '> `rm -rf src`'],
+  ];
+  for (const [command, part] of written) assert.deepEqual(probe.bashVerdict(command), { decision: 'END', code: 'redirect', part }, command);
+  for (const command of ['ls >&2', 'ls >&-', 'ls 1>&2-', 'ls >&/dev/null', 'ls 2>& 1', 'git config user.name 2>& 1']) {
+    assert.deepEqual(probe.bashVerdict(command), { decision: 'RETRY', code: 'unlisted', part: command }, command);
+  }
+  assert.deepEqual(probe.bashVerdict('sort x >"/dev/null"'), { decision: 'RETRY', code: 'unlisted', part: 'sort x >/dev/null' });
+  assert.deepEqual(probe.bashVerdict('ls >&"2"'), { decision: 'RETRY', code: 'unlisted', part: 'ls >&2' });
+  assert.deepEqual(probe.bashVerdict('sort x >\\/dev/null'), { decision: 'RETRY', code: 'unlisted', part: 'sort x >/dev/null' });
+  assert.deepEqual(probe.bashVerdict('ls >&\\2'), { decision: 'RETRY', code: 'unlisted', part: 'ls >&2' });
+  assert.deepEqual(probe.bashVerdict('cat < "$(rm -rf src)"'), { decision: 'END', code: 'program:rm', part: 'rm -rf src' });
+  assert.deepEqual(probe.bashVerdict('cat < "`rm -rf src`"'), { decision: 'END', code: 'program:rm', part: 'rm -rf src' });
+  assert.deepEqual(probe.bashVerdict('sort x > "$(rm -rf src)"'), { decision: 'END', code: 'redirect', part: '> "$(rm -rf src)"' });
+  for (const command of ['git config --get user.name 2>&1', 'git config core.hooksPath 2>&1 || echo none', 'ls 2>&"1"', "ls > '/dev/null'", 'ls 2>&1\ty']) assert.equal(probe.bashDecision(command), 'ALLOW', command);
+});
+
+test('a proven read program keeps no flag that writes a file or loads code', () => {
+  const ended = [
+    ['tree -o out.txt', 'program:tree'],
+    ['tree -R src', 'program:tree'],
+    ['tree -ao out.txt', 'program:tree'],
+    ['node --test --import=x.mjs', 'program:node'],
+    ['node --test -r ./x.js', 'program:node'],
+    ['node --test --require=./x.js tests/', 'program:node'],
+    ['node --test --test-reporter=./r.mjs', 'program:node'],
+    ["printf -v'a[$(rm -rf src)]' x", 'name-flag'],
+    ['printf -vname x', 'name-flag'],
+    ['file -C -m x.magic', 'program:file'],
+    ['file --compile -m x', 'program:file'],
+    ['file -bC -m x', 'program:file'],
+    ['npm test --node-options=--require=./x.js', 'program:npm'],
+    ['npm run test --node-options=--import=data:text/javascript,1', 'program:npm'],
+    ['pnpm test --node-options=x', 'program:pnpm'],
+    ['npm test -script-shell=./x.sh', 'program:npm'],
+  ];
+  for (const [command, code] of ended) assert.deepEqual([probe.bashVerdict(command).decision, probe.bashVerdict(command).code], ['END', code], command);
+  const testFlags = '--test-name-pattern=a --test-skip-pattern=b --test-only --test-concurrency=1 --test-timeout=9 --test-shard=1/2 --test-force-exit --experimental-test-coverage --test-coverage-include=src/a.js --test-coverage-exclude=x --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=70';
+  const reporters = ['spec', 'tap', 'dot', 'junit', 'lcov'].map((name) => `node --test --test-reporter=${name} tests/`);
+  for (const command of ['tree -L 2 src', 'tree --noreport src', 'node --test tests/', `node --test ${testFlags} tests/`, ...reporters, 'printf x', 'file src/cart.js', 'file -b CHANGELOG.md', 'npm test --silent', 'npm run test -s', 'npm run test --quiet', 'npm test -q -- --test-name-pattern=cart', 'pnpm test --if-present']) {
+    assert.equal(probe.bashDecision(command), 'ALLOW', command);
+  }
+  assert.deepEqual(probe.bashVerdict('yarn test --watch'), { decision: 'RETRY', code: 'unlisted', part: 'yarn test --watch' });
+  assert.deepEqual(probe.bashVerdict('file -b CHANGELOG.md; foo'), { decision: 'RETRY', code: 'unlisted', part: 'foo' });
+});
+
 test('the probe flattens a question into one bounded line', () => {
   const question = { questions: [{ header: 'Route', question: 'Run it?', options: [{ label: 'Yes', description: 'Workflow' }, { label: 'No' }] }] };
   assert.equal(probe.flattenQuestion(question), 'Route | Run it? | Yes | Workflow | No');
@@ -1254,6 +1335,57 @@ test('the session-memory needle reads each or every request as the session, and 
   const perOptionMissing = (replacement) => route.missing(PER_OPTION_QUESTION.replace('Applies for the rest of this session', replacement), false);
   for (const replacement of ['For the rest of this session, until /zensu:delivery-route changes it', 'For the rest of this session it stays on until /zensu:delivery-route changes it']) assert.deepEqual(perOptionMissing(replacement), [], replacement);
   assert.deepEqual(perOptionMissing('For the rest of this session, it is not remembered'), ['a Yes is remembered for the session']);
+});
+
+test('the session-memory needle reads a rest-of-the-session phrase after a listed connective as fronted, and a negation only up to the next clause', () => {
+  const route = require(path.join(EVAL, 'assertions', 'route-question-complete.js'));
+  const remembered = route.NEEDLES.find(([name]) => name === 'a Yes is remembered for the session')[1];
+  const connectives = ['and', 'but', 'or', 'so', 'yet', 'then', 'however', 'although', 'though', 'even', 'because', 'since', 'as', 'if', 'when', 'once', 'unless', 'until', 'while', 'whilst', 'whereas', 'that', 'also', 'now', 'still', 'thus', 'therefore', 'hence', 'too', 'meanwhile', 'otherwise', 'instead', 'nevertheless', 'nonetheless', 'moreover', 'furthermore', 'besides', 'indeed', 'likewise'];
+  for (const word of connectives) {
+    assert.equal(remembered.test(`Pick Yes, ${word} for the rest of this session it is not remembered.`), false, word);
+    assert.equal(remembered.test(`Pick Yes, ${word} for the rest of this session it is remembered.`), true, word);
+    assert.equal(remembered.test(`Your answer, for the rest of this session, ${word}, is not remembered.`), false, word);
+  }
+  const unprompted = (rest) => `If you pick Yes, for the rest of this session you won't be prompted again ${rest}.`;
+  const contrasts = ['but', 'though', 'although', 'while', 'whilst', 'whereas', 'because'].map((word) => unprompted(`${word} kept`));
+  const joins = ['and', 'so', 'then', 'yet', 'since', 'as', 'once', 'when', 'if', 'unless', 'until'].map((word) => unprompted(`${word} it applies`));
+  const subjects = ['it applies', 'its effect stays', 'this applies', 'that applies', 'you keep it', 'your choice applies', 'the choice applies', 'a Yes applies', 'an answer applies', 'there it stays', 'Zensu keeps it', 'I keep it', 'we keep it', 'they keep it', 'my record keeps it', 'our record keeps it', 'their record keeps it'].map((rest) => unprompted(`and ${rest}`));
+  const holds = [
+    ...contrasts,
+    ...joins,
+    ...subjects,
+    'Your choice, for the rest of this session, is never asked again and stays.',
+    'If you pick Yes, for the rest of this session I will not ask again and I will apply it to plans you approve later.',
+    'If you pick Yes, for the rest of this session it applies but a No is not remembered.',
+    'If you pick Yes, for the rest of this session it applies and No is not remembered.',
+    'If you pick Yes, for the rest of this session it applies while the No is not remembered.',
+    'If you pick Yes, for the rest of this session it applies whereas your No is not remembered.',
+    'If you pick Yes, for the rest of this session it applies but a **No** is not remembered.',
+    'Pick Yes for the rest of this session.',
+  ];
+  const lacks = [
+    'Pick Yes, and for the rest of this session it is not saved or remembered.',
+    'Pick Yes, and for the rest of this session it is not shown or remembered.',
+    'Pick Yes, and for the rest of this session it will not be used and remembered.',
+    'Pick Yes, and for the rest of this session it neither applies nor is remembered.',
+    'Your answer, for the rest of this session, is not remembered and it is not stored.',
+    'Pick Yes, and for the rest of this session it applies and is not remembered.',
+    'Your answer, for the rest of this session, is not yet saved.',
+    'Pick Yes, and for the rest of this session it is not yet remembered.',
+    'Your answer, for the rest of this session, has not since been saved.',
+    'Your answer, for the rest of this session, is not so much as remembered.',
+    'Pick Yes, and also for the rest of this session it is not remembered.',
+    'Your answer, also for the rest of this session, is not remembered.',
+    'A Yes, for the rest of this session, though, is not saved.',
+    'If you pick Yes, for the rest of this session it applies but it is not remembered.',
+    'Pick Yes, and for the rest of this session it applies and it is not stored.',
+    'Your choice is not remembered and the workflow keeps running for the rest of this session.',
+    'If you pick Yes, for the rest of this session a No is not remembered.',
+  ];
+  assert.deepEqual([...holds, ...lacks].map((t) => remembered.test(t)), [...holds.map(() => true), ...lacks.map(() => false)]);
+  const disclosed = 'A Yes is remembered for the rest of this session,';
+  assert.deepEqual(route.missing(COMPLETE_TWO_OPTION_QUESTION.replace(disclosed, "If you pick Yes, for the rest of this session you won't be prompted again and it applies,"), false), []);
+  assert.deepEqual(route.missing(COMPLETE_TWO_OPTION_QUESTION.replace(disclosed, 'Pick Yes, yet for the rest of this session it is not remembered,'), false), ['a Yes is remembered for the session']);
 });
 
 test('route-question-ranked requires the recommended option first and the only one marked', () => {

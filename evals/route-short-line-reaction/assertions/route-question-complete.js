@@ -13,8 +13,9 @@ const PICK = /\b(?:pick|picks|choose|chooses|select|selects|answer|answers|say|s
 const ROUTE_CHANGE = /\/zensu:delivery-route\b/i;
 const CLAUSE_BREAK = /[,;]|:(?=\s|$)/;
 const LABEL_LEAD = /^[\s*_`"'“”‘’>•-]+/;
-const LEAD_ONLY = /^\W*(?:(?:and|but|so|then)\b\W*)*$/i;
-const CLOSING = /^[^\w/]+/;
+const LEAD_ONLY = /^\W*(?:(?:and|but|or|so|yet|then|however|although|though|even|because|since|as|if|when|once|unless|until|while|whilst|whereas|that|also|now|still|thus|therefore|hence|too|meanwhile|otherwise|instead|nevertheless|nonetheless|moreover|furthermore|besides|indeed|likewise)\b\W*)*$/i;
+const NEW_CLAUSE = /\b(?:but|though|although|while|whilst|whereas|because)\b|\b(?:and|so|then|yet|since|as|once|when|if|unless|until)\s+(?=(?:it|its|this|that|you|your|the|a|an|there|zensu|i|we|they|my|our|their|no)\b)/i;
+const NO_SUBJECT = /^\W*(?:(?:[Aa]|[Tt]he|[Yy]our)\s+)?["'“‘*_]*No\b/;
 const HOLDING = /\b(?:remember(?:s|ed)?|sav(?:e|es|ed)|stor(?:e|es|ed)|keeps?|kept|record(?:s|ed)?|appl(?:y|ies|ied)|holds?|held|carr(?:y|ies|ied)|lasts?|stays?|remains?|persists?)\b/i;
 const GAP = 80;
 
@@ -43,14 +44,18 @@ function unblocked(sentence, predicate) {
 }
 
 function negatesHolding(clause) {
-  const text = clause.replace(ASKED_AGAIN, ' ');
-  const negation = NEGATION.exec(text);
-  return Boolean(negation) && HOLDING.test(text.slice(negation.index));
+  return clause.replace(ASKED_AGAIN, ' ').split(NEW_CLAUSE).some((part, k) => {
+    if (k > 0 && NO_SUBJECT.test(part)) return false;
+    const negation = NEGATION.exec(part);
+    return Boolean(negation) && HOLDING.test(part.slice(negation.index));
+  });
 }
 
 function settled(sentence, duration) {
   const lead = clauseBefore(sentence, duration.start).split(SUBJECT).pop();
-  return !LEAD_ONLY.test(lead) || !negatesHolding(sentence.slice(duration.end).replace(CLOSING, '').split(CLAUSE_BREAK)[0]);
+  if (!LEAD_ONLY.test(lead)) return true;
+  const host = sentence.slice(duration.end).split(CLAUSE_BREAK).find((clause) => !LEAD_ONLY.test(clause));
+  return !negatesHolding(host || '');
 }
 
 function memoryHolds(sentence, memory) {
