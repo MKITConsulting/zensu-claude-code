@@ -1,0 +1,15 @@
+{
+  "description": "Verdict PASS in local matrix mode while the tree changed between --report-begin and --report-render.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "verdict.tree-changed",
+        "at": "verdict"
+      }
+    ]
+  }
+}

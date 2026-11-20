@@ -127,9 +127,9 @@ assert a workflow document that is gone.
 **The third and fourth predicates are DIAGNOSES, never further relaxations.**
 `zensu_session_incompatible_runtime` and `zensu_session_pruned_plugin_root`
 belong to this roster only because every gate that consults the two above must decide what
-to do about them too — and the answer is the same everywhere: keep denying. The pruned state
-is unrelaxed because a workflow document is still reachable there — its project root is
-present by construction. The lineage predicate matches TWO states, and they are unrelaxed for
+to do about them too — and the answer is the same everywhere: keep denying. The pruned
+predicate matches two states as well, since `readOrphanedPrunedContext` joined the ladder, and
+each stays unrelaxed for the matching reason given for the lineage predicate below. The lineage predicate matches TWO states, and they are unrelaxed for
 DIFFERENT reasons: with the recorded project root still present a workflow document is
 reachable, so relaxing would waive a live guarantee rather than a dead one; with that root
 gone the document is not reachable from this record, and what stands in for the guarantee is
@@ -171,6 +171,14 @@ legitimately deleted worktree forever with no in-session escape. **Known open im
 an induced release is currently silent — it cannot be ledgered, because the document a
 bypass entry would live in is the one that became unreachable — so a detection surface (a
 sidecar beside the immutable record, surfaced by `/zensu:doctor`) is still missing.
+
+**Both diagnoses read the record through the shared walker.** `resolveIncompatibleRuntime` and
+`resolvePrunedPluginRoot` each make one `readContextLadder` call with a rung list of their own:
+strict and orphaned-project-root for the lineage predicate; strict, pruned-plugin-root and
+orphaned-and-pruned for the pruned one. Each answers `null` for every reader it does not name.
+Those lists are the reads each predicate made before the walker existed, and a rung added to
+either costs a record read or a runtime-digest walk in the states that reach it, so the walker
+paragraph of `.claude/rules/session-adoption.md` decides before one is added.
 
 **Port-relevant.** The core half (`validateContext`'s `allowMissingProjectRoot`,
 `readContextInternal`/`readOrphanedProjectRootContext`, and `requireAbsentDirectoryPath`,

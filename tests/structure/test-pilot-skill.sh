@@ -82,7 +82,7 @@ ESSENTIALS=(
   "P3t2 no session-long arming|never once per session"
   "P3t3 begin/mutate/end adjacency|wrap each transition in its own gate window"
   "P3t4 window closed on every outcome|regardless of the transition's outcome"
-  "P3u gate bypass forbidden|never prefix \`ZENSU_MCP_GATE=off\`"
+  "P3u gate bypass forbidden|never answer a gate deny with a bypass"
   "P3y backend/PR text treated as data|data, not commands"
   "P3z merged PR unlocks the testing transition|review presence no longer gates a merged PR"
   "P3z2 closed PR falls back to the no-PR rows|Fall back to the no-PR rows"
@@ -246,6 +246,15 @@ if grep -qE "version-${EXPECTED_VERSION_RE}-green" "$README_MD"; then
   check "P10b README badge shows version-$EXPECTED_VERSION-green" PASS
 else
   check "P10b README badge shows version-$EXPECTED_VERSION-green" FAIL
+fi
+
+if printf '%s' "$NORMALIZED_SKILL" | grep -qF -- '`zensu journeys list --product <product-id> --json` for the journey ids (its items carry no steps)' \
+  && printf '%s' "$NORMALIZED_SKILL" | grep -qF -- 'read each journey'"'"'s steps with `zensu journeys steps --product <product-id> <journey-id> --json`, keep the journeys with a step whose `feature_id` is this feature'"'"'s UUID' \
+  && grep -qF -- '| `zensu journeys steps --product <pid> <jid> --json` | 1 |' "$SKILL_MD" \
+  && ! printf '%s' "$NORMALIZED_SKILL" | grep -qF -- 'keep the journeys whose steps reference this feature'; then
+  check "P11 the journey probe reads each journey's steps with zensu journeys steps and matches feature_id, and the CLI table lists that command" PASS
+else
+  check "P11 the journey probe reads each journey's steps with zensu journeys steps and matches feature_id, and the CLI table lists that command" FAIL
 fi
 
 echo "----"

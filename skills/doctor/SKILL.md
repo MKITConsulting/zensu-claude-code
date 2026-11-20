@@ -69,8 +69,8 @@ CAS workflow documents are never deleted.
 
 ## Prerequisites
 
-None. No MCP connection, no API key, no network. The tool probes are local
-(`command -v`, `--version`, `zensu auth status`). The `playwright-cli` version is read by
+None: no MCP connection, API key or network. Every probe is local: `command -v`,
+`--version`, `zensu auth status`, `ssh -G`. The `playwright-cli` version is read by
 `hooks/lib/playwright-cli-version-v1.js` from the `package.json` of the `@playwright/cli`
 package the binary on `PATH` resolves to — one beside an npm shim, else the nearest manifest
 within four directories of the resolved binary — without running it. A manifest that names
@@ -542,13 +542,12 @@ whether browser verification is enforced, not only when a row is red.
   the automatic path was either opted out
   through `hooks.sessionAutoAdopt: false` — the opt-out governs the automatic path only —
   or did not complete (a lock timeout, or a fault inside the adoption itself),
-  which a gate's deny names as `not-completed`, `lock-timeout` or `adoption-failed`.
-  Reading ADOPTABLE as the opt-out alone sends a user whose adoption merely timed out
-  looking for a config key nobody set. Then
+  which a gate's deny names as `not-completed`, `lock-timeout` or `adoption-failed`. Then
   `/zensu:adopt-session --confirm` retries by hand — it ignores the
   opt-out, so on an opted-out record ask the user before running it: the operator
   switched the automatic path off on purpose.
-  Both stay reachable in this state; so does this diagnostic. A refusal names the
+  Both stay reachable in this state through Bash outside Windows, never the Skill
+  tool; so does this diagnostic. A refusal names the
   exact condition that failed:
   `workflow-schema-mismatch` means a persisted shape really did change and a
   fresh session is the only way forward, and `executing-runtime-older` means the
@@ -558,9 +557,8 @@ whether browser verification is enforced, not only when a row is red.
   user to restart after a successful one. Carry the same conditional limit the
   row below carries: if the recorded project root is ALSO gone, the adoption
   clears the lineage break while a `zensu` CLI call, `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write the opted-in source-write gate attributes with no
-  usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created. This row is reachable in that state — the doctor
-  falls back to it when the third-fact probe cannot answer — so the remedy
-  without the clause would promise what this check did not establish.
+  usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created. The doctor
+  falls back to this row when the third-fact probe cannot answer.
 - **❌ binding: this session's Session Control record is readable, but BOTH the
   recorded project root … is gone and the running Zensu installation declares an
   incompatible lineage** → both of the two rows above at once, and it is its own
@@ -638,8 +636,10 @@ whether browser verification is enforced, not only when a row is red.
   lock timeout, or a fault inside the adoption itself), and
   `/zensu:adopt-session --confirm` retries by hand. The report marks the
   minting version `(installation pruned from the plugin cache)`. Both
-  commands and this diagnostic stay reachable, and `Stop` is released rather
-  than wedged. Do NOT tell the user to restart after a successful adoption.
+  commands and this diagnostic stay reachable through Bash outside Windows, never
+  the Skill tool, and `Stop` is released rather than wedged. Relay the row's clause
+  for a recorded project root that is gone as well, and do NOT tell the user to
+  restart after a successful adoption.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
   command can advance. Report it and name `/zensu:recover-chain`, which must be
   run **from the session that owns that chain** (the row prints its truncated
@@ -794,11 +794,10 @@ whether browser verification is enforced, not only when a row is red.
   the directory the row prints and stop; offer no cleanup, and never suggest
   deleting a run document counted by THIS row — one of them may still hold a
   working tree a live run is driving, which is the whole reason the row exists.
-  The row below is the deliberate exception and states its own ground. The count excludes a document the report
+  The count excludes a document the report
   could still read well enough to see a `DONE` or `CANCELLED` stage, because the
-  working-tree claim is false of such a record — NOT because it is harmless. Those
-  are counted by the row below instead, so a run file you know to be malformed may
-  legitimately be absent from THIS row and present in that one. Everything this row
+  working-tree claim is false of such a record — NOT because it is harmless. Those,
+  and a moved nonterminal record, have rows of their own. Everything this row
   counts is nonterminal or unreadable outright, which is what makes its
   working-tree claim true of every member.
 - **⚠️ autopilot: `<N>` durable run document(s) this report does not accept whose
@@ -814,6 +813,8 @@ whether browser verification is enforced, not only when a row is red.
   document it has just refused, in a directory any session in the project can
   write. Leave the removal to the user, and never generalize this permission to
   the row above.
+- **⚠️ autopilot: `<N>` durable run document(s) whose recorded project root no longer
+  exists** → a moved live run: relay its route, never offer deletion.
 - **autopilot lease:** rows (✅ or ⚠️) → read `references/autopilot-lease.md` before you relay
   any of them, and follow it. Never delete a lease artifact and never offer to.
 - **⚠️ topology: this session's audited run log claims edits under `<N>` root(s)

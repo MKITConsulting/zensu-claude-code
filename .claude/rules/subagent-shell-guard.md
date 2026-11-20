@@ -202,8 +202,8 @@ grows past 64 directories is denied (`directories`).
 - `ZENSU_CONFIG` adds only its own file, and the project root and its ancestors are never
   protected parents: a config file beside the project would otherwise make the project's
   parent untouchable, and removing those directories is the project-root rule's case.
-- The CLI gate ignores the inline `ZENSU_MCP_GATE=off` prefix for a subagent, its deny reason
-  for a subagent leaves the prefix out, and the guard also denies that assignment.
+- The CLI gate ignores the inline `ZENSU_MCP_GATE=off` prefix for a subagent, its deny reasons
+  name no escape for a subagent or the main thread, and the guard also denies that assignment.
 - `mcpGate: false` and a host-environment `ZENSU_MCP_GATE=off` switch the CLI gate off for the
   subagent too. The operator chose that; the guard does not re-implement the CLI map.
 - The CLI gate gates every invocation that `commandInvocations`, this module's walker over
@@ -260,8 +260,10 @@ grows past 64 directories is denied (`directories`).
   restate what `RESERVED_WORDS`, `SHELL_ASSIGNMENT`, `SHELL_WRAP` and `WRAPPER_OPTIONS` say in
   `hooks/lib/bash-source-write-parse.js`. The unit case `the shell readers of the source-write
   parser and the subagent shell guard, compared over one corpus` in
-  `tests/structure/git-repo-escape.test.js` pins where the two readers agree and the three places
-  they differ: `env -S`, `sudo -h` and the wrappers only this guard sees through.
+  `tests/structure/git-repo-escape.test.js` pins where the two readers agree and where they
+  differ: `env -S`, `sudo -h`, the wrappers only this guard sees through, and the code a command
+  hands to a shell, `eval` or `trap`, which the two read with separate shell lists and separate
+  code-operand rules (its `nested` map, `.claude/rules/git-mutation-tables.md`).
 - The neutral sentence of `renderHostContext` in `hooks/lib/session-control-core-v1.js`: pinned
   verbatim in `tests/structure/test-session-control-claude.sh` and
   `evals/session-control/tests/wrapper-selftest.sh`; `test-reviewer-capability-gate.sh` checks

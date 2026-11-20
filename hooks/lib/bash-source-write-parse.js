@@ -81,7 +81,7 @@
 const path = require("path");
 const fs = require("fs");
 const { execFileSync } = require("child_process");
-// The ONLY sibling require in this file, and a deliberate one: the MSYS drive
+// The ONLY eager sibling require in this file, and a deliberate one: the MSYS drive
 // rule has to be identical to the one the session-control path boundary applies,
 // and the program-name reading to the one the other gates are to share, so a
 // shared total function is the way to guarantee that instead of a hand-copy held
@@ -135,7 +135,7 @@ const WRAPPER_OPTIONS = Object.assign(Object.create(null), {
     long: { format: 1, output: 1, append: 0, portability: 0, quiet: 0, verbose: 0, help: 0, version: 0 },
     effects: {}
   },
-  command: { flags: "pvV", operands: "", optional: "", long: {}, effects: {} },
+  command: { flags: "pvV", operands: "", optional: "", long: {}, effects: { v: "lookup", V: "lookup" } },
   builtin: { flags: "", operands: "", optional: "", long: {}, effects: {} },
   exec: { flags: "cl", operands: "a", optional: "", long: {}, effects: { c: "clear" } }
 });
@@ -214,7 +214,7 @@ const GIT_OPTS_WITH_OPERAND = new Set(
 
 const OPT_IN_NOTE =
   " This gate is opt-in and runs because hooks.bashWriteGate is true in the Zensu config; " +
-  "if the command is intended, ask the user to run it or to switch the gate off.";
+  "if the command is intended, ask the user to run it.";
 
 function stripSlash(p) {
   return p && p.length > 1 && p.endsWith("/") ? p.replace(/\/+$/, "") : p;
@@ -808,7 +808,7 @@ function wrapperArguments(name, words, start, out) {
   if (!spec) return start;
   const apply = (key, value, at, source) => {
     const kind = Object.prototype.hasOwnProperty.call(spec.effects, key) ? spec.effects[key] : "";
-    if (kind === "clear") out.ops.push({ kind });
+    if (kind === "clear" || kind === "lookup") out.ops.push({ kind });
     else if (value === undefined) return;
     else if (kind === "unset" || kind === "chdir") out.ops.push({ kind, name: value });
     else if (kind === "split" && out.splits++ < MAX_SPLITS) {
@@ -1162,6 +1162,24 @@ function detectChannels(cmd) {
   return Array.from(found).join("\n");
 }
 
+const ADOPTION_INPUTS = new Set([
+  "ZADOPT_PLUGIN_DATA",
+  "ZADOPT_SESSION_ID",
+  "ZADOPT_PLUGIN_ROOT",
+  "ZADOPT_MODE",
+  "ZADOPT_CONFIRM"
+]);
+
+const REANCHOR_INPUTS = new Set([
+  "ZREANCHOR_PLUGIN_ROOT",
+  "ZREANCHOR_PLUGIN_DATA",
+  "ZREANCHOR_TARGET",
+  "ZREANCHOR_CONFIRM",
+  "ZREANCHOR_WORKTREE_KEEP",
+  "ZREANCHOR_WORKTREE_KEEP_IDLE_HOURS",
+  "ZREANCHOR_BASH"
+]);
+
 const CONTROL_BINDINGS = new Set([
   "CLAUDE_ENV_FILE",
   "CLAUDE_CODE_SESSION_ID",
@@ -1169,7 +1187,9 @@ const CONTROL_BINDINGS = new Set([
   "ZENSU_SESSION_KEY",
   "ZENSU_SESSION_CONTEXT",
   "ZENSU_RUNTIME_DIGEST",
-  "ZENSU_PROJECT_ROOT"
+  "ZENSU_PROJECT_ROOT",
+  ...ADOPTION_INPUTS,
+  ...REANCHOR_INPUTS
 ]);
 
 function bindingFromAssignment(word) {
@@ -1239,25 +1259,41 @@ function wordsReferToControlPath(cmd, envFile) {
   return !!target && readings(cmd).flat(2).some((w) => !w.op && controlPathNamespace(w.value) === target);
 }
 
+const ENV_FILE_WRITE = "Blocked a Bash write to CLAUDE_ENV_FILE. Model commands must not alter the environment inherited by later Claude Code Bash calls.";
+
+function envFileWrite(text) {
+  const envFile = process.env.CLAUDE_ENV_FILE || "";
+  const refersToEnvFile = /\$\{?CLAUDE_ENV_FILE\}?/.test(text)
+    || commandRefersToControlPath(text, envFile)
+    || wordsReferToControlPath(text, envFile);
+  return refersToEnvFile && Boolean(detectChannels(text));
+}
+
 // Claude's host session selector and Zensu's helper-private bindings must not
 // be rebound by a model-issued Bash call. Likewise, model commands may not
 // write CLAUDE_ENV_FILE and poison later Bash environments. This check is
 // deliberately independent of the source-write config and escape hatches.
 function detectControlMutation(cmd) {
   if (!cmd) return "";
-  const envFile = process.env.CLAUDE_ENV_FILE || "";
   // Keep the symbolic reference check independent from path normalization: a
   // command that writes through $CLAUDE_ENV_FILE must stay denied even if the
   // ambient value is missing, native Windows, or otherwise uncomparable.
-  const refersToEnvFile = /\$\{?CLAUDE_ENV_FILE\}?/.test(cmd)
-    || commandRefersToControlPath(cmd, envFile)
-    || wordsReferToControlPath(cmd, envFile);
-  if (refersToEnvFile && detectChannels(cmd)) {
-    return "Blocked a Bash write to CLAUDE_ENV_FILE. Model commands must not alter the environment inherited by later Claude Code Bash calls.";
-  }
+  if (envFileWrite(cmd)) return ENV_FILE_WRITE;
 
   const found = controlFinding(cmd);
   if (!found) return "";
+  if (found.kind === "envfile") return ENV_FILE_WRITE;
+  if (found.kind === "foreign") {
+    return "Blocked a Bash command that hands code to " + found.name + " because " + found.reason + ". " +
+      "This check keeps model commands from rebinding Claude Code's Session Control inputs and from writing the file " +
+      "behind CLAUDE_ENV_FILE, and it refuses code handed to PowerShell or cmd that it cannot rule out doing either. " +
+      "Rewrite the command without that construct.";
+  }
+  if (found.kind === "positional") {
+    return "Blocked a Bash command that hands the protected Session Control input " + found.name +
+      " to a shell as a positional word, which the shell's code can run or assign. " +
+      "Pass its value instead of its name, or write the command without it.";
+  }
   if (found.kind === "unread") {
     return "Blocked a Bash command with more than " + MAX_SPLITS + " env -S split strings, which this check does not read. Write the command without nesting env -S.";
   }
@@ -1268,14 +1304,19 @@ function detectControlMutation(cmd) {
     return "Blocked a Bash nameref declaration, which this check cannot follow to the variable it names. Assign the variable by its literal name instead.";
   }
   if (found.kind === "deep") {
-    return "Blocked a Bash command nested deeper than this check reads. Write the command with fewer nested substitutions.";
+    return "Blocked a Bash command nested deeper than this check reads. Write the command with fewer nested substitutions or shells.";
   }
-  return found.kind === "removal"
-    ? "Blocked removal of protected Session Control input " + found.name + ". Start a fresh Claude Code session instead."
-    : "Blocked a Bash rebind of protected Session Control input " + found.name + ". Start a fresh Claude Code session instead.";
+  const remedy = ADOPTION_INPUTS.has(found.name)
+    ? " zensu-session-adopt.sh sets it itself, so run /zensu:adopt-session in the session the repair is for."
+    : REANCHOR_INPUTS.has(found.name)
+      ? " zensu-session-reanchor.sh sets it itself, so run /zensu:adopt-session --reanchor in the session the move is for."
+      : " Start a fresh Claude Code session instead.";
+  return (found.kind === "removal"
+    ? "Blocked removal of protected Session Control input "
+    : "Blocked a Bash rebind of protected Session Control input ") + found.name + "." + remedy;
 }
 
-function readControlMutation(cmd) {
+function readControlMutation(cmd, context) {
   for (const segment of readings(cmd).flat()) {
     const descriptor = segment.find((w) => w.fdName && CONTROL_BINDINGS.has(w.fdName));
     if (descriptor) return { kind: "rebind", name: descriptor.fdName };
@@ -1289,7 +1330,7 @@ function readControlMutation(cmd) {
     if (read.index >= read.words.length) continue;
     const cmd0 = read.word.split("/").pop();
     const args = read.words.slice(read.index + 1).map((w) => w.value);
-    const found = baseControlMutation(cmd0, args, bindingFromAssignment);
+    const found = baseControlMutation(cmd0, args, bindingFromAssignment) || runsNested(read, args, context);
     if (found) return found;
   }
   return null;
@@ -1322,6 +1363,99 @@ function wordSplitControlMutation(cmd) {
     if (found) return found;
   }
   return null;
+}
+
+const MAX_SHELL_NESTING = 8;
+const NESTED_SHELLS = new Set("sh bash rbash zsh dash ksh mksh ash hush yash posh lksh oksh pdksh loksh fish csh tcsh".split(" "));
+const FOREIGN_HOSTS = new Set(["powershell", "powershell_ise", "pwsh", "cmd"]);
+
+function shellProgram(word) {
+  const program = programName(word);
+  if (NESTED_SHELLS.has(program)) return program;
+  const unversioned = program.replace(/-?[0-9][0-9.]*$/, "");
+  return NESTED_SHELLS.has(unversioned) ? unversioned : "";
+}
+
+const PROTECTED_WORD = new RegExp("(?<![A-Za-z0-9_$])(?<!\\$\\{)(?:" + Array.from(CONTROL_BINDINGS).join("|") + ")(?![A-Za-z0-9_])");
+
+function shellCodeCandidates(args, upper) {
+  const letter = upper ? /[cC]/ : /c/;
+  const takesCode = (value) => /^[-+]/.test(value) && letter.test(value);
+  const start = args.findIndex(takesCode);
+  if (start === -1) return { code: [], positional: [] };
+  const attachedCode = (value) => {
+    const equals = value.indexOf("=");
+    return value.startsWith("--") ? (equals === -1 ? "" : value.slice(equals + 1)) : value.slice(value.search(letter) + 1);
+  };
+  const words = args.slice(start + 1);
+  const attached = args.slice(start).filter(takesCode).map(attachedCode);
+  const carried = upper && attached.some(Boolean);
+  const first = carried ? -1 : words.findIndex((value) => !/^[-+]/.test(value));
+  return {
+    code: attached.concat(words, [words.slice(1).join(" "), words.slice(2).join(" ")]),
+    positional: words.filter((value, index) => index !== first && !(carried && takesCode(value) && attachedCode(value)))
+  };
+}
+
+function trapAction(args) {
+  const rest = args[0] === "--" ? args.slice(1) : args;
+  return rest.length >= 2 && !/^-./.test(rest[0]) ? rest[0] : null;
+}
+
+function nestedCode(word, args) {
+  const shell = shellProgram(word);
+  if (shell) return shellCodeCandidates(args, shell === "fish");
+  if (programName(word) === "busybox" && args.length > 0 && shellProgram(args[0])) return shellCodeCandidates(args.slice(1), false);
+  const cmd0 = word.split("/").pop();
+  if (cmd0 === "eval") return { code: [(args[0] === "--" ? args.slice(1) : args).join(" ")], positional: [] };
+  if (cmd0 === "trap") return { code: [trapAction(args)], positional: [] };
+  if (cmd0 === "emulate") return shellCodeCandidates(args, false);
+  return { code: [], positional: [] };
+}
+
+function powershellLiteral(value) {
+  return "'" + String(value).replace(/'/g, "''") + "'";
+}
+
+function foreignFinding(host, args) {
+  let powershell = null;
+  try {
+    powershell = require("./powershell-command-v1.js");
+  } catch (_error) {
+    return { kind: "foreign", name: host, reason: POWERSHELL_UNLOADED };
+  }
+  const envFile = process.env.CLAUDE_ENV_FILE || "";
+  const reason = powershell.controlVerdict([host].concat(args.map(powershellLiteral)).join(" "), {
+    names: Array.from(CONTROL_BINDINGS),
+    refersToEnvFile: (text) => commandRefersToControlPath(text, envFile)
+  });
+  return reason ? { kind: "foreign", name: host, reason } : null;
+}
+
+function nestedFinding(word, args, context) {
+  const scope = context || { depth: 0, seen: new Map() };
+  const host = programName(word);
+  if (FOREIGN_HOSTS.has(host)) return foreignFinding(host, args);
+  const nested = nestedCode(word, args);
+  for (const code of nested.code) {
+    if (!code) continue;
+    if (scope.depth >= MAX_SHELL_NESTING) return { kind: "deep", name: "" };
+    const key = scope.depth + "\u0000" + code;
+    let found = scope.seen.get(key);
+    if (found === undefined) {
+      found = envFileWrite(code)
+        ? { kind: "envfile", name: "" }
+        : controlFinding(code, { depth: scope.depth + 1, seen: scope.seen });
+      scope.seen.set(key, found);
+    }
+    if (found) return found;
+  }
+  const named = nested.positional.map((value) => PROTECTED_WORD.exec(value)).find(Boolean);
+  return named ? { kind: "positional", name: named[0] } : null;
+}
+
+function runsNested(read, args, context) {
+  return read.ops.some((op) => op.kind === "lookup") ? null : nestedFinding(read.word, args, context);
 }
 
 function baseControlMutation(cmd0, args, binding) {
@@ -1636,7 +1770,7 @@ function conditionalFinding(tokens) {
   return null;
 }
 
-function commandFinding(words) {
+function commandFinding(words, context) {
   if (!words.length) return null;
   const read = commandWords(words);
   if (read.overflow) return { kind: "unread", name: "" };
@@ -1653,12 +1787,13 @@ function commandFinding(words) {
   if (cmd0 === "coproc") {
     const rest = read.words.slice(read.index + 1);
     const name = rest.length ? protectedName(rest[0].value) : "";
-    return name ? { kind: "rebind", name } : commandFinding(rest);
+    return name ? { kind: "rebind", name } : commandFinding(rest, context);
   }
-  return builtinControlMutation(cmd0, read.words.slice(read.index + 1).map((w) => w.value));
+  const args = read.words.slice(read.index + 1).map((w) => w.value);
+  return builtinControlMutation(cmd0, args) || runsNested(read, args, context);
 }
 
-function shellFinding(source, bashQuotes) {
+function shellFinding(source, bashQuotes, context) {
   const deep = { kind: "deep", name: "" };
   const limit = 32 * source.length + 65536;
   let steps = 0;
@@ -1988,7 +2123,7 @@ function shellFinding(source, bashQuotes) {
       target = false;
       redirected = false;
       if (inCase("head")) return null;
-      const found = commandFinding(words);
+      const found = commandFinding(words, context);
       words = [];
       return found;
     };
@@ -2033,7 +2168,7 @@ function shellFinding(source, bashQuotes) {
       if (c === "[" && next === "[" && !word && !inCase("pattern") && (atCommand() || coprocName()) && /\s/.test(text[i + 2] || "")) {
         const read = conditional(text, i + 2, depth + 1);
         if (read.found) return { end: text.length, found: read.found };
-        const prior = (read.broken === -1 ? null : commands(text, read.broken, closer, depth + 1).found) || commandFinding(words);
+        const prior = (read.broken === -1 ? null : commands(text, read.broken, closer, depth + 1).found) || commandFinding(words, context);
         if (prior) return { end: text.length, found: prior };
         words = [];
         i = read.end;
@@ -2201,15 +2336,16 @@ function shellFinding(source, bashQuotes) {
   return commands(source, 0, "", 0).found;
 }
 
-function shellControlMutation(cmd) {
-  const found = shellFinding(cmd, false) || shellFinding(cmd, true);
+function shellControlMutation(cmd, context) {
+  const found = shellFinding(cmd, false, context) || shellFinding(cmd, true, context);
   if (found || cmd.indexOf("\\\n") === -1) return found;
   const joined = joinedText(cmd);
-  return shellFinding(joined, false) || shellFinding(joined, true);
+  return shellFinding(joined, false, context) || shellFinding(joined, true, context);
 }
 
-function controlFinding(cmd) {
-  return readControlMutation(cmd) || wordSplitControlMutation(cmd) || shellControlMutation(cmd);
+function controlFinding(cmd, context) {
+  const scope = context || { depth: 0, seen: new Map() };
+  return readControlMutation(cmd, scope) || wordSplitControlMutation(cmd) || shellControlMutation(cmd, scope);
 }
 
 const POWERSHELL_CONTROL_MAIN =
@@ -2263,6 +2399,32 @@ function powershellVerdict(cmd, mode, child) {
     "provably read-only. Run it through the Bash tool, or change files with Edit or Write." + OPT_IN_NOTE;
 }
 
+const FRAME_HEAD = "ZENSU-BSWG-FRAME-V1 ";
+const FRAME_DOCUMENT_MAX = 4 * 1024 * 1024;
+
+function readFrame(input) {
+  const head = Buffer.from(FRAME_HEAD, "utf8");
+  if (input.length < head.length || !input.subarray(0, head.length).equals(head)) {
+    return { payload: input.toString("utf8"), document: null };
+  }
+  const newline = input.indexOf(10, head.length);
+  const sizeText = newline < 0 ? "" : input.subarray(head.length, newline).toString("utf8");
+  const size = /^[0-9]{1,8}$/.test(sizeText) ? Number(sizeText) : -1;
+  if (size < 0 || size > FRAME_DOCUMENT_MAX || newline + 1 + size > input.length) {
+    return { payload: "", document: null, broken: true };
+  }
+  const body = input.subarray(newline + 1);
+  let document = null;
+  if (size > 0) {
+    try {
+      document = JSON.parse(body.subarray(0, size).toString("utf8"));
+    } catch (e) {
+      document = null;
+    }
+  }
+  return { payload: body.subarray(size).toString("utf8"), document };
+}
+
 function payloadFields(raw) {
   try {
     const j = JSON.parse(raw || "{}");
@@ -2296,8 +2458,17 @@ function main() {
   // The env branch remains for tests/structure/test-secret-scan-gate.sh, whose
   // detect() helper supplies the payload with no stdin redirect.
   let raw = process.env.PAYLOAD;
+  let frameDocument = null;
   if (raw === undefined || raw === "") {
-    try { raw = fs.readFileSync(0, "utf8"); } catch (e) { raw = ""; }
+    let input;
+    try { input = fs.readFileSync(0); } catch (e) { input = Buffer.alloc(0); }
+    const framed = readFrame(input);
+    if (framed.broken) {
+      process.exitCode = 1;
+      return "";
+    }
+    raw = framed.payload;
+    frameDocument = framed.document;
   }
   const fields = payloadFields(raw);
   if (!fields) return "";
@@ -2363,6 +2534,26 @@ function main() {
   }
   const projectRoot = canonical(process.env.CLAUDE_PROJECT_DIR || cwd0 || process.cwd());
   let curdir = cwd0 ? canonical(cwd0) : projectRoot;
+  let codeRootTops = [];
+  if (frameDocument) {
+    try {
+      const codeRoots = require("./code-roots-v1.js");
+      const read = codeRoots.declaresLiveRoots(frameDocument)
+        ? codeRoots.readCodeRoots(frameDocument, {
+          anchor: projectRoot,
+          pluginData: process.env.CLAUDE_PLUGIN_DATA || "",
+          claudeConfigDir: process.env.CLAUDE_CONFIG_DIR || "",
+        })
+        : { status: "absent" };
+      if (read.status === "ok") codeRootTops = read.roots.map((root) => canonical(root.top));
+    } catch (e) {
+      codeRootTops = [];
+    }
+  }
+  const unionRoots = [projectRoot].concat(codeRootTops);
+  const inUnion = (p) => unionRoots.some((root) => within(root, p));
+  const containsUnionMember = (t) => unionRoots.some((root) => within(t, root));
+  const inCodeRoot = (p) => codeRootTops.some((root) => within(root, p));
 
   // Temp roots are exempt from the (B) escape rule. ZENSU_BSWGATE_TEMP_DIRS (a
   // colon-separated list) overrides the default set when present — an advanced
@@ -2388,7 +2579,7 @@ function main() {
   // A temp root that CONTAINS the project would exempt the project itself and
   // switch all three rules off — with no bypass-ledger entry, unlike the
   // documented escape hatches. `/` as an entry is the degenerate case.
-  const TEMP_SAFE = () => TEMP.filter((t) => !within(t, projectRoot));
+  const TEMP_SAFE = () => TEMP.filter((t) => !containsUnionMember(t));
   // The canonical spellings are computed ONCE, on the first isTemp call the raw
   // list does not satisfy — which in practice means the first in-project
   // candidate, since those are under no temp root either. Replacing the raw list
@@ -2422,7 +2613,7 @@ function main() {
       // above in its raw spelling and only widens once canonical() resolves it,
       // switching rules (B) and (C) off for every path with no ledger entry.
       TEMP_REAL = safe.map(canonical).filter((t, i, a) =>
-        t !== safe[i] && a.indexOf(t) === i && !isUnsafeTempEntry(t, path) && !within(t, projectRoot));
+        t !== safe[i] && a.indexOf(t) === i && !isUnsafeTempEntry(t, path) && !containsUnionMember(t));
     }
     return TEMP_REAL.some((t) => p === t || within(t, p));
   }
@@ -2438,14 +2629,18 @@ function main() {
   // cannot be reinterpreted as a flag.
   function tracked(p) {
     const dir = path.dirname(p);
-    const opts = { stdio: "ignore", timeout: 2000 };
+    const readOnly = inCodeRoot(p) ? require("./git-read-only-v1.js") : null;
+    const opts = readOnly
+      ? { stdio: "ignore", timeout: 2000, env: readOnly.gitEnvironment() }
+      : { stdio: "ignore", timeout: 2000 };
+    const args = (rest) => (readOnly ? readOnly.READ_ONLY_GIT.concat(rest) : rest);
     try {
-      execFileSync("git", ["-C", dir, "ls-files", "--error-unmatch", "--", p], opts);
+      execFileSync("git", args(["-C", dir, "ls-files", "--error-unmatch", "--", p]), opts);
       return true;
     } catch (e1) {
       if (bail(e1)) return false;
       try {
-        execFileSync("git", ["-C", dir, "rev-parse", "--is-inside-work-tree"], opts);
+        execFileSync("git", args(["-C", dir, "rev-parse", "--is-inside-work-tree"]), opts);
         return false;
       } catch (e2) {
         if (bail(e2)) return false;
@@ -2471,7 +2666,7 @@ function main() {
     // needs an operand, not a channel token: detectChannels matches text, so
     // it reports `redirect` for `git commit -m "fix: A -> B"`.
     if (targetsOnly) return "WRITE-TARGET " + p + " (via " + channel + ")";
-    if (!within(projectRoot, p)) {
+    if (!inUnion(p)) {
       return (
         "Blocked a Bash write to a source file OUTSIDE this session's worktree/project root (" +
         p +
@@ -2517,7 +2712,7 @@ function main() {
     // one resolves identically for every possible expansion — `worktree remove
     // --force /abs/foreign/wt` destroys that tree whatever `-C "$REPO"` becomes.
     const judgeable = t.unresolved ? ((p) => t.absolute.indexOf(p) !== -1) : (() => true);
-    const escapes = (p) => !isTemp(p) && !within(projectRoot, p);
+    const escapes = (p) => !isTemp(p) && !inUnion(p);
     const workTrees = t.workTrees.slice();
     const gitDirs = t.gitDirs.slice();
     // Env-sourced designations obey the same UNEXPANDED contract as their flag
@@ -2533,7 +2728,7 @@ function main() {
     // permanently outside the session root — so an explicitly in-project work tree
     // makes the accompanying git dir a false positive, not an escape. Without a
     // work tree a foreign git dir still receives the commit, so it stays a candidate.
-    const workTreeInProject = workTrees.length > 0 && workTrees.every((w) => within(projectRoot, w));
+    const workTreeInProject = workTrees.length > 0 && workTrees.every((w) => inUnion(w));
     // `worktree remove|move` never touches the addressed repository's own working
     // tree — only its worktree bookkeeping and the tree named as an operand. So it
     // is judged on that operand INSTEAD of on `repo`: removing a scratch worktree
@@ -2744,14 +2939,13 @@ function heredocBodies(s) {
   return bodies;
 }
 
-if (require.main === module) {
-  process.stdout.write(main());
-} else {
+{
   // Copies, not the live tables. Object.freeze does NOT protect a Set — its
   // entries live in an internal slot, so a frozen Set still accepts .delete()
   // and an in-process consumer could neuter rule (C) for that process.
   module.exports = {
     OPT_IN_NOTE,
+    FRAME_DOCUMENT_MAX,
     controlVerdict,
     detectChannels,
     detectControlMutation,
@@ -2772,4 +2966,8 @@ if (require.main === module) {
     GIT_OPTS_WITH_OPERAND: Object.freeze(Array.from(GIT_OPTS_WITH_OPERAND)),
     GIT_READONLY_FORMS: Object.freeze(Object.keys(GIT_READONLY_FORMS))
   };
+}
+
+if (require.main === module) {
+  process.stdout.write(main());
 }

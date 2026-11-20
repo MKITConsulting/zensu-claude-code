@@ -1,0 +1,12 @@
+{
+  "description": "A manifest that names another schema version, which a v1 reader refuses with one fault naming it.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "schema.version",
+        "at": "schema"
+      }
+    ]
+  }
+}

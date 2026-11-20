@@ -675,8 +675,8 @@ memory_has "http://127.0.0.1:4200" "/envonly" "remembered" \
   || check "H8b a zensu-verify session named by the environment is gated" FAIL
 
 for url in "http://app.localhost:4200/" "http://localhost.:4200/" "http://10.0.0.5/" "https://192.168.1.10/" "http://user:pw@127.0.0.1:4200/" \
-  "http://127.0.0.1:4200/?t=1" "http://127.0.0.1:4200/#x" "file:///etc/passwd"; do
-  [ "$(pre_verdict "$CLI goto $url" "$SID" "$PROJ")" = "DENY" ] \
+  "https://app.example.com/?t=1" "https://app.example.com/#x" "http://10.0.0.5/?t=1" "http://app.localhost:4200/#x" "file:///etc/passwd"; do
+  [ "$(pre_verdict "$CLI goto '$url'" "$SID" "$PROJ")" = "DENY" ] \
     && check "H9 the floor denies $url" PASS || check "H9 the floor denies $url" FAIL
 done
 [ "$(pre_verdict "$CLI goto http://localhost:4395/" "$SID" "$PROJ")" = "ASK" ] \
@@ -713,6 +713,34 @@ case "$(pre_reason "$CLI goto 'https://*.example.com/'" "$SID" "$PROJ" "$HUMAN")
   *'an origin must name its host exactly'*) check "H9f a pattern host is refused by the floor even where a prompt could be shown" PASS ;;
   *) check "H9f a pattern host is refused by the floor even where a prompt could be shown" FAIL ;;
 esac
+H9G_BARE="$(pre_reason "$CLI goto 'http://127.0.0.1:4410/login'" "$SID" "$PROJ")"
+H9G_QUERY="$(pre_reason "$CLI goto 'http://127.0.0.1:4410/login?scenario=1#top'" "$SID" "$PROJ")"
+if [ "$(pre_verdict "$CLI goto 'http://127.0.0.1:4410/login?scenario=1#top'" "$SID" "$PROJ")" = "ASK" ] \
+  && [ -n "$H9G_BARE" ] && [ "$H9G_BARE" = "$H9G_QUERY" ]; then
+  check "H9g a loopback target with a query and a fragment asks with the same prompt as the target without them" PASS
+else
+  check "H9g a loopback target with a query and a fragment asks with the same prompt as the target without them" FAIL
+fi
+[ "$(pre_verdict "$CLI tab-new 'http://localhost:4411/#/dashboard'" "$SID" "$PROJ")" = "ASK" ] \
+  && check "H9h a tab-new to localhost with a fragment asks" PASS \
+  || check "H9h a tab-new to localhost with a fragment asks" FAIL
+case "$(pre_reason "$CLI goto 'https://app.example.com/?scenario=1'" "$SID" "$PROJ" "$HUMAN")" in
+  *'navigation target contains query or fragment'*) check "H9i a remote target with a query is refused by the floor even where a prompt could be shown" PASS ;;
+  *) check "H9i a remote target with a query is refused by the floor even where a prompt could be shown" FAIL ;;
+esac
+case "$(pre_reason "$CLI goto http://127.0.0.1:4412/?scenario=1" "$SID" "$PROJ")" in
+  *'must carry literal arguments only'*'single-quoted literal arguments'*) check "H9j an unquoted URL with a question mark stays a shape denial that names the single-quoted retry" PASS ;;
+  *) check "H9j an unquoted URL with a question mark stays a shape denial that names the single-quoted retry" FAIL ;;
+esac
+H9K_BEFORE="$(memory_count)"
+[ "$H9K_BEFORE" = "none" ] && H9K_BEFORE=0
+post_run "$CLI goto 'http://127.0.0.1:4413/login?scenario=zq-secret-91#frag-zq-secret-91'" "$SID" "$PROJ" >/dev/null
+if memory_has "http://127.0.0.1:4413" "/login" "asked" && [ "$(memory_count)" = "$((H9K_BEFORE + 1))" ] \
+  && ! grep -q 'zq-secret' "$MEMORY"; then
+  check "H9k the recorder stores the path of a navigation with a query and a fragment, and no query value" PASS
+else
+  check "H9k the recorder stores the path of a navigation with a query and a fragment, and no query value" FAIL
+fi
 
 SUBAGENT='{"agent_id":"agent-1","agent_type":"general-purpose"}'
 case "$(pre_reason "$CLI snapshot" "$SID" "$PROJ" "$SUBAGENT")" in
@@ -868,7 +896,7 @@ post_run "$CLI goto https://app.example.com/" "$SID" "$PROJ" >/dev/null
 post_run "$CLI eval 1" "$SID" "$PROJ" >/dev/null
 post_run "$CLI goto http://app.localhost:4200/" "$SID" "$PROJ" >/dev/null
 COUNT_AFTER="$(memory_count)"
-[ "$COUNT_BEFORE" = "8" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
+[ "$COUNT_BEFORE" = "9" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
   && check "H14 interrupted and denied calls are never recorded" PASS \
   || check "H14 interrupted and denied calls are never recorded (before=$COUNT_BEFORE after=$COUNT_AFTER)" FAIL
 [ "$(pre_verdict "$CLI goto http://127.0.0.1:4360/" "$SID" "$PROJ")" = "ASK" ] \
@@ -1201,6 +1229,15 @@ if [ -z "$DRIFT_MISSING" ]; then
   check "V49 docs/gates.md names the version-drift gap: user-supplied driver, manifest-only guard, run-config fences and channels" PASS
 else
   check "V49 docs/gates.md names the version-drift gap: user-supplied driver, manifest-only guard, run-config fences and channels (missing:$DRIFT_MISSING)" FAIL
+fi
+if printf '%s' "$GATES_FLAT" | grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not" \
+  && printf '%s' "$GATES_FLAT" | grep -qF 'playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins' \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not" \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'it refuses every other HTTP(S) request there'; then
+  check "V73 docs/gates.md and docs/verify-feature.md name a shared worker's fetch as an exception to the HTTP(S) fence, with the measured versions" PASS
+else
+  check "V73 docs/gates.md and docs/verify-feature.md name a shared worker's fetch as an exception to the HTTP(S) fence, with the measured versions" FAIL
 fi
 if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'a shape denial — one that objects only to how the call is spelled — is re-issued once as one plain call with single-quoted literal arguments, and any other denial leaves the affected scenario PARTIAL' \
   && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'the skill reports the affected scenario PARTIAL rather than working around it'; then

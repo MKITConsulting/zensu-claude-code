@@ -158,7 +158,7 @@ STEP6="$(awk '/^### Step 6/ { f = 1 } /^### Step 7/ { f = 0 } f' "$SKILL_MD")"
 S9="$(printf '%s' "$STEP6" | node -e '
   const t = require("fs").readFileSync(0, "utf8");
   const a = t.indexOf("After `zensu features create`");
-  const b = t.indexOf("`zensu features update <feature-id> --priority <priority> --description \"$(cat \"$f\")\"`");
+  const b = t.indexOf("`zensu features update <feature-id> --priority <priority> --description-file \"$f\"`");
   const c = t.indexOf("`zensu security classify <feature-id> --classification <level>`");
   process.stdout.write(a !== -1 && a < b && b < c && /structured Markdown/.test(t) && /report each result/.test(t) ? "ok" : "bad");
 ')"
@@ -175,10 +175,10 @@ STRAY="$(grep -ohE 'zensu +(products +(create|vision-create|bootstrap-apply|boot
   && check "S10 the skill neither declares nor names an onboarding command or the security-review terminus" PASS \
   || check "S10 onboarding leak (declared:${ONB_BAD:- none} named: ${STRAY:-none})" FAIL
 
-grep -qF 'Never answer a deny with the `ZENSU_MCP_GATE=off` prefix' "$SKILL_MD" \
-  && ! grep -qE 'ZENSU_MCP_GATE=off +zensu' "$SKILL_MD" "$COMMANDS_MD" \
-  && check "S11 the skill forbids the inline gate escape and never uses it" PASS \
-  || check "S11 the skill uses or allows the inline gate escape" FAIL
+grep -qF 'Never retry a denied command, with or without a prefix.' "$SKILL_MD" \
+  && ! grep -qE 'ZENSU_MCP_GATE' "$SKILL_MD" "$COMMANDS_MD" \
+  && check "S11 the skill forbids retrying a denied command and names no gate escape" PASS \
+  || check "S11 the skill allows a retry of a denied command or names a gate escape" FAIL
 
 RULES="$(awk '/^## Rules/ { f = 1 } f' "$SKILL_MD")"
 if printf '%s' "$RULES" | grep -qF 'One window per session, never nested' \

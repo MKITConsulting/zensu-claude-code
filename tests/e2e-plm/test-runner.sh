@@ -398,7 +398,7 @@ create_user_journey to seed brownfield user journeys; the v1 baseline is minted
 server-side.
 CAP
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
-I will call pulse_start_session with the current git HEAD SHA and branch name.
+I will run zensu pulse start with the current git HEAD SHA and branch name.
 CAP
   cat > "$tmp/results/status-transition-20260101-000000.captured.txt" <<'CAP'
 Status transitions are not handled by an MCP tool. You need to call the Zensu REST API endpoint
@@ -492,7 +492,7 @@ case "$prompt_arg" in
     echo "create_user_journey to seed brownfield user journeys; the v1 baseline is minted server-side."
     ;;
   *Pulse-Session*|*"Pulse"*)
-    echo "I will call pulse_start_session with the current git HEAD SHA and branch name."
+    echo "I will run zensu pulse start with the current git HEAD SHA and branch name."
     ;;
   *"ZEN-1"*|*released*)
     echo "Status transitions are not handled by an MCP tool. Use the Zensu REST API endpoint"

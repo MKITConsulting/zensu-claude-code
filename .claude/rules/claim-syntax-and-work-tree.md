@@ -132,7 +132,13 @@ project root itself as the default mode; any other directory must lie strictly b
 root, be its own `--show-toplevel`, and have the anchor's `--path-format=absolute
 --git-common-dir`, the `worktreeIdentity` predicate of `session-reanchor-v1.js`. A clone, a
 submodule, a subdirectory, a tree outside, a path inside `.git` and an empty value exit 2 naming
-the failed condition. Check mode prints `anchor<TAB><path>` or `work-tree<TAB><path>`. With a
+the failed condition. Check mode prints `anchor<TAB><path>` or `work-tree<TAB><path>`, and for a
+refused topology also `refused<TAB><reason>` on stdout beside the stderr refusal and exit 2. Only
+the topology refusals print it: a git fault, which dies as `could not be checked`, an argument
+refusal and a run-log refusal print no verdict line, and the other modes never print one. Its one
+consumer is `_autopilot_adopt_source_dir` in `hooks/lib/zensu-autopilot-state.sh`, which maps the
+verdict and never the message; `_zensu_chain_work_tree_line` in `zensu-log.sh` and `checkWorkTree`
+in `review-packet-v1.js` read stdout only on exit 0. With a
 work tree the change set, relative-claim placement, `check-ignore` and the nested walks run in
 `WT`; a relative claim that `WT` does not hold and that nests below the anchor, such as `WT`'s own
 prefix as the packet spells it or a sibling worktree, is placed against the anchor's top instead,

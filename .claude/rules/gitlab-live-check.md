@@ -28,10 +28,12 @@ driver with explicit `--provider gitlab` and `--repo-id`, because the SSRF guard
 `_zensu_vcs_probeable_host` rightly refuses loopback hosts, so provider detection stays covered by
 `test-vcs-detect.sh`. Every verb that reaches glab is driven: `--post-review`, `--fetch-threads`,
 `--resolve-thread`, `--reconcile-review`, `--diff-refs`, `--pr-state`, `--scout-pr`, `--locate-pr`,
-`--review-markers`, `--review-summary` and `--open-pr`. The second merge request, opened through
+`--review-markers`, `--review-summary`, `--pr-diff`, `--open-pr` and `--edit-pr-body`. `--pr-diff`
+rebuilds the first merge request's diff (`GL58`-`GL59b`). The second merge request, opened through
 `--open-pr`, starts with resolvable discussions only (`GL64`-`GL68`); its approval then adds a
-system note that `--fetch-threads` has to pass over (`GL71`, `GL72`). Not covered: the
-`changesRequested` arm of `--review-summary`, which needs a second GitLab user.
+system note that `--fetch-threads` has to pass over (`GL71`, `GL72`), and `--edit-pr-body` then
+rewrites its description (`GL73`, `GL74`). Not covered: the `changesRequested` arm of
+`--review-summary`, which needs a second GitLab user.
 
 **Where it runs, and why not in `tests/run-all.sh`.** A GitLab container costs a 1.2-1.6 GiB pull,
 several GB of memory and minutes of boot, so it runs only where its signal pays for it:

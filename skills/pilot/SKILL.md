@@ -116,10 +116,12 @@ Gather the real state; run zero mutations:
   probe below needs.
 - `zensu security validate <id>` — release-gate preview (score, violations).
 - Journeys: resolve the product id from the `features get` JSON, run
-  `zensu journeys list --product <product-id> --json`, keep the journeys whose
-  steps reference this feature, then `zensu journeys health --product
-  <product-id> <journey-id>` per match (skip silently when the product has no
-  journeys or none reference the feature).
+  `zensu journeys list --product <product-id> --json` for the journey ids (its
+  items carry no steps), read each journey's steps with
+  `zensu journeys steps --product <product-id> <journey-id> --json`, keep the
+  journeys with a step whose `feature_id` is this feature's UUID, then
+  `zensu journeys health --product <product-id> <journey-id>` per match (skip
+  silently when the product has no journeys or none reference the feature).
 - Git: current branch, dirty files, commits ahead of the base branch.
 - PR (only when `cliReady=true`), from `$REPO` for the feature branch:
 
@@ -205,8 +207,8 @@ and the relevant slice of the status card as the skill's input. Rules:
    mutation**, never once per session. Run step iii regardless of the
    transition's outcome — a 409, auth error, or network failure still closes
    the window BEFORE the rejection is handled. If the gate denies a confirmed
-   transition, re-arm and retry; **never prefix `ZENSU_MCP_GATE=off`** — a
-   gate deny means the arming window is missing, not that a bypass is
+   transition, re-arm and retry; **never answer a gate deny with a bypass**
+   — a gate deny means the arming window is missing, not that a bypass is
    warranted.
 3. **`released` preflight:** before offering the `released` transition, re-run
    `zensu security validate <id>`. Offer it only on a green verdict; on red,
@@ -297,7 +299,8 @@ and the relevant slice of the status card as the skill's input. Rules:
 | `zensu features list --product <pid> --json` | 0 | Candidate pick when no feature id given (`--product` required) |
 | `zensu features get <feature-uuid>` | 1 | Status, revision, linked artifacts, product id |
 | `zensu security validate <id>` | 1, 4 | Release-gate preview + released preflight |
-| `zensu journeys list --product <pid> --json` | 1 | Discover journeys referencing the feature |
+| `zensu journeys list --product <pid> --json` | 1 | The product's journey ids (list items carry no steps) |
+| `zensu journeys steps --product <pid> <jid> --json` | 1 | A journey's steps, matched on `feature_id` to find the journeys referencing the feature |
 | `zensu journeys health --product <pid> <jid>` | 1 | Journey coverage on the card |
 | `zensu-vcs.sh --detect` / `--conventions` | 0 | Forge, CLI readiness, the repository's conventions |
 | `zensu-vcs.sh --locate-pr` / `--review-summary` / `--review-markers` / `--fetch-threads` | 1 | PR state, review presence, unresolved threads |

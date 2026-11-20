@@ -28,6 +28,8 @@ AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
 APPROVED_PLAN="$ROOT/hooks/lib/approved-plan-v1.js"
 SESSION_LINEAGE="$ROOT/skills/session-trail/scripts/session-lineage-v1.mjs"
+AUTOPILOT_RUNS="$ROOT/skills/session-trail/scripts/autopilot-runs-v1.mjs"
+AUTOPILOT_RUNS_HUB="$ROOT/plugins/session-hub/skills/session-trail/scripts/autopilot-runs-v1.mjs"
 ARTIFACT_REDACT="$ROOT/hooks/lib/zensu-artifact-redact-v1.js"
 BEST_SOLUTION_HOOK="$ROOT/hooks/user-prompt-best-solution-first.sh"
 EVIDENCE_DISCIPLINE_HOOK="$ROOT/hooks/session-start-evidence-discipline.sh"
@@ -463,8 +465,10 @@ else
   check "Session Control brackets Windows opens with path and descriptor identity" FAIL
 fi
 
-if [ "$(grep -cF 'const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$AUTOPILOT_STATE")" -eq 3 ] \
+if [ "$(grep -cF 'const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$AUTOPILOT_STATE")" -eq 4 ] \
   && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | noFollow)' "$AUTOPILOT_STATE")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock)' "$AUTOPILOT_STATE")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | noFollow, 0o600)' "$AUTOPILOT_STATE")" -eq 1 ] \
   && [ "$(grep -cF 'fs.openSync(target, fs.constants.O_RDONLY | noFollow)' "$AUTOPILOT_STATE")" -eq 1 ] \
   && [ "$(grep -cF 'fs.openSync(temp, fs.constants.O_RDONLY | noFollow)' "$AUTOPILOT_STATE")" -eq 1 ] \
   && [ "$(grep -cF 'fs.openSync(source, fs.constants.O_RDONLY | noFollow)' "$AUTOPILOT_STATE")" -eq 1 ] \
@@ -533,6 +537,21 @@ if [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.
   check "session-lineage ledger reader asserts on the descriptor with a Windows-safe flag" PASS
 else
   check "session-lineage ledger reader asserts on the descriptor with a Windows-safe flag" FAIL
+fi
+
+AUTOPILOT_RUNS_OK=true
+for copy in "$AUTOPILOT_RUNS" "$AUTOPILOT_RUNS_HUB"; do
+  [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$copy")" -eq 1 ] \
+    && [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NONBLOCK)" "$copy")" -eq 1 ] \
+    && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW | NONBLOCK)' "$copy")" -eq 1 ] \
+    && ! grep -qF '(fs.constants.O_NOFOLLOW || 0)' "$copy" \
+    && ! grep -qF '(fs.constants.O_NONBLOCK || 0)' "$copy" \
+    || AUTOPILOT_RUNS_OK=false
+done
+if [ "$AUTOPILOT_RUNS_OK" = true ]; then
+  check "session-trail run reader omits unsupported O_NOFOLLOW and O_NONBLOCK on Windows in both copies" PASS
+else
+  check "session-trail run reader omits unsupported O_NOFOLLOW and O_NONBLOCK on Windows in both copies" FAIL
 fi
 
 # The artifact redactor is another requireable module carrying a hardened

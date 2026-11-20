@@ -3140,6 +3140,37 @@ var AUTOPILOT_STATE_KEYS = ['schemaVersion', 'runId', 'projectRoot', 'ownerSessi
   'stage', 'nextActionCode', 'approvedPlanSha256', 'options', 'tdd', 'effects',
   'evidence', 'blocked', 'bypasses', 'stopBudget', 'events'];
 var AUTOPILOT_TERMINAL_UNSHAPED = { terminalUnshaped: true };
+var AUTOPILOT_ROOT_RELEASED = { rootReleased: true };
+
+function autopilotRootReleasedRelocatable(parsed) {
+  var recorded = parsed.projectRoot;
+  if (!path.isAbsolute(recorded) || /^[\\/]{2}/.test(recorded)) return false;
+  if (Object.prototype.hasOwnProperty.call(parsed, 'workspaceRoot') && parsed.workspaceRoot !== recorded) return false;
+  var vanished = function (e) { return !!e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'); };
+  var stat;
+  try { stat = fs.lstatSync(recorded); } catch (e) { return vanished(e); }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
+  var names = ['autopilot-run-' + parsed.runId + '.json', 'autopilot-relocating-' + parsed.runId + '.json'];
+  for (var i = 0; i < names.length; i++) {
+    try {
+      fs.lstatSync(path.join(recorded, '.zensu', 'state', names[i]));
+      return false;
+    } catch (e) {
+      if (!vanished(e)) return false;
+    }
+  }
+  return true;
+}
+
+function autopilotMainCheckout(root) {
+  if (typeof root !== 'string' || !path.isAbsolute(root)) return false;
+  try {
+    var stat = fs.lstatSync(path.join(root, '.git'));
+    return stat.isDirectory() && !stat.isSymbolicLink();
+  } catch (e) {
+    return false;
+  }
+}
 var AUTOPILOT_SHA256_RE = /^[a-fA-F0-9]{64}$/;
 var AUTOPILOT_TDD_OUTCOMES = ['pass', 'no-changes', 'max-rounds', 'converged'];
 // The owner's `sha256` is a TYPE test as much as a pattern test, and the type half is
@@ -3304,7 +3335,9 @@ function autopilotRun(file, stem, projectRoot) {
   // `/private/var` case the canonicalization was added for is still fixed, because
   // the mismatch was always on the caller's side — `stateProjectRoot()` returns a
   // `path.resolve`, not a realpath.
-  if (parsed.projectRoot !== autopilotCanonical(projectRoot)) return shapeReject;
+  if (parsed.projectRoot !== autopilotCanonical(projectRoot)) {
+    return shapeReject === null && autopilotRootReleasedRelocatable(parsed) ? AUTOPILOT_ROOT_RELEASED : shapeReject;
+  }
   // ABSENT and PRESENT-BUT-UNUSABLE are different answers and the row says so.
   // A record minted before workspace scoping carries no `workspaceRoot` at all,
   // and `mayHoldWorkspace` short-circuits on that: it then holds EVERY tree in
@@ -3976,6 +4009,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
   var unscanned = candidates.length - scanned.length;
   var unreadable = [];
   var terminalUnshaped = [];
+  var releasedRoots = [];
   var rows = [];
   var ownerActivityWin = ownerActivityWindow();
   var releaseActivityWin = releaseOwnerActivityWindow();
@@ -3992,7 +4026,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
   // test, so counting it here would state a code this report did not establish — the
   // same standard the green glyph is already held to one function down.
   var ownHoldsOwnRun = ownKey !== '' && parsedRuns.some(function (p) {
-    return p.run && p.run !== AUTOPILOT_TERMINAL_UNSHAPED && p.run.owner === ownKey
+    return p.run && p.run !== AUTOPILOT_TERMINAL_UNSHAPED && p.run !== AUTOPILOT_ROOT_RELEASED && p.run.owner === ownKey
       && p.run.ownerWouldAccept === true
       && AUTOPILOT_TERMINAL.indexOf(p.run.stage) === -1;
   });
@@ -4016,6 +4050,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
     // one — but `readRunInventory` never consults terminality, so it can still fail
     // every Autopilot verb closed for the whole project. Its own row says that.
     if (run === AUTOPILOT_TERMINAL_UNSHAPED) { terminalUnshaped.push(c.name); return; }
+    if (run === AUTOPILOT_ROOT_RELEASED) { releasedRoots.push(c.name); return; }
     if (!run) { unreadable.push(c.name); return; }
     if (AUTOPILOT_TERMINAL.indexOf(run.stage) !== -1) return;
     // THREE cases, never two. `ownKey` is empty for every binding verdict but
@@ -4394,6 +4429,25 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
         + ' not establish the name is safe to echo — a stem the Autopilot writer could not'
         + ' have minted, a character this report will not echo, or a display-safety rule that'
         + ' could not be applied; list ' + foldPath(dir, ' directly.') + ' directly.' : ''));
+  }
+  if (releasedRoots.length) {
+    var releasedSafe = autopilotSafeNames(releasedRoots);
+    var releasedWithheld = releasedRoots.length - releasedSafe.length;
+    line(WARN, 'autopilot: ' + releasedRoots.length + ' durable run document(s) whose recorded project root'
+      + ' no longer exists or no longer holds the run — such a record moved here with its working tree, and until it names this'
+      + ' project as its root, `--autopilot-begin` and the workspace-occupancy check fail closed for'
+      + ' this project.'
+      + (autopilotMainCheckout(projectRoot)
+        ? ' This project is the main checkout of its repository, not a linked worktree, so'
+          + ' /zensu:autopilot-adopt cannot show that it was moved rather than copied and refuses to'
+          + ' rewrite such a record in place: move this checkout back to the project root the record'
+          + ' names and continue or cancel the run from a session whose project root is that directory.'
+        : ' /zensu:autopilot-adopt, run from a session whose project root is this project,'
+          + ' reports whether it can rewrite the record in place; it refuses a run whose inner build chain'
+          + ' another session still drives.')
+      + (releasedSafe.length ? ' Inspect ' + truncatedList(releasedSafe) + ' in ' + foldPath(dir, '.') + '.' : '')
+      + (releasedWithheld ? ' ' + releasedWithheld + ' further name(s) are withheld because this report could'
+        + ' not establish the name is safe to echo; list ' + foldPath(dir, ' directly.') + ' directly.' : ''));
   }
   // The row above may not carry these: it asserts the record "still holds its working
   // tree", and a DONE or CANCELLED one does not. That was the whole reason for the
@@ -5052,7 +5106,8 @@ function bindingLine() {
     case 'pruned-plugin-root':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the installation that minted it has been removed from the plugin cache'
         + versions()
-        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY);
+        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY
+        + '. If the recorded project root is gone as well, an adoption re-mints the record, but a zensu CLI call, Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, until that exact directory is re-created; /zensu:adopt-session --restore-root reports on that AFTER the adoption, because that repair requires the running installation to serve the record');
     // BOTH disagreements at once, and the row exists because each of the two
     // above answers "not me" for it: the orphan probe re-applies
     // servesRecordedRuntime, which an incompatible lineage fails, and the lineage
@@ -5572,7 +5627,7 @@ function auditedRunLog(projectRoot, value) {
 // runs it, answering a typed result the row renders. It refuses a symlinked or
 // non-plain-file library rather than executing it, and the ENOENT branch below states why
 // an absent command is a damaged tree rather than an uninstalled feature.
-function claimInventory(logFile, projectRoot, workTree) {
+function claimInventory(logFile, projectRoot, workTree, workflowFile) {
   var lib = path.join(pluginDir(), 'hooks', 'lib', 'zensu-edit-landing.sh');
   try {
     var st = fs.lstatSync(lib);
@@ -5597,8 +5652,11 @@ function claimInventory(logFile, projectRoot, workTree) {
   }
   var r;
   try {
+    var inventoryArgs = [lib, '--inventory', '--log', logFile, '--project', projectRoot];
+    if (workTree) inventoryArgs.push('--work-tree', workTree);
+    if (workflowFile) inventoryArgs.push('--workflow', workflowFile);
     r = require('child_process').spawnSync('bash',
-      [lib, '--inventory', '--log', logFile, '--project', projectRoot].concat(workTree ? ['--work-tree', workTree] : []),
+      inventoryArgs,
       { encoding: 'utf8', timeout: CLAIM_INVENTORY_TIMEOUT_MS, maxBuffer: 1024 * 1024 });
   } catch (e) {
     return { ok: false, reason: 'the inventory command could not be started' };
@@ -5624,8 +5682,10 @@ function claimInventory(logFile, projectRoot, workTree) {
   // `claimed-files=` and discloses when it is absent.
   var roots = [];
   var seenCount = false;
+  var folder = false;
   r.stdout.split('\n').forEach(function (l) {
     if (l.indexOf('claimed-files=') === 0) { seenCount = true; return; }
+    if (l === 'anchor\tfolder') { folder = true; return; }
     var i = l.indexOf('\t');
     if (i === -1 || l.slice(0, i) !== 'foreign-root') return;
     var value = l.slice(i + 1);
@@ -5634,7 +5694,7 @@ function claimInventory(logFile, projectRoot, workTree) {
   if (!seenCount) {
     return { ok: false, reason: 'the inventory command answered in a format this runtime does not recognise' };
   }
-  return { ok: true, roots: roots };
+  return { ok: true, roots: roots, folder: folder };
 }
 
 // A receipt exists in this project's state directory, whoever wrote it. Used
@@ -5702,6 +5762,8 @@ function claimTopologyRow(projectRoot, ownKey) {
     }
     return;
   }
+  var declared = declaredCodeRoots(projectRoot, ownKey);
+  declaredCodeRootsRow(declared);
   var loaded;
   try {
     loaded = receiptLib.readBoundedJson(receiptLib.receiptFile(projectRoot, ownKey), receiptLib.MAX_RECEIPT_BYTES);
@@ -5736,12 +5798,18 @@ function claimTopologyRow(projectRoot, ownKey) {
       + workTree.reason + '. That is a missing check, not an all-clear.');
     return;
   }
-  var inventory = claimInventory(logFile, projectRoot, workTree.path);
+  var inventory = claimInventory(logFile, projectRoot, workTree.path,
+    declared && declared.status === 'ok' ? declared.workflowFile : '');
   if (inventory === null) return;
   if (!inventory.ok) {
     line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — '
       + inventory.reason + '. That is a missing check, not an all-clear.');
     return;
+  }
+  if (inventory.folder) {
+    line(OK, 'topology: the anchor is a folder anchor — it lies outside every git work tree, so it '
+      + 'has no change set of its own, and a repository a claim names below it is a foreign root '
+      + 'unless the chain declares it as a code root.');
   }
   if (inventory.roots.length === 0) return;
   var named = claimRootSafeNames(inventory.roots);
@@ -6113,6 +6181,55 @@ function stateBlock(nowMs) {
       line(OK, 'state: pending-review.json present and within its ' + ttl + 'h TTL');
     }
   } catch (e) { /* no pending-review marker */ }
+}
+
+function declaredCodeRoots(projectRoot, ownKey) {
+  var workflowFile = path.join(projectRoot, '.zensu', 'state', 'tdd-phase-' + ownKey + '.json');
+  var core;
+  var codeRoots;
+  try {
+    core = require(path.join(pluginDir(), 'hooks', 'lib', 'session-control-core-v1.js'));
+    codeRoots = require(path.join(pluginDir(), 'hooks', 'lib', 'code-roots-v1.js'));
+  } catch (e) {
+    return null;
+  }
+  var read = sharedWorkflowRead(core, projectRoot, ownKey, null);
+  if (!read.state || typeof read.state !== 'object'
+      || !Object.prototype.hasOwnProperty.call(read.state, 'codeRoots')) return null;
+  var verdict;
+  try {
+    verdict = codeRoots.readCodeRoots(read.state, {
+      anchor: projectRoot,
+      pluginData: env.CLAUDE_PLUGIN_DATA || '',
+      claudeConfigDir: env.CLAUDE_CONFIG_DIR || '',
+    });
+  } catch (e) {
+    return { status: 'unreadable', roots: [], reason: 'the code-root list could not be judged', workflowFile: workflowFile };
+  }
+  return { status: verdict.status, roots: verdict.roots, reason: verdict.reason, workflowFile: workflowFile };
+}
+
+function declaredCodeRootsRow(declared) {
+  if (!declared) return;
+  if (declared.status === 'ok') {
+    var listed = declared.roots.filter(function (root) { return claimRootRenderable(root.path); })
+      .map(function (root) { return '`@' + root.label + '/` ' + claimRootRender(root.path); });
+    var withheldRoots = declared.roots.length - listed.length;
+    line(OK, 'topology: this chain declares ' + declared.roots.length + ' code root'
+      + (declared.roots.length === 1 ? '' : 's') + (listed.length ? ': ' + listed.join(', ') : '')
+      + (withheldRoots ? ' (' + withheldRoots + ' withheld, its path is not safe to render)' : '')
+      + '. Their claims are spelled @<label>/<path> and graded against that root.');
+    return;
+  }
+  var reason = String(declared.reason || '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029`]/g, '?');
+  if (declared.status === 'disabled') {
+    line(OK, 'topology: the workflow document declares code roots, and this build ignores them — '
+      + reason + '. The chain counts and audits the anchor alone.');
+    return;
+  }
+  line(WARN, 'topology: the workflow document declares code roots, and they are ignored — '
+    + (reason || 'the list could not be judged') + '. The chain counts and audits the anchor alone; '
+    + 're-arm the chain to replace the list.');
 }
 
 function auditedWorkTree(projectRoot, parsed) {

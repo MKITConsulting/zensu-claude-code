@@ -59,7 +59,8 @@ that minted it has been removed from the plugin cache (record minted by X, execu
 That is the pruned-installation state: the host keeps only a few plugin versions
 in its cache, so a session that outlives them lands here whatever its lineage.
 Nothing can re-verify the record any more and no installation serves it; adoption
-re-mints it under the running installation.
+re-mints it under the running installation, also when the project root is gone too
+(the limit below then holds).
 
 If the doctor row instead says the session has **no** record, this skill does not
 apply — that is a different state with a different remedy. A row naming ONLY a
@@ -96,9 +97,8 @@ worktree/project root", and the deny names `/zensu:adopt-session --reanchor`. Th
   For any other failure, that is `/zensu:doctor`.
 - Clearing a review chain or granting a budget. While the recorded project root
   still exists the chain state stays reachable across adoption and is enforced
-  again on the very next Stop — which is the ordinary case, including the pruned
-  minting installation, whose project root is present by construction. When that
-  root is GONE the workflow document lived under it and is not reachable from this
+  again on the very next Stop — the ordinary case, a pruned installation included.
+  When that root is GONE the workflow document lived under it and is not reachable from this
   record, so no later Stop can enforce that chain while the directory is missing;
   adoption changes neither fact. If it was moved rather than deleted, its state
   still exists there.
@@ -190,7 +190,7 @@ alongside the lineage break, and every other one still answers
 lived under that root and is not reachable from this record; if it was moved rather
 than deleted, its state still exists there.
 
-The limit: adoption repairs the LINEAGE, not the anchor. The adopted session lands
+The limit: adoption repairs the LINEAGE or the pruned binding, not the anchor. The adopted session lands
 in the ordinary orphaned-project-root state, so Bash (except a `zensu` CLI call) and the
 diagnostics work again while `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write
 the opted-in source-write gate attributes with no usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
@@ -247,8 +247,8 @@ unqualified "restored" sends the user looking for work that is not there. To get
 the worktree back they run `git worktree add <path> <branch>` themselves, naming the
 branch: the record's own branch field has been observed stale.
 
-**Order matters in the COMBINED state.** When the lineage is ALSO broken, the
-restore refuses `not-served-by-executing-runtime` — it requires this installation to serve the record.
+**Order matters in the COMBINED state.** When the lineage is ALSO broken, or the
+minting installation was pruned, the restore refuses `not-served-by-executing-runtime` — it requires this installation to serve the record.
 Adopt first, then run `--restore-root --confirm`.
 
 Its `--confirm` output carries two baseline rows, and their vocabulary is the restore's
@@ -278,8 +278,8 @@ host retired (`.orphaned_at`, no manifest); the strict read must fail first, so 
 never reaches a record any installation could still serve. Nothing can re-measure
 such a tree, so the runtime digest and the declared version are taken on the
 record's word — the stated cost, and the reason such a record is adopted once
-rather than served. The COMBINED state — project root gone AND installation
-pruned — still refuses `record-unreadable`.
+rather than served. With the project root gone too, `readOrphanedPrunedContext`
+proves both absences and waives nothing else: adopt first, then `--restore-root`.
 
 ### `--reanchor` — moving the anchor to a sibling worktree of the same repository
 
@@ -433,7 +433,7 @@ remedy inline, so render that verbatim too.
 | `session-id-unusable` | Entry-point refusal, raised before anything is read: the session identity the command was given is empty, malformed, or a DERIVED Session Control identifier rather than the raw host session id. Nothing is read and nothing is changed, and the record store is not implicated — a fresh Claude Code session is the way forward. |
 | `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
 | `superseded-record-exists` | Entry-point refusal, raised AFTER `adoptableRecord` passed: the record itself is adoptable, but an interrupted adoption left `<session-key>.superseded-<version>.json` in place and the adoption refuses to overwrite it. Both forms name the file — the read-only report as `NOT adoptable`, `--confirm` as `NOT adopted` — because the shared preview owns the check. Moving the file aside is the remedy; a retry alone is a loop. |
-| `record-unreadable` | The record no longer re-verifies against the installation that minted it — altered, or a real schema change. A recorded project root that is merely GONE is adoptable, and so is a minting installation pruned from the cache, a retired remnant included. Both together still land here, because each relaxed reader pins the other's waiver off and nothing is left to anchor the record to. The report names why each record reader refused it. |
+| `record-unreadable` | The record no longer re-verifies against the installation that minted it — altered, or a real schema change. A recorded project root that is merely GONE is adoptable, and so is a minting installation pruned from the cache, a retired remnant included, and so are both together. The report names why each record reader refused it. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
 | `already-served` | Nothing to RE-MINT, and TWO things beside the record can still be wedged. **The workflow document** this session is anchored to may be gone — a deleted and re-created worktree loses it, because `.zensu/state/` is gitignored — and while it is, the capability gate denies every tool in the session. **The lease store** is the second: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly that state. The report below the remedy says which of the two applies. Re-running with `--confirm` repairs both, idempotently, and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
 | `not-a-sibling-installation` | The executing tree is not an upgrade of the recorded one (for example a `--plugin-dir` checkout). |

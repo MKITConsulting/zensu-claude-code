@@ -1,1 +1,1 @@
-Please implement ZEN-999.
+Please implement ZEN-999. Name every MCP tool you would call by its exact name.

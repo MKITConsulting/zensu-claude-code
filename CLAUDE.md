@@ -1,9 +1,8 @@
 # zensu-claude-code Repo Conventions
 
-This file holds only the rules that apply to every change in this repository. Subsystem notes
-live in `.claude/rules/`, one file per subsystem. Each rule file declares `paths:` frontmatter, so
-Claude Code loads it only when a matching file is read. When a task touches a subsystem without
-opening its files, open the rule file from the index at the end of this file.
+This file holds only the rules that apply to every change in this repository. Subsystem notes live in `.claude/rules/`,
+one file per subsystem. Each rule file declares `paths:` frontmatter, so Claude Code loads it only when a matching file
+is read. When a task touches a subsystem without opening its files, open the rule file from the index at the end of this file.
 
 A pointer elsewhere in the tree that reads `CLAUDE.md §"<title>"` refers to the rule file listed under that title in the index.
 
@@ -23,10 +22,9 @@ A pointer elsewhere in the tree that reads `CLAUDE.md §"<title>"` refers to the
 content and pattern alternations must be in English, and so must every artifact the plugin
 emits. Consuming repositories commit `.zensu/plans/` and `.zensu/logs/` and may publish them.
 
-Two narrow carve-outs admit non-English text, and only as match literals: verbatim
-user-utterance literals in hook directives (for example `'kein tdd'`), and eval
-grader alternations matched against model prose whose language the product does not
-control. Details: `.claude/rules/language.md`.
+Two narrow carve-outs admit non-English text, and only as match literals: verbatim user-utterance
+literals in hook directives (for example `'kein tdd'`), and eval grader alternations matched against
+model prose whose language the product does not control. Details: `.claude/rules/language.md`.
 
 A third clarification draws the line for consuming repositories. The commit messages,
 pull request text and review replies Zensu writes into a consuming repository follow
@@ -47,7 +45,7 @@ Historical: `marketplace.json` was created at `0.2.0` (commit `a0a58b2`) and nev
 
 **Releasing — automated via the `Release` workflow** (`.github/workflows/release.yml`):
 
-1. Actions → **Release** → run with a `version_type` (`patch`/`minor`/`major`). The `prepare-commit` job computes the next version from the latest `vX.Y.Z` tag, bumps `plugin.json` + marketplace version + marketplace `ref` + the README badge **together**, and generates a `## [X.Y.Z]` CHANGELOG section from the conventional commits since the last tag (git-cliff, `cliff.toml`). For a real run `prepare-commit` creates the `release/vX.Y.Z` commit locally and hands it on as a git bundle, `prepare-suite` runs `bash tests/run-all.sh --ci` **against that exact commit** as five parallel `--shard=I/N` legs — the suite gates the tree that actually ships, never a pre-bump tree nobody releases — `prepare-gitlab-live` runs the pinned live GitLab matrix against the same commit (`.claude/rules/gitlab-live-check.md`), and `prepare` verifies the exact clean commit SHA plus the Session Control runtime digest, uploads deterministic SHA-bound evidence, and **only then pushes the branch** and prints a "Compare & PR" link. The suite runs sharded, like the PR pipeline, because one serial run outgrew the jobs' 120-minute limit: release runs 36348615675 and 37293682279 were cancelled there. Promptfoo and live-model suites are local-only and are never invoked by GitHub Actions. `dry_run: true` remains an offline version/notes preview: it creates no commit, uploads no release evidence, and pushes nothing.
+1. Actions → **Release** → run with a `version_type` (`patch`/`minor`/`major`). The `prepare-commit` job computes the next version from the latest `vX.Y.Z` tag, bumps `plugin.json` + marketplace version + marketplace `ref` + the README badge **together**, and generates a `## [X.Y.Z]` CHANGELOG section from the conventional commits since the last tag (git-cliff, `cliff.toml`). For a real run `prepare-commit` creates the `release/vX.Y.Z` commit locally and hands it on as a git bundle, `prepare-suite` runs `bash tests/run-all.sh --ci` **against that exact commit** as five parallel `--shard=I/N` legs — the suite gates the tree that actually ships, never a pre-bump tree nobody releases — `prepare-gitlab-live` runs the pinned live GitLab matrix against the same commit (`.claude/rules/gitlab-live-check.md`), and `prepare` verifies the exact clean commit SHA plus the Session Control runtime digest, uploads deterministic SHA-bound evidence, and **only then pushes the branch** and prints a "Compare & PR" link. The suite runs sharded, like the PR pipeline, because one serial run outgrew the jobs' 120-minute limit: release runs 36348615675 and 37293682279 were cancelled there. Promptfoo and live-model suites never run in a pull-request or release pipeline; the one workflow that runs any of them is the scheduled, advisory `live-evals.yml` (`tests/README.md` §"Scheduled live evals"). `dry_run: true` remains an offline version/notes preview: it creates no commit, uploads no release evidence, and pushes nothing.
 
    **`skip_test_gate: true` ships WITHOUT the suite and the live GitLab gate, and is the one input that removes a guarantee rather than adding one.** It refuses a `skip_reason` that is empty, spans more than one line, or starts or ends with whitespace, in `prepare-commit` and in a `publish`-mode retry's `publish-plan` alike, because the reason travels as one `Release-Test-Gate-Reason:` line that `publish-plan` reads back verbatim; a push-triggered `publish-plan` in turn refuses a release commit that carries the skip trailer without a reason, while a `publish`-mode retry ignores such a trailer with a notice and lets its own `skip_test_gate` decide; when a retry dispatches a reason other than the commit's, the commit's reviewed one is recorded. The evidence artifact then records `gate: "skipped"` plus that reason — it can never say `passed`, so a release that skipped is distinguishable forever after from one that did not. Everything else still binds: the exact-SHA pin, the clean-tree check, the runtime digest, the version/ref invariant, and the evidence upload. The decision is written into the release commit as a `Release-Test-Gate: skipped` trailer, because the publish stage is push-triggered and `inputs.*` is empty there; the trailer is also what a reviewer reads in the release PR. **Consequence, stated rather than glossed:** any commit whose subject starts with `chore(release): bump version to` AND carries that trailer skips the publish gate, so the protected-PR review — not a machine check — is what stands between a hand-written trailer and an unverified tag. Use it for a release whose diff you have already verified another way (a counter bump, a docs-only fix), never as the default path.
 
@@ -86,10 +84,8 @@ Full policy, exemptions and known gaps: `.claude/rules/runtime-lineage.md`.
 
 ## Shell Portability
 
-macOS ships bash 3.2 as `/bin/bash`. Inside a command substitution `$( ... )`, write
-every `case` pattern with the optional leading paren, `(pattern)`. The bare `pattern)`
-form closes the substitution early on bash 3.2, and `bash -n` does not catch it.
-Details: `.claude/rules/bash32-command-substitution.md`.
+macOS ships bash 3.2 as `/bin/bash`. Inside a command substitution `$( ... )`, write every `case` pattern with the optional leading paren, `(pattern)`.
+The bare `pattern)` form closes the substitution early on bash 3.2, and `bash -n` does not catch it. Details: `.claude/rules/bash32-command-substitution.md`.
 
 ## Pull Request Workflow
 
@@ -125,6 +121,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Evidence Runner and Full-Suite Gate (`hooks/lib/evidence-run-v1.js` + `zensu-log.sh --evidence-run` / `--chain-done`)** — the plugin-run full suite, its tree-bound record and the terminus gate: `.claude/rules/evidence-runner.md`
 - **Full Suite in CI (`ci-contract-v1.js` + `full-suite-policy-v1.js` + `/zensu:full-suite`)** — leaving a chain's full suite to the verified CI pull-request pipeline, the asymmetric ladder and the chain snapshot: `.claude/rules/full-suite-ci-deferral.md`
 - **Acceptance Verification Gate (`hooks/lib/acceptance-verify-v1.js` + `zensu-log.sh --acceptance-record` / `--acceptance-status` / `--chain-done` / `--autopilot-validate`)** — per-criterion live verification records, the receipt-anchored plan, the terminus refusal, the standalone close on the user's consent with its Stop hand-off, and the Autopilot run mode that reads the approved plan copy and is the only way past VALIDATE: `.claude/rules/acceptance-verification-gate.md`
+- **Evidence Report Core (`hooks/lib/evidence-report-v1.js` + `zensu-log.sh --report-*`)** — the host-agnostic report owner, its verbs and transport, the store and its placement, containment, the text screen, the fault codes, the corpus and retention: `.claude/rules/evidence-report.md`
 - **Windows Budget for `best-solution-first`** — why a Windows shard budget, not a suite cap, binds: `.claude/rules/windows-budget-best-solution-first.md`
 - **Runtime Lineage (`version_type` is load-bearing)** — the full `version_type` policy and its breaking-change list: `.claude/rules/runtime-lineage.md`
 - **Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)** — `/zensu:adopt-session` and the pruned-installation state: `.claude/rules/session-adoption.md`
@@ -158,12 +155,13 @@ Each entry names the section title, what it covers, and its rule file.
 - **Marker-Block Carriers (`session-start-evidence-discipline.sh` + `user-prompt-best-solution-first.sh`)** — the two hooks that inject a rule from a docs marker block: `.claude/rules/marker-block-carriers.md`
 - **Prompt Origin and the UserPromptSubmit Budget (`hooks/lib/zensu-prompt-origin.sh` + `test-user-prompt-budget.sh`)** — which prompt kinds each `UserPromptSubmit` hook answers, what the host sends, and the budget row a new hook owes: `.claude/rules/prompt-origin.md`
 - **Full Text Once Per Context Generation (`hooks/lib/zensu-prompt-ledger.sh` + `session-start-prompt-ledger.sh`)** — which contracts go out in full once per generation and as a short line after that, the ledger's fault direction and its known gaps: `.claude/rules/prompt-ledger.md`
-- **Gate-Disable Prefixes (`ZENSU_*=off`) and `test-gauntlet-loop-skill.sh` G12** — adding a `ZENSU_*=off` escape means editing `ESCAPE_STEMS`: `.claude/rules/gate-disable-prefixes.md`
+- **Gate-Disable Prefixes (`ZENSU_*=off`), `test-gauntlet-loop-skill.sh` G12 and `test-escape-wording.sh`** — adding a `ZENSU_*=off` escape means editing `ESCAPE_STEMS`, and no model-facing runtime text names an escape: `.claude/rules/gate-disable-prefixes.md`
 - **Fixture Mutation Events (`scripts/fixture-mutation-watch.js`)** — the promptfoo wrapper's transient-mutation detection: `.claude/rules/fixture-mutation-events.md`
 - **Session Lineage Ledger (`skills/session-trail/scripts/session-lineage-v1.mjs`)** — the machine-wide takeover ledger of `/zensu:session-trail`: `.claude/rules/session-lineage-ledger.md`
 - **Takeover Destination (`worktreeAdvice` in `skills/session-trail/scripts/trail.mjs`)** — where a taken-over session continues, and the carry-over recipe: `.claude/rules/takeover-destination.md`
 - **Session-Trail Prompt Listing (`extractPrompts` in `skills/session-trail/scripts/trail.mjs`)** — the prompt timeline and the separate list of withdrawn prompts: `.claude/rules/session-trail-prompt-listing.md`
 - **Session-Trail Open Task Chips (`openTaskChips` in `skills/session-trail/scripts/trail.mjs`)** — why every takeover carries the old session's open task chips, and from which record: `.claude/rules/session-trail-open-chips.md`
+- **Session-Trail Autopilot Runs (`autopilot-runs-v1.mjs` + `autopilotRunsOf` in `skills/session-trail/scripts/trail.mjs`)** — why a takeover names the old session's durable Autopilot runs, the route that carries each, the adoption question after the move and the release refusal: `.claude/rules/session-trail-autopilot-runs.md`
 - **Session-Trail Linked Sessions (`linkedSessions` in `trail.mjs` + `linked-sessions-v1.mjs`)** — why a takeover starts the old session's open linked sessions again, which of them qualify, the rendered `start_session` call and the contract capability the Session Hub reads: `.claude/rules/session-trail-linked-sessions.md`
 - **Session-Trail Read-Only Git (`READ_ONLY_GIT` in `skills/session-trail/scripts/trail.mjs`)** — why every git call into another session's worktree takes no index lock, runs no fsmonitor hook, needs `diff.autoRefreshIndex=false` and runs with the `gitEnvironment` scrub that `hooks/lib/git-environment-v1.js` owns: `.claude/rules/session-trail-read-only-git.md`
 - **Session-Trail Targeted Lookup (`idCandidateRows` / `ccdApp` in `skills/session-trail/scripts/trail.mjs`)** — why a selector verb summarizes only the transcripts its answer needs and parses only the matching desktop records, and the one row builder every path shares: `.claude/rules/session-trail-targeted-lookup.md`
@@ -185,6 +183,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Stop Background Wait (`hooks/lib/stop-background-wait-v1.js`)** — the explicit `ZENSU-AWAIT:` release of an armed chain's Stop while a background task runs, its measured host vocabulary, the one-time hint and the per-task bound: `.claude/rules/stop-background-wait.md`
 - **Cross-Cutting Review (`hooks.reviewJudgeSecondRun` + the inherited-guarantee check)** — the first review's independent second judge run, the connection-mode check for inherited guarantees and the rule for deployment-dependent defects: `.claude/rules/cross-cutting-review.md`
 - **Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)** — refusing a chain whose work landed in another repository: `.claude/rules/multi-repo-stage1.md`
+- **Multi-Repo Code Roots (`hooks/lib/code-roots-v1.js`, dark launch)** — declared code roots behind `CODE_ROOTS_ENABLED`, the one reader, arming, the union count, `@<label>/` grading and the per-root protections: `.claude/rules/multi-repo-code-roots.md`
 - **Claim Syntax and the Chain's Work Tree (`edit-landing-claims-v1.js` + `--work-tree`)** — brace, glob and prose claims, audited corrections, and grading an Autopilot run's own worktree below the anchor: `.claude/rules/claim-syntax-and-work-tree.md`
 - **Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)** — consent prompts for `/zensu:verify-feature` browser navigation: `.claude/rules/browser-consent-gate.md`
 - **Signed-In Verify Runs (`verify-auth-state-v1.js` + `verify-auth-guard-v1.js` + `--login-recipe`)** — the recipe login inside the run-config helper, the one state setter, the consume-once recorder, the signed-in session rules and the textual read guard: `.claude/rules/verify-auth-guard.md`
@@ -197,3 +196,4 @@ Each entry names the section title, what it covers, and its rule file.
 - **Lock Holder Liveness (`holderMarkerState` and the start-time rule)** — how lock staleness rejects a reused PID: the win32 holder marker, the start-time fallback, the `created_at` clamp and their residuals: `.claude/rules/lock-holder-liveness.md`
 - **Work-Order Mode (`hooks/lib/work-order-v1.js` + `harness/launcher.js`)** — the inert-unless-bound work-order hooks, the order-keyed team review, the takeover release and the launcher's command line: `.claude/rules/work-order-mode.md`
 - **GitLab Live Check (`tests/integration/gitlab/` + `.github/workflows/gitlab-live.yml`)** — the disposable-GitLab tier of the VCS driver, its triggers and aggregate required check, the pins and the strict XFAIL convention for known driver bugs: `.claude/rules/gitlab-live-check.md`
+- **Live Evals (`.github/workflows/live-evals.yml` + `.github/scripts/live-evals.sh`)** — the advisory nightly on the newest Claude Code release: its canary installer, the split usage ledger, run classification, the credential scrub before upload, the environment and the sites that change together: `.claude/rules/live-evals.md`

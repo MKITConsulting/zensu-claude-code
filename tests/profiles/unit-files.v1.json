@@ -7,7 +7,7 @@
       "summary": "AI work capture: durable retries, account and host binding, explicit goals, commit submission and refusal of automatic decisions."
     },
     {
-      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 227, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
+      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 237, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
       "runs": [{ "driver": "tests/session-control/run.sh" }],
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
@@ -22,9 +22,14 @@
       "summary": "Review-aspect activation: which review perspectives a round activates for a given change."
     },
     {
-      "path": "tests/structure/background-review-v1.test.js", "registered": 44, "skips": {"win32": 2},
+      "path": "tests/structure/autopilot-runs-v1.test.js", "registered": 25, "skips": {"root": 1, "win32": 2},
+      "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
+      "summary": "The session-trail Autopilot run reader: the bounded read of a session's run records under a byte budget, the schema version and owner filters, the folders and listings that cannot be read, the unfinished runs of a third session, the relocation claims an interrupted move leaves, the three layouts, the work-order route and the inner-chain classification, the pull-request shape, the brief section with the cancel route each layout allows, the show line, the release blockers and the vocabulary it mirrors from the state library and trail.mjs."
+    },
+    {
+      "path": "tests/structure/background-review-v1.test.js", "registered": 54, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-background-review.sh" }],
-      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the name bindings that map a named spawn's hand-back to its agent id, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."
+      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the reviewer register that renews a resumed fan-out reviewer at a Stop within its renewal, idle and name-binding bounds and the wait note it prints, the name bindings that map a named spawn's hand-back to its agent id, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."
     },
     {
       "path": "tests/structure/chain-recovery-v1.test.js", "registered": 21,
@@ -55,6 +60,11 @@
       "path": "tests/structure/edit-landing-scope-v1.test.js", "registered": 37, "skips": {"win32": 1},
       "runs": [{ "driver": "tests/structure/test-edit-landing-audit.sh" }],
       "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal."
+    },
+    {
+      "path": "tests/structure/evidence-report-v1.test.js", "registered": 84, "skips": {"win32": 4},
+      "runs": [{ "driver": "tests/structure/test-evidence-report.sh" }],
+      "summary": "Verify-feature evidence reports: ids, the strict manifest schema, the conformance corpus, deterministic rendering, containment, the secret screen and redaction, retention, the store placement, chain and matrix coverage, and the transport."
     },
     {
       "path": "tests/structure/evidence-run-v1.test.js", "registered": 96, "skips": {"win32": 3},
@@ -88,9 +98,9 @@
       "summary": "Full-suite CI deferral: the workflow scan and the version job check, the remote proof with its host pin and refresh deadline, the per-version verification cache, the policy ladder, the chain-begin snapshot, the deferred-ci verdict and the chain's own work tree."
     },
     {
-      "path": "tests/structure/git-repo-escape.test.js", "registered": 63,
+      "path": "tests/structure/git-repo-escape.test.js", "registered": 64,
       "runs": [{ "driver": "tests/structure/test-bash-source-write-gate.sh" }],
-      "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice, plus the shell word and command reader, the program-name reading of the wrappers and its comparison with the other gates, the Session Control check and the write channels, the comparison of the shell readers with the subagent shell guard, and targets mode under a directory named at run time."
+      "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice, plus the shell word and command reader, the program-name reading of the wrappers and its comparison with the other gates, the Session Control check with the entry-point inputs and the code a command hands to a shell, eval or trap, the write channels, the comparison of the shell readers with the subagent shell guard, and targets mode under a directory named at run time."
     },
     {
       "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 19,
@@ -107,9 +117,9 @@
       "summary": "The session-trail linked-session reader: the family walk and its open-below counts, the kinds, the start decisions and calls, the plan names a takeover carries into its run after the yes, the saved presets, the unread reports and the task-chip proposals."
     },
     {
-      "path": "tests/structure/owned-process.test.js", "registered": 4, "skips": {"win32": 4},
+      "path": "tests/structure/owned-process.test.js", "registered": 7, "skips": {"win32": 7},
       "runs": [{ "driver": "tests/structure/test-eval-harness-units.sh" }],
-      "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number."
+      "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number, a group signal answered with EPERM once, a group that keeps answering it, and one that refuses the signals but answers the probe."
     },
     {
       "path": "tests/structure/plan-payload-v1.test.js", "registered": 23,
@@ -130,6 +140,12 @@
       "path": "tests/structure/plugin-data-guard-v1.test.js", "registered": 37, "skips": {"win32": 4},
       "runs": [{ "driver": "tests/structure/test-plugin-data-guard.sh" }],
       "summary": "Plugin-data containment: the separator classes, the resolution bounds, the truncated-walk refusal and the realpath fast path."
+    },
+    {
+      "path": "tests/structure/code-roots-v1.test.js", "registered": 35,
+      "notRunOn": {"win32": "test-code-roots.sh skips native Windows before grading, because its fixtures need POSIX symlinks, perl -pi and an assumed different git owner"},
+      "runs": [{ "driver": "tests/structure/test-code-roots.sh" }],
+      "summary": "The code-roots foundation of multi-repo chains: the dark-launch switch, the list reader and its string rules, arming validation and exclusivity, the per-root enumeration and count recipes, the anchor exclusions and the CLI the shell callers read."
     },
     {
       "path": "tests/structure/powershell-command-v1.test.js", "registered": 17, "skips": {"darwin": 1, "linux": 1, "root": 1},
@@ -215,7 +231,7 @@
       "summary": "Host-refused reviewer spawns: tool_use_id keying, the host error flag, the marker prefix and the read bounds."
     },
     {
-      "path": "tests/structure/route-short-line-graders.test.js", "registered": 38,
+      "path": "tests/structure/route-short-line-graders.test.js", "registered": 41,
       "runs": [{ "driver": "tests/structure/test-route-short-line-eval.sh" }],
       "summary": "The route short-line eval: the decision probe and its Bash classifier, the transcript and envelope parsers, and every grader in both directions."
     },
@@ -250,7 +266,7 @@
       "summary": "The session-trail lineage ledger: the record schema, the refusal table, the symlink and ceiling rules and the chain walk."
     },
     {
-      "path": "tests/structure/session-reanchor-v1.test.js", "registered": 68, "skips": {"win32": 1},
+      "path": "tests/structure/session-reanchor-v1.test.js", "registered": 69, "skips": {"win32": 1},
       "runs": [{ "driver": "tests/structure/test-session-reanchor.sh" }],
       "summary": "Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason."
     },
@@ -260,9 +276,9 @@
       "summary": "The state path walk the tdd-phase lease processes and _tdd_paths_safe share: link, kind and link-count refusals, unreadable components, trusted-root and fallback anchors, and malformed requests."
     },
     {
-      "path": "tests/structure/stop-background-wait-v1.test.js", "registered": 19,
+      "path": "tests/structure/stop-background-wait-v1.test.js", "registered": 21,
       "runs": [{ "driver": "tests/structure/test-stop-background-wait.sh" }],
-      "summary": "The Stop guard's background wait: the measured host vocabulary, the ZENSU-AWAIT line grammar, the wait, hint and nowait verdicts, the per-task release bound, the per-generation hint bound, the store and the CLI."
+      "summary": "The Stop guard's background wait: the measured host vocabulary, the ZENSU-AWAIT line grammar, the wait, hint and nowait verdicts, the per-task release bound, the per-generation hint bound, the readable release note and the shared list renderer, the store and the CLI."
     },
     {
       "path": "tests/structure/subagent-shell-guard-v1.test.js", "registered": 27, "skips": {"win32": 2},
@@ -295,7 +311,7 @@
       "summary": "The playwright-cli run-config helper: the isolated origin-restricted config, the address pins of a remote run, the signed-in login step with its signal cleanup, and the discard verb."
     },
     {
-      "path": "tests/structure/verify-consent-v1.test.js", "registered": 139, "skips": {"darwin": 1, "linux": 1, "root": 1, "win32": 3},
+      "path": "tests/structure/verify-consent-v1.test.js", "registered": 142, "skips": {"darwin": 1, "linux": 1, "root": 1, "win32": 3},
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
       "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer with its linear shell-flag scan, every refused indirection and the signed-in session rules."
     },
@@ -310,7 +326,7 @@
       "summary": "The free loopback port helper: argument parsing, occupied and excluded ports and the CLI contract."
     },
     {
-      "path": "tests/structure/verify-navigation-floor-v1.test.js", "registered": 21,
+      "path": "tests/structure/verify-navigation-floor-v1.test.js", "registered": 22,
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
       "summary": "The navigation floor the consent gate and the run-config helper share: local hosts, address classes and URL refusals."
     },
@@ -325,9 +341,9 @@
       "summary": "Windows CI manifest invariants: the shards, their deadlines, the command catalog and the workflow job."
     },
     {
-      "path": "tests/structure/windows-observation.test.js", "registered": 11,
+      "path": "tests/structure/windows-observation.test.js", "registered": 12,
       "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
-      "summary": "The Windows observation summarizer."
+      "summary": "The Windows observation summarizer, including the shard summary that judges every profile by its newest run attempt."
     },
     {
       "path": "tests/structure/windows-profile-contract.test.js", "registered": 4,

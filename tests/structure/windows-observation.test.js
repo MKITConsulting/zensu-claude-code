@@ -78,6 +78,29 @@ function fixture() {
   return { root, reports, legacy };
 }
 
+function artifactName(name, attempt) {
+  return `windows-profile-${name}-${context.sourceGitRevision}-${attempt}`;
+}
+
+function reportFile(artifacts, name = EXPECTED_PROFILES[0], attempt = context.runAttempt) {
+  return path.join(artifacts, artifactName(name, attempt), `${name}.json`);
+}
+
+function writeArtifact(artifacts, name, attempt, report = profile(name, { runAttempt: attempt })) {
+  const file = reportFile(artifacts, name, attempt);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(report));
+  return file;
+}
+
+function artifactFixture(attempt = context.runAttempt) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-windows-shard-artifacts-'));
+  const artifacts = path.join(root, 'artifacts');
+  fs.mkdirSync(artifacts);
+  for (const name of EXPECTED_PROFILES) writeArtifact(artifacts, name, attempt);
+  return { root, artifacts };
+}
+
 function currentContractHashes() {
   return CURRENT_PROFILE_CONTRACT;
 }
@@ -129,24 +152,28 @@ test('summarizes every provenance-bound profile report against the legacy result
 });
 
 test('cutover summary passes only the complete same-run Windows shard inventory', () => {
-  const value = fixture();
+  const value = artifactFixture();
   try {
     const result = summarizeShards({
-      reportsDirectory: value.reports,
+      artifactsDirectory: value.artifacts,
       expected: context,
     });
     assert.deepEqual(
       {
+        schemaVersion: result.schemaVersion,
         kind: result.kind,
         status: result.status,
         complete: result.complete,
         profileNames: result.profiles.map((entry) => entry.profile),
+        profileAttempts: result.profiles.map((entry) => entry.runAttempt),
       },
       {
+        schemaVersion: 2,
         kind: 'windows-shard-summary',
         status: 'passed',
         complete: true,
         profileNames: EXPECTED_PROFILES,
+        profileAttempts: EXPECTED_PROFILES.map(() => context.runAttempt),
       },
     );
     assert.deepEqual(
@@ -166,26 +193,60 @@ test('cutover summary passes only the complete same-run Windows shard inventory'
 test('cutover summary fails closed on malformed, drifted, or red shard evidence', () => {
   const mutations = [
     {
-      throws: /exactly \d+/,
-      mutate: ({ reports }) => fs.unlinkSync(
-        path.join(reports, `${EXPECTED_PROFILES[0]}.json`),
-      ),
+      throws: /has no report for/,
+      mutate: ({ artifacts }) => fs.rmSync(path.dirname(reportFile(artifacts)), { recursive: true }),
     },
     {
-      throws: /exactly \d+/,
-      mutate: ({ reports }) => fs.writeFileSync(
-        path.join(reports, 'unexpected.json'),
+      throws: /must hold exactly/,
+      mutate: ({ artifacts }) => fs.unlinkSync(reportFile(artifacts)),
+    },
+    {
+      throws: /must hold exactly/,
+      mutate: ({ artifacts }) => fs.writeFileSync(
+        path.join(path.dirname(reportFile(artifacts)), 'unexpected.json'),
         JSON.stringify(profile(EXPECTED_PROFILES[0])),
       ),
     },
-    { mutate: ({ reports }) => {
-      const file = path.join(reports, `${EXPECTED_PROFILES[0]}.json`);
+    {
+      throws: /not a profile report artifact/,
+      mutate: ({ artifacts }) => fs.mkdirSync(path.join(artifacts, 'unexpected')),
+    },
+    {
+      throws: /not a profile report artifact/,
+      mutate: ({ artifacts }) => fs.mkdirSync(path.join(artifacts, artifactName('windows-shard-0', '1'))),
+    },
+    {
+      throws: /not a profile report artifact/,
+      mutate: ({ artifacts }) => fs.mkdirSync(path.join(
+        artifacts,
+        `windows-profile-${EXPECTED_PROFILES[0]}-${'b'.repeat(40)}-1`,
+      )),
+    },
+    {
+      throws: /not a profile report artifact/,
+      mutate: ({ artifacts }) => fs.mkdirSync(
+        path.join(artifacts, artifactName(EXPECTED_PROFILES[0], '01')),
+      ),
+    },
+    {
+      throws: /not a profile report artifact/,
+      mutate: ({ artifacts }) => fs.writeFileSync(
+        path.join(artifacts, artifactName(EXPECTED_PROFILES[0], '1')),
+        JSON.stringify(profile(EXPECTED_PROFILES[0], { runAttempt: '1' })),
+      ),
+    },
+    {
+      throws: /later run attempt/,
+      mutate: ({ artifacts }) => writeArtifact(artifacts, EXPECTED_PROFILES[0], '3'),
+    },
+    { mutate: ({ artifacts }) => {
+      const file = reportFile(artifacts);
       const failed = profile(EXPECTED_PROFILES[0], { status: 'failed' });
       failed.suites[0] = { ...failed.suites[0], status: 'failed', exitCode: 1 };
       fs.writeFileSync(file, JSON.stringify(failed));
     } },
-    { mutate: ({ reports }) => {
-      const file = path.join(reports, `${EXPECTED_PROFILES[0]}.json`);
+    { mutate: ({ artifacts }) => {
+      const file = reportFile(artifacts);
       const timedOut = profile(EXPECTED_PROFILES[0], { status: 'failed' });
       timedOut.suites[0] = {
         ...timedOut.suites[0],
@@ -194,8 +255,8 @@ test('cutover summary fails closed on malformed, drifted, or red shard evidence'
       };
       fs.writeFileSync(file, JSON.stringify(timedOut));
     } },
-    { mutate: ({ reports }) => {
-      const file = path.join(reports, `${EXPECTED_PROFILES[0]}.json`);
+    { mutate: ({ artifacts }) => {
+      const file = reportFile(artifacts);
       const cleanupFailed = profile(EXPECTED_PROFILES[0], { status: 'failed' });
       cleanupFailed.suites[0] = {
         ...cleanupFailed.suites[0],
@@ -203,22 +264,22 @@ test('cutover summary fails closed on malformed, drifted, or red shard evidence'
       };
       fs.writeFileSync(file, JSON.stringify(cleanupFailed));
     } },
-    { throws: /runAttempt/, mutate: ({ reports }) => {
-      const file = path.join(reports, `${EXPECTED_PROFILES[0]}.json`);
-      fs.writeFileSync(file, JSON.stringify(profile(EXPECTED_PROFILES[0], { runAttempt: '9' })));
+    { throws: /runAttempt/, mutate: ({ artifacts }) => {
+      const file = reportFile(artifacts);
+      fs.writeFileSync(file, JSON.stringify(profile(EXPECTED_PROFILES[0], { runAttempt: '1' })));
     } },
-    { throws: /profileContractSha256/, mutate: ({ reports }) => {
-      const file = path.join(reports, `${EXPECTED_PROFILES[0]}.json`);
+    { throws: /profileContractSha256/, mutate: ({ artifacts }) => {
+      const file = reportFile(artifacts);
       fs.writeFileSync(file, JSON.stringify(profile(EXPECTED_PROFILES[0], {
         profileContractSha256: 'e'.repeat(64),
       })));
     } },
-    { throws: /report is incomplete/, mutate: ({ reports }) => {
-      const file = path.join(reports, `${EXPECTED_PROFILES[0]}.json`);
+    { throws: /report is incomplete/, mutate: ({ artifacts }) => {
+      const file = reportFile(artifacts);
       fs.writeFileSync(file, JSON.stringify(profile(EXPECTED_PROFILES[0], { suites: [] })));
     } },
-    { throws: /status contradicts its suite evidence/, mutate: ({ reports }) => {
-      const file = path.join(reports, `${EXPECTED_PROFILES[0]}.json`);
+    { throws: /status contradicts its suite evidence/, mutate: ({ artifacts }) => {
+      const file = reportFile(artifacts);
       const contradictory = profile(EXPECTED_PROFILES[0]);
       contradictory.suites[0] = {
         ...contradictory.suites[0],
@@ -229,17 +290,17 @@ test('cutover summary fails closed on malformed, drifted, or red shard evidence'
     } },
   ];
   for (const mutation of mutations) {
-    const value = fixture();
+    const value = artifactFixture();
     try {
       mutation.mutate(value);
       if (mutation.throws) {
         assert.throws(
-          () => summarizeShards({ reportsDirectory: value.reports, expected: context }),
+          () => summarizeShards({ artifactsDirectory: value.artifacts, expected: context }),
           mutation.throws,
         );
       } else {
         const result = summarizeShards({
-          reportsDirectory: value.reports,
+          artifactsDirectory: value.artifacts,
           expected: context,
         });
         assert.equal(result.status, 'failed');
@@ -248,6 +309,47 @@ test('cutover summary fails closed on malformed, drifted, or red shard evidence'
     } finally {
       fs.rmSync(value.root, { recursive: true, force: true });
     }
+  }
+});
+
+test('shard summary judges every profile by its newest run attempt', () => {
+  const value = artifactFixture('1');
+  try {
+    const [rerunProfile, laterProfile] = EXPECTED_PROFILES;
+    const timedOut = profile(rerunProfile, { runAttempt: '1', status: 'failed' });
+    timedOut.suites[0] = { ...timedOut.suites[0], status: 'timed_out', timeoutScope: 'suite' };
+    fs.writeFileSync(reportFile(value.artifacts, rerunProfile, '1'), JSON.stringify(timedOut));
+    writeArtifact(value.artifacts, rerunProfile, '2');
+    const repaired = summarizeShards({ artifactsDirectory: value.artifacts, expected: context });
+    assert.equal(repaired.status, 'passed');
+    assert.equal(repaired.runAttempt, '2');
+    assert.deepEqual(
+      repaired.profiles.map((entry) => entry.runAttempt),
+      EXPECTED_PROFILES.map((name) => (name === rerunProfile ? '2' : '1')),
+    );
+
+    const summaryOnly = { ...context, runAttempt: '3' };
+    const rerunSummary = summarizeShards({ artifactsDirectory: value.artifacts, expected: summaryOnly });
+    assert.equal(rerunSummary.status, 'passed');
+    assert.equal(rerunSummary.runAttempt, '3');
+    assert.deepEqual(
+      rerunSummary.profiles.map((entry) => entry.runAttempt),
+      repaired.profiles.map((entry) => entry.runAttempt),
+    );
+
+    const regressed = profile(laterProfile, { runAttempt: '3', status: 'failed' });
+    regressed.suites[0] = { ...regressed.suites[0], status: 'failed', exitCode: 1 };
+    writeArtifact(value.artifacts, laterProfile, '3', regressed);
+    const masked = summarizeShards({ artifactsDirectory: value.artifacts, expected: summaryOnly });
+    assert.equal(masked.status, 'failed');
+    assert.equal(masked.complete, false);
+    assert.deepEqual(
+      masked.profiles.filter((entry) => entry.profile === laterProfile),
+      [{ profile: laterProfile, status: 'failed', durationMs: 60000,
+        suiteCount: regressed.suites.length, runAttempt: '3' }],
+    );
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
   }
 });
 
@@ -420,9 +522,11 @@ test('public CLI records, summarizes, and audits persisted observation evidence'
 });
 
 test('public CLI writes a shard-only aggregate and returns non-zero for red evidence', () => {
-  const value = fixture();
+  const value = artifactFixture();
+  const flat = fixture();
   const output = path.join(value.root, 'generated', 'shards.json');
   const stdout = [];
+  const stderr = [];
   const environment = {
     GITHUB_SHA: context.sourceGitRevision,
     GITHUB_RUN_ID: context.runId,
@@ -431,26 +535,33 @@ test('public CLI writes a shard-only aggregate and returns non-zero for red evid
   };
   try {
     assert.equal(main({
-      argv: ['summarize-shards', value.reports, output],
+      argv: ['summarize-shards', value.artifacts, output],
       environment,
       stdout: { write(message) { stdout.push(String(message)); } },
     }), 0);
     assert.equal(JSON.parse(fs.readFileSync(output, 'utf8')).status, 'passed');
 
-    const file = path.join(value.reports, `${EXPECTED_PROFILES[0]}.json`);
+    const file = reportFile(value.artifacts);
     const failed = profile(EXPECTED_PROFILES[0], { status: 'failed' });
     failed.suites[0] = { ...failed.suites[0], status: 'failed', exitCode: 1 };
     fs.writeFileSync(file, JSON.stringify(failed));
     assert.equal(main({
-      argv: ['summarize-shards', value.reports, output],
+      argv: ['summarize-shards', value.artifacts, output],
       environment,
       stdout: { write(message) { stdout.push(String(message)); } },
     }), 1);
     assert.equal(JSON.parse(fs.readFileSync(output, 'utf8')).status, 'failed');
     assert.match(stdout.join(''), /windows shards: PASS/);
     assert.match(stdout.join(''), /windows shards: FAIL/);
+    assert.equal(main({
+      argv: ['summarize-shards', flat.reports, output],
+      environment,
+      stderr: { write(message) { stderr.push(String(message)); } },
+    }), 2);
+    assert.match(stderr.join(''), /is not a profile report artifact of this commit/);
   } finally {
     fs.rmSync(value.root, { recursive: true, force: true });
+    fs.rmSync(flat.root, { recursive: true, force: true });
   }
 });
 

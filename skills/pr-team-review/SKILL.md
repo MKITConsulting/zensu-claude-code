@@ -132,7 +132,7 @@ Delegated mode keeps the ref without asking.
 
 - `rules/reviewer-personas.md` — 25-persona pool (incl. the always-on holistic core `coverage-audit` / `bug-hunter` / `maintainability` / `adversarial`), trigger signals, prompt templates, JSON schema
 - `rules/workflow.md` — phase-by-phase pitfalls + heuristics
-- `rules/github-publish.md` — GitHub atomic `gh api` reviews schema, side/line rules, pre-publish anchor validation, fallbacks
+- `rules/github-publish.md` — GitHub reviews payload schema for the driver's `--post-review`, side/line rules, pre-publish anchor validation, fallbacks, verification
 - `rules/gitlab-publish.md` — GitLab publish via the driver: summary note + inline discussions, `position` object, marker idempotency, never auto-approve
 
 ## Critical Conventions

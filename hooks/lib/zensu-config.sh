@@ -45,7 +45,7 @@
 # double-quoted JS string literals so each getter can embed it inside a
 # single-quoted extraction snippet and keep a single `node -e` spawn:
 #   node -e "$_ZENSU_CFG_JS"' <extraction reading the cfg() object> '
-_ZENSU_CFG_JS='function rd(p){try{return JSON.parse(require("fs").readFileSync(p,"utf8"))}catch(e){return {}}}function dm(b,o){if(o===null||typeof o!=="object"||Array.isArray(o))return o;var r=(b&&typeof b==="object"&&!Array.isArray(b))?Object.assign({},b):{};for(var k of Object.keys(o)){if(k==="__proto__"||k==="constructor"||k==="prototype")continue;r[k]=Object.prototype.hasOwnProperty.call(r,k)?dm(r[k],o[k]):o[k]}return r}function cfg(){var e=process.env.ZENSU_CONFIG;if(e)return rd(e);var g=rd((process.env.HOME||"")+"/.zensu/config.json");var pd=process.env.CLAUDE_PROJECT_DIR;var p=pd?rd(pd+"/.zensu/config.json"):{};return dm(g,p)}'
+_ZENSU_CFG_JS='function rd(p){try{return JSON.parse(require("fs").readFileSync(p,"utf8"))}catch(e){return {}}}function dm(b,o){if(o===null||typeof o!=="object"||Array.isArray(o))return o;var r=(b&&typeof b==="object"&&!Array.isArray(b))?Object.assign({},b):{};for(var k of Object.keys(o)){if(k==="__proto__"||k==="constructor"||k==="prototype")continue;r[k]=Object.prototype.hasOwnProperty.call(r,k)?dm(r[k],o[k]):o[k]}return r}function ucfg(){var e=process.env.ZENSU_CONFIG;return e?rd(e):rd((process.env.HOME||"")+"/.zensu/config.json")}function pcfg(){if(process.env.ZENSU_CONFIG)return {};var pd=process.env.CLAUDE_PROJECT_DIR;return pd?rd(pd+"/.zensu/config.json"):{}}function cfg(){return process.env.ZENSU_CONFIG?ucfg():dm(ucfg(),pcfg())}'
 
 # Native Windows Node cannot reliably consume an MSYS path through its
 # quote-sensitive automatic environment conversion. Render only the three
@@ -520,6 +520,14 @@ zensu_evidence_ci_config_json() {
   command -v node >/dev/null 2>&1 || { printf '{}'; return 0; }
   local val
   val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var e=j.evidence;e=(e&&typeof e==="object"&&!Array.isArray(e))?e:{};var c=(e.ci&&typeof e.ci==="object"&&!Array.isArray(e.ci))?e.ci:{};function s(v){return typeof v==="string"&&v.trim()!==""&&v.length<=512&&v.indexOf(String.fromCharCode(0))===-1?v.trim():null}var r=e.fullSuiteRunner==="ci"||e.fullSuiteRunner==="local"?e.fullSuiteRunner:null;process.stdout.write(JSON.stringify({runner:r,workflow:s(c.workflow),job:s(c.job)}))' 2>/dev/null)
+  [ -n "$val" ] || val='{}'
+  printf '%s' "$val"
+}
+
+zensu_evidence_report_config_json() {
+  command -v node >/dev/null 2>&1 || { printf '{}'; return 0; }
+  local val
+  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' function ob(x){return Boolean(x)&&typeof x==="object"&&!Array.isArray(x)}function rep(j){var e=ob(j)&&ob(j.evidence)?j.evidence:{};return ob(e.report)?e.report:{}}process.stdout.write(JSON.stringify({user:rep(ucfg()),project:rep(pcfg())}))' 2>/dev/null)
   [ -n "$val" ] || val='{}'
   printf '%s' "$val"
 }

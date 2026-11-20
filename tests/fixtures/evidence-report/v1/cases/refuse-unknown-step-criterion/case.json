@@ -1,0 +1,15 @@
+{
+  "description": "A step that names a criterion the coverage does not list.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "step.unknown-criterion",
+        "at": "steps[1].criteria"
+      }
+    ]
+  }
+}

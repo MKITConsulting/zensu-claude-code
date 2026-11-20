@@ -2516,6 +2516,13 @@ case "$OUT" in
     esac ;;
   *) check "P1ad4 pruned row without a pair (got: $OUT)" FAIL ;;
 esac
+case "$OUT" in
+  *'--restore-root --confirm'*|*'--confirm --restore-root'*)
+    check "P1ad4b the pruned row hands over the restore's complete invocation (got: $OUT)" FAIL ;;
+  *'If the recorded project root is gone as well, an adoption re-mints the record, but a zensu CLI call, Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, until that exact directory is re-created; /zensu:adopt-session --restore-root reports on that AFTER the adoption'*)
+    check "P1ad4b the pruned row also covers a recorded project root that is gone and orders the restore after the adoption" PASS ;;
+  *) check "P1ad4b the pruned row names the combined state (got: $OUT)" FAIL ;;
+esac
 # All THREE adoptable rows say WHY the user is looking at them: adoption runs on its
 # own on the first hook contact, so a row still rendered means that adoption was
 # refused, opted out or did not complete, and the remedy is the report first, the
@@ -4263,17 +4270,31 @@ if grep -qF 'zensu-vcs.sh' "$HELPER" && grep -qF -- '--detect' "$HELPER"; then
 else
   check "P4c wrapper resolves the forge through the driver's public --detect seam" FAIL
 fi
-GL="$(ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
+DOC_SSH="$(mktemp -d -t doctor-ssh-XXXXXX)"; mkdir -p "$DOC_SSH/bin"
+cat > "$DOC_SSH/bin/ssh" <<STUB
+#!/bin/sh
+printf '%s\n' "\$*" >> "$DOC_SSH/ssh.log"
+for a in "\$@"; do h="\$a"; done
+printf 'user git\nhostname %s\nport 22\n' "\$h"
+STUB
+chmod +x "$DOC_SSH/bin/ssh"
+GL="$(PATH="$DOC_SSH/bin:$PATH" ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$SBOX" \
   ZENSU_VCS_REMOTE='git@gitlab.com:acme/app.git' ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \
   bash "$HELPER" 2>/dev/null)"
 case "$GL" in *'GitLab CLI (glab): installed and authenticated'*) check "P4g wrapper detects a gitlab remote -> GitLab glab line" PASS ;; *) check "P4g wrapper gitlab detect (got: $GL)" FAIL ;; esac
 case "$GL" in *GitHub*) check "P4h gitlab repo NOT warned about GitHub/gh (the false scare this feature removes)" FAIL ;; *) check "P4h gitlab repo NOT warned about GitHub/gh" PASS ;; esac
-GHUB="$(ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
+GHUB="$(PATH="$DOC_SSH/bin:$PATH" ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$SBOX" \
   ZENSU_VCS_REMOTE='git@github.com:acme/app.git' ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \
   bash "$HELPER" 2>/dev/null)"
 case "$GHUB" in *'GitHub CLI (gh): installed and authenticated'*) check "P4e wrapper detects a github remote -> GitHub gh line" PASS ;; *) check "P4e wrapper github detect (got: $GHUB)" FAIL ;; esac
+DOC_SSH_LOG="$(cat "$DOC_SSH/ssh.log" 2>/dev/null)"
+case "$DOC_SSH_LOG" in
+  *"-G -- gitlab.com"*"-G -- github.com"*) check "P4i the wrapper's SSH remotes reach the suite's identity ssh, never the machine's ssh configuration" PASS ;;
+  *) check "P4i the wrapper's SSH remotes reach the suite's identity ssh, never the machine's ssh configuration (ssh='$DOC_SSH_LOG')" FAIL ;;
+esac
+rm -rf "$DOC_SSH"
 UNK="$(ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$SBOX" \
   ZENSU_VCS_REMOTE= ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \
@@ -6866,6 +6887,69 @@ else
   check "P1nz13 the terminal escape must narrow the finding, not silence it (out=$AP_TERMROW_OUT ctl=$AP_TERMROW_CTL)" FAIL
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json
+
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+AP_GONE_HOLDING="$SBOX/ap-gone-holding"
+AP_GONE_CLAIMING="$SBOX/ap-gone-claiming"
+AP_GONE_EMPTY="$SBOX/ap-gone-empty"
+mkdir -p "$AP_GONE_HOLDING/.zensu/state" "$AP_GONE_CLAIMING/.zensu/state" "$AP_GONE_EMPTY"
+: > "$AP_GONE_HOLDING/.zensu/state/autopilot-run-run_gone_live.json"
+: > "$AP_GONE_CLAIMING/.zensu/state/autopilot-relocating-run_gone_claim.json"
+ap_run run_gone_a GATES "$AP_FOREIGN" "-" "/nonexistent/moved/root"
+ap_run run_gone_b TEAM_REVIEW "$AP_OWN" "/nonexistent/moved/root" "/nonexistent/moved/root"
+ap_run run_gone_ws GATES "$AP_FOREIGN" "/w/t" "/nonexistent/moved/root"
+ap_run run_gone_live GATES "$AP_FOREIGN" "-" "$AP_GONE_HOLDING"
+ap_run run_gone_claim GATES "$AP_FOREIGN" "-" "$AP_GONE_CLAIMING"
+ap_run run_gone_empty GATES "$AP_FOREIGN" "-" "$AP_GONE_EMPTY"
+ap_run run_gone_done DONE "$AP_FOREIGN" "-" "/nonexistent/moved/root"
+AP_GONE_OUT="$(ap_report bound "$AP_OWN")"
+AP_GONE_ROW="$(printf '%s\n' "$AP_GONE_OUT" | grep -F 'whose recorded project root no longer exists')"
+AP_GONE_UNREAD="$(printf '%s\n' "$AP_GONE_OUT" | grep -F 'could not be read')"
+AP_GONE_MAIN=""
+if [ ! -e "$AP_P/.git" ] && mkdir "$AP_P/.git"; then
+  AP_GONE_MAIN="$(ap_report bound "$AP_OWN" | grep -F 'whose recorded project root no longer exists')"
+  rmdir "$AP_P/.git"
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_gone_ctl GATES "$AP_FOREIGN" "/w/t" "/nonexistent/moved/root"
+AP_GONE_CTL="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json
+if printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot: 3 durable run document(s) whose recorded project root no longer exists or no longer holds the run' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF '⚠️' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot-run-run_gone_a.json' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot-run-run_gone_b.json' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot-run-run_gone_empty.json' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF '/zensu:autopilot-adopt, run from a session whose project root is this project' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF -- '--confirm' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'zensu-log.sh' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'run_gone_ws' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'run_gone_live' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'run_gone_claim' \
+  && printf '%s' "$AP_GONE_UNREAD" | grep -qF '3 durable run document(s) that could not be read' \
+  && printf '%s' "$AP_GONE_UNREAD" | grep -qF 'autopilot-run-run_gone_ws.json' \
+  && printf '%s' "$AP_GONE_UNREAD" | grep -qF 'autopilot-run-run_gone_live.json' \
+  && printf '%s' "$AP_GONE_UNREAD" | grep -qF 'autopilot-run-run_gone_claim.json' \
+  && ! printf '%s' "$AP_GONE_UNREAD" | grep -qF 'run_gone_a' \
+  && ! printf '%s' "$AP_GONE_UNREAD" | grep -qF 'run_gone_empty' \
+  && printf '%s' "$AP_GONE_OUT" | grep -F 'recorded stage is terminal' | grep -qF 'autopilot-run-run_gone_done.json' \
+  && ! printf '%s' "$AP_GONE_OUT" | grep -qF 'nonterminal durable run run_gone_b' \
+  && printf '%s' "$AP_GONE_CTL" | grep -qF '1 durable run document(s) that could not be read' \
+  && ! printf '%s' "$AP_GONE_CTL" | grep -qF 'whose recorded project root no longer exists'; then
+  check "P1nz21 a nonterminal record whose recorded root is gone or no longer holds the run, and whose working tree is that root, gets its own row routing to /zensu:autopilot-adopt, while a root that still holds its record or claim stays unreadable" PASS
+else
+  check "P1nz21 the vanished-root row (row=$AP_GONE_ROW unread=$AP_GONE_UNREAD ctl=$AP_GONE_CTL)" FAIL
+fi
+if printf '%s' "$AP_GONE_MAIN" | grep -qF 'autopilot: 3 durable run document(s) whose recorded project root no longer exists or no longer holds the run' \
+  && printf '%s' "$AP_GONE_MAIN" | grep -qF 'This project is the main checkout of its repository, not a linked worktree' \
+  && printf '%s' "$AP_GONE_MAIN" | grep -qF 'move this checkout back to the project root the record names' \
+  && ! printf '%s' "$AP_GONE_MAIN" | grep -qF 'reports whether it can rewrite the record in place' \
+  && ! printf '%s' "$AP_GONE_MAIN" | grep -qF -- '--confirm' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF 'reports whether it can rewrite the record in place' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'main checkout'; then
+  check "P1nz21b in a project that is a main checkout the released-root row names the way back instead of the in-place rewrite /zensu:autopilot-adopt refuses there, and only there" PASS
+else
+  check "P1nz21b the main-checkout released-root row (main=$AP_GONE_MAIN)" FAIL
+fi
 
 # P1nz11 — `ownerWouldAccept` must mirror the owner's `sha256` as a TYPE test, not only
 # as a pattern. `RegExp.prototype.test` applies ToString to its argument, so a

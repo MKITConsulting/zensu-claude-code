@@ -149,7 +149,8 @@ Inline comment structure (Markdown), one per `comments[]` entry:
 A P2 comment opens with `🟡 **Should fix** · **F<n>** · <category>`; P3 findings never
 become inline comments. The `suggestion` block is optional and is emitted only under the
 conditions in `rules/github-publish.md` § Suggested changes (on GitLab its fence reads
-`suggestion:-0+0`, `rules/gitlab-publish.md`). The `Evidence` block is optional too. The
+`suggestion:-0+0`, `rules/gitlab-publish.md`, and its anchor condition takes the GitLab form
+stated in that section). The `Evidence` block is optional too. The
 closing marker is invisible metadata for tools: the same ID as the body, the finding's
 severity, its category as a slug of lower-case letters, digits, and single hyphens
 (`docs-drift`), and the short head SHA. It never spells `zensu-review:v1`, the driver's
@@ -167,9 +168,9 @@ graded `VERIFIED`; with the gate off it reads `not verified (finding verificatio
 
 The **sole exception** is the `### Test Coverage` status table above: four short all-numeric columns survive the squeeze because every cell is a small integer. Nothing else — no findings table, no file-path table. Inside inline comments the exception does **not** apply: no tables at all, code fences / bullet lists / bold prefixes only.
 
-Inline findings: max `--max-inline` (default 25), sorted by path then line, P1 first. See the detected forge's publish rules — `rules/github-publish.md` (atomic `gh api` review, `line`/`side` rules per file `changeType` ADDED/MODIFIED/RENAMED, suggested changes) or `rules/gitlab-publish.md` (summary note + inline discussions, `position` object, marker idempotency, alert and suggestion spelling).
+Inline findings: max `--max-inline` (default 25), sorted by path then line, P1 first. See the detected forge's publish rules — `rules/github-publish.md` (one atomic review through `--post-review`, `line`/`side` rules per file `changeType` ADDED/MODIFIED/RENAMED, suggested changes) or `rules/gitlab-publish.md` (summary note + inline discussions, `position` object, marker idempotency, alert and suggestion spelling).
 
-Validate every inline anchor before it enters `comments[]`, per `rules/github-publish.md` § Pre-Publish Anchor Validation (`hooks/lib/valid-diff-lines.js`: `valid` keeps the anchor, `remap` moves it with a body note and drops any suggestion block, `none` turns the finding into a body-only finding). Only validated anchors go into the payload the driver's `--post-review` publishes; on GitLab the driver additionally folds any line-less finding into a positionless thread (`rules/gitlab-publish.md`).
+On GitHub, validate every inline anchor before it enters `comments[]`, per `rules/github-publish.md` § Pre-Publish Anchor Validation (`hooks/lib/valid-diff-lines.js`: `valid` keeps the anchor, `remap` moves it with a body note and drops any suggestion block, `none` turns the finding into a body-only finding). Only validated anchors go into the payload the driver's `--post-review` publishes. On GitLab the driver runs that check itself: its anchor preflight reads every page of the merge request's diffs, turns an anchor it cannot place into a positionless thread with the path in its body, and folds any line-less finding the same way (`rules/gitlab-publish.md`).
 
 After a newly synthesized payload is complete, bind it durably before the first `--reconcile-review` call. The store is create-once: an identical retry returns the existing
 private snapshot, while different bytes, a stale operation/head, corruption, a symlink, or
@@ -254,7 +255,8 @@ reconciliation; it does not claim distributed exactly-once behavior for independ
 simultaneous writers that bypass the owner contract.
 
 - **GitHub** — `URL` is the review `html_url` from the POST response; return it to the user.
-  Verify with `gh api repos/<owner>/<repo>/pulls/<n>/reviews/<id>/comments | jq length`
-  (should equal the inline count).
+  Verify with `(cd "$REPO" && bash "$VCS" --fetch-review --provider github --repo-id "$REPOID" <n> <id>)`,
+  `<id>` being the number after `#pullrequestreview-` in `URL`: its `comments` count should
+  equal the inline count (`rules/github-publish.md` § Verification After Post).
 - **GitLab** — discussions post in a loop (not transactional). Report the MR URL from the
   scout metadata + the number of posted threads; a re-run reconciles via the markers.

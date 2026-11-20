@@ -1,0 +1,3 @@
+GET /settings 200 in 41 ms
+PUT /api/settings 200 in 12 ms
+console: [warning] The locale picker uses a deprecated API

@@ -104,7 +104,9 @@ Three verdicts:
   else `process.platform` of the hook, which runs where PowerShell runs.
 
 Nested shells are judged by how they read code. A PowerShell host reads `-Command`,
-`-EncodedCommand` (always refused), `-File` and standard input (refused); `pwsh` reads its first
+`-EncodedCommand` (always refused), `-File` and standard input (refused), while a help request
+(`-Help`, `-?`, `/?`) and, for `pwsh`, a version request (`-Version`, `-v`, `--version`) before
+any code run nothing (`isTerminalOption`); `pwsh` reads its first
 positional argument as a script file, `powershell` as a command; an option in
 `POWERSHELL_VALUE_OPTIONS` takes its value. A POSIX shell reads `-c` code, a script file or
 standard input (refused); an option name built at run time is refused. Code built at run time is

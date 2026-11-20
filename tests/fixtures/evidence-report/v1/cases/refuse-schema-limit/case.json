@@ -1,0 +1,12 @@
+{
+  "description": "More limitation lines than schema version 1 allows.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "schema.limit",
+        "at": "sections.limitations"
+      }
+    ]
+  }
+}

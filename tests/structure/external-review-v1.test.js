@@ -784,11 +784,13 @@ test('stopWait waits a bounded number of times per session and expires an old co
     const result = xr.stopWait(running, options);
     assert.equal(result.wait, true);
     assert.equal(result.line, `wait count=${count} max=3 workflows=2 names=review-changes`);
+    assert.equal(result.note, 'Zensu is waiting for the workflow "review-changes" and 1 more background workflow; the review chain continues when they report back.');
     setMtime(waitFile, options.now);
   }
   const limited = xr.stopWait(running, options);
   assert.equal(limited.wait, false);
   assert.equal(limited.reason, 'limit');
+  assert.equal(limited.note, undefined);
   assert.equal(xr.stopWait(running, options).reason, 'limit');
   const later = xr.stopWait(running, { ...options, now: options.now + 25 * 60 * 60 * 1000 });
   assert.equal(later.wait, true);
@@ -858,6 +860,7 @@ test('main never writes stdout in record mode and always answers in check, tree 
   const waitFile = path.join(data, 'external-review', 'v1', 'waits', `${SESSION}.json`);
   for (let count = 1; count <= 3; count += 1) {
     assert.equal(xr.main(['stop-wait'], waitEnv, runningInput), 0);
+    assert.equal(written.at(-1), `wait count=${count} max=3 workflows=1 names=(unnamed)\nZensu is waiting for a background workflow; the review chain continues when it reports back.\n`);
     setMtime(waitFile, Date.now());
   }
   assert.equal(xr.main(['stop-wait'], waitEnv, runningInput), 0);

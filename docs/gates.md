@@ -39,7 +39,11 @@ at most once. Neither literal takes a VALUE, which is what keeps a destination o
 of every invocation this gate admits. Every hook on the `Bash|PowerShell`
 matcher plus the all-tool capability gate must allow, because a deny from any one
 of them wins. The recognizer reads the Bash spelling only, so run both commands through the
-Bash tool; a PowerShell call in a bind failure gets the named deny. The adoption itself no longer needs the command: every hook adopts a
+Bash tool; a PowerShell call in a bind failure gets the named deny. The Skill tool
+is not a way in either: the all-tool capability gate denies it like every other
+non-Bash tool, so a command reaches the session when the user types it or as the
+Bash command its skill renders. On Windows the recognizer admits neither command,
+so a fresh Claude Code session is the way out there. The adoption itself no longer needs the command: every hook adopts a
 compatible-schema record automatically on its first failed bind
 (`hooks/lib/session-auto-adopt-v1.js`, opt-out `hooks.sessionAutoAdopt`), and the
 command is the report and the manual retry for a refusal. The full account is in
@@ -85,11 +89,21 @@ To keep Claude on the Bash tool anyway, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`;
 
 ## CLI Write-Gate
 
-The main thread may run `ai-work start` and `ai-work submit` without a workflow
-window to report an agreed goal and result during direct implementation. They
-remain classified as mutations and are denied to subagents; this narrow exception
-does not admit other commands chained after them. Personal OAuth and the separate
-capture API enforce the account. There is no CLI acceptance/revocation command.
+The main thread may run the AI-work capture commands without a workflow window,
+also during direct implementation: `ai-work bind` records the product the person
+confirmed, `ai-work start` and `ai-work submit` report an agreed goal and result,
+and `ai-work recover` inspects, archives or restores the local capture receipts of
+the capture key its `--session` names. They remain classified as mutations and are
+denied to subagents; this narrow exception does not admit other commands chained
+after them. `recover` sends no request, but its `--archive` form moves the active
+receipt that capture reports from into the archive and its `--restore` form copies an
+archived receipt back into an empty active slot, and the gate classifies the verb, not
+its flags, so its inspection is denied to a subagent as well. It reaches no backend,
+so a localhost backend reading never lifts that deny. The gate does not compare the
+`--session` key with the session's own capture key: the plugin supplies that key,
+and only the rule in `docs/ai-work-capture.md` keeps a call to it. Personal OAuth
+and the separate capture API enforce the reporting account of every capture command
+that reaches the backend. There is no CLI acceptance/revocation command.
 
 The `zensu` CLI is **read-free, write-gated**. Any state-mutating command (creating or
 updating features, security classifications, tiers, journeys and their steps, revisions, mocks,
@@ -187,7 +201,9 @@ flowchart TD
     B -->|"yes"| ALLOW(["ALLOW"])
     B -->|"no — state mutation"| C{"ZENSU_MCP_GATE=off (env or inline)<br/>or hooks.mcpGate=false<br/>or localhost backend?"}
     C -->|"yes (escape hatch)"| ALLOW
-    C -->|"no"| E{"Inside an active main-thread skill workflow?<br/>workflowActive = true<br/>AND tool in workflowTools (per-skill scope)"}
+    C -->|"no"| K{"AI-work capture command?<br/>ai-work bind / start / submit / recover"}
+    K -->|"yes (main thread only)"| ALLOW
+    K -->|"no"| E{"Inside an active main-thread skill workflow?<br/>workflowActive = true<br/>AND tool in workflowTools (per-skill scope)"}
     E -->|"yes"| ALLOW
     E -->|"no"| W{"zensu work ask / followup<br/>in a bound work-order session?"}
     W -->|"yes (the work-order gate decides)"| ALLOW
@@ -243,7 +259,8 @@ In a Bash command a `--help` or `-h` word right after a word the shell expands a
 value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
 brings any such call to the binding, which denies it when it fails. A subagent's mutation is denied even while a window is open, because a child never
 borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
-report the operation to the main thread, which runs it through the matching skill. In a bound
+report the operation to the main thread, which runs it through the matching skill, or, for an
+AI-work capture command, directly without a skill window. In a bound
 work-order session the gate leaves `zensu work ask` and `zensu work followup` to the work-order
 gate, which allows them there ([Work-order mode](work-order-mode.md)). That gate reads the CLI
 name only as `zensu`, in lowercase and without `.exe`, so in such a session on macOS and Windows a
@@ -421,17 +438,62 @@ the shell ends it, so no reading drops the lines after them. A command nested mo
 deep, or one whose reading would exceed a work bound proportional to its length, is refused with
 its own reason. W382 to W554 pin each spelling and the commands that stay allowed.
 
+**Code handed to a shell.** The rebind check also reads the literal code a command hands to a
+shell in its own arguments, and judges it as a command of its own with every refusal of that
+check, the write to the file behind `CLAUDE_ENV_FILE` included. Rules (A), (B) and (C) do not
+read it, so `bash -c 'git -C ../sibling add -A'` is judged by none of them. For `sh`, `bash`,
+`rbash`, `zsh`, `dash`, `ksh`, `mksh`, `ash`, `hush`, `yash`, `posh`, `lksh`, `oksh`, `pdksh`,
+`loksh`, `fish`, `csh` and `tcsh`, also under a versioned name such as `bash5.2` or `zsh-5.9`,
+behind a wrapper the check reads, behind a path, in another letter case or as a `busybox` applet,
+and for zsh's `emulate`, it reads every word after the first option word that holds a `c` (`-c`,
+`+c`, a cluster such as `-lc`, `--rcfile`, and for `fish` also `-C`) as code, each word on its own
+and the positional words joined into one command line, and it reads the code attached to that option
+word and to every later one that holds the letter as well (`fish -c'…'`, `fish --command=…`,
+`fish -C x -c'…'`). So no option grammar the check does not
+model can hide the code, and code that runs its positional words
+(`bash -c '"$@"' _ env NAME=… cmd`) is read with them. A positional word that names a protected
+input is refused with a reason of its own, because the code can run or assign its positional
+words in any slice or order (`shift; "$@"`, `"${@:2}"`, `printf -v "$1"`); a `$NAME` or `${NAME…}`
+there is the outer shell's value, not the name, and passes, as does a longer name that only
+contains a protected one. It also reads the operands of `eval` and the
+action of `trap`. So `bash -c 'CLAUDE_CODE_SESSION_ID=… …'`, `sh -c "export ZENSU_SESSION_KEY=…"`,
+`bash -c + '…'`, `zsh -O -c '…'`, `eval '…'` and `trap '…' EXIT` are refused like the command they
+carry, and so is a protected name inside a shell inside a shell, up to eight shells deep; a ninth
+is refused as nested too deep. The price is that a positional word that spells a protected
+assignment, or names a protected input at all, is refused even where the code only reads it
+(`bash -c 'echo $1' _ NAME=…`, `bash -c 'printenv "$1"' _ NAME`), and, because the first word
+after the option that is no option counts as the code, after an option that takes a value
+(`bash --rcfile <file> -c 'echo NAME'`) the code counts as a positional word; a script file and
+`bash -s` stay data. Code of `csh`, `tcsh` and `fish` is read with the POSIX
+grammar, so their own export forms (`setenv`, `set -x`) are not read. Code handed to `powershell`,
+`pwsh` or `cmd` goes to the PowerShell control verdict, which refuses any spelling of a protected
+input, an encoded command and a host left to read its command from standard input; a help request
+and a `pwsh` version request run no code and pass, and `command -v` or `-V` only looks a program
+up, so its operand is not read as code. The adoption report's `ZADOPT_*` inputs, which
+`zensu-session-adopt.sh` sets inside its own process, and the re-anchor module's `ZREANCHOR_*`
+inputs, which `zensu-session-reanchor.sh` sets the same way, are protected inputs as well: the
+refusal names `/zensu:adopt-session` or `/zensu:adopt-session --reanchor`, and the shipped commands
+of that skill set none of them and stay allowed. The unit case
+`the Session Control check protects the entry-point inputs and reads the code a command hands to a shell, eval or trap`
+in `tests/structure/git-repo-escape.test.js`, which derives each entry point's inputs from its
+module and its wrapper, and `R11f` to `R11g8` in `tests/structure/test-restore-project-root.sh` pin
+both.
+
 **What the reader still leaves alone.** zsh reads an unknown escape inside `$'…'` and a `$"…"`
 differently, expands `=git` to a path and runs the precommand modifiers `noglob`, `nocorrect` and
 `-`; where the Bash tool runs zsh, the gate still reads those spellings the bash way, so they pass.
 A variable name the shell builds at run time in a builtin or wrapper operand (`export "$N=…"`,
 `export $(cat .env | xargs)`, `unset "$v"`) stays allowed, because loading an environment file that
 way is common and `source` reaches the same assignments. A program word the shell builds at run
-time (`$GIT`, `$(…)`), an alias or a function, code the shell builds or stores to run later
-(`eval`, `trap`, `bash -c`, `source`, a script file, a `mapfile -C` callback), arithmetic that
+time (`$GIT`, `$(…)`), an alias or a function, code the shell builds at run time
+(`bash -c "$CODE"`, `eval "$(…)"`) or reads from outside the command text (`source`, a script file,
+a here-document, here-string or pipe into a shell, a `mapfile -C` callback), arithmetic that
 reaches a name through another variable's value (`x='NAME=1'; (( x ))`) or an integer attribute
 (`declare -i`), zsh's numeric `printf` arguments and module builtins (`zparseopts`, `strftime -s`,
-`zstat -A`) and a wrapper outside the list (`timeout`, `xargs`, `stdbuf`) are not followed either.
+`zstat -A`), interpreter code (`node -e`, `python -c`) and a wrapper outside the list (`timeout`,
+`xargs`, `stdbuf`, `su -c`, `find -exec`) are not followed either. The check reads the Bash and
+PowerShell tools only, so a command run through a tool it is not registered on, such as a
+main-thread `Monitor` command, is not read at all.
 The third reading is a hand-written approximation of the shell grammar, and a construct it misreads
 can hide the commands after it, so a spelling outside the pinned rows may still pass. The word
 reader and the whitespace reading still split
@@ -835,9 +897,12 @@ session is prose, not a boundary.
 **The floor holds regardless of consent.** A hostname other than `localhost` in local mode —
 `app.localhost`, `localhost.` and `/etc/hosts` aliases included — a non-loopback `http` origin, a
 private, link-local, loopback-mapped or documentation address, credentials in the URL, and a
-query or fragment in a navigation are all refused. The one exception in local mode is a
+query or fragment in a navigation to a non-loopback origin are all refused. The one exception in local mode is a
 network-only origin a local policy declares (below), which may be a public `https://` origin, its
-hostname resolved and pinned like a remote target's. A local run admits **loopback origins
+hostname resolved and pinned like a remote target's. A navigation to a loopback origin may
+carry a query or a fragment, such as a fixture switch (`http://localhost:4200/?scenario=empty`),
+and is judged like the same URL without them: consent and policy decide on the origin alone, and
+the recorder stores the path only. A local run admits **loopback origins
 only**: a loopback IP or the exact name `localhost`. The browser answers `localhost` itself, with
 `[::1]` and `127.0.0.1`, before any HOSTS-file or DNS lookup, so no resolver pin travels with it,
 and the gate refuses a run config that pins `localhost` to an address. A remote origin, whether a
@@ -845,11 +910,14 @@ policy target or one the human approves at the prompt, is HTTPS with its host na
 run-config helper resolves each hostname once, refuses a non-public or mixed answer, and writes
 the pin the gate then requires at `open` for every `https` or `wss` origin whose host is neither
 an IP literal nor local, so a run config without that pin, or with a pattern host, never opens. The browser
-itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`; it does NOT
-fence a WebSocket connection — measured with playwright-cli 0.1.21, 0.1.23 and 0.1.24, an open gap. Nor does it refuse a
+itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`, with three
+exceptions. It does NOT fence a WebSocket connection — measured with playwright-cli 0.1.21, 0.1.23 and 0.1.24, an open gap. Nor does it refuse a
 server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
-line after every navigating call and stops a scenario that left the approved set. Nothing
-enforces routes: the evidence boundary is the origin, which the launch policy names or the human
+line after every navigating call and stops a scenario that left the approved set. Nor does it
+fence a shared worker's fetch, an open gap too — measured with playwright-cli 0.1.24 driving
+Google Chrome 157 on loopback `http` origins: a dedicated worker's fetch is fenced, a shared
+worker's fetch is not. An `https` target, a remote host, Windows and Linux were not measured.
+Nothing enforces routes: the evidence boundary is the origin, which the launch policy names or the human
 approves at the prompt, and an approved origin covers every page on it, at any path.
 
 **Consent and memory.** For an origin no policy names, the PreToolUse hook returns
@@ -869,8 +937,8 @@ CLI spelling; a loopback origin asks as before. Measured on Claude Code 2.1.293 
 app's Auto mode: the gate's `ask` reached the user, and the transcript recorded the answer with
 `permissionDecision.source: user_temporary`, while the classifier's approvals in the same session
 read `reasonType: classifier`. The PostToolUse hook
-records an executed call as `(origin, route, decidedBy, at)` in
-`<project>/.zensu/state/verify-consent-<session-key>.json`,
+records an executed call as `(origin, route, decidedBy, at)`, the route being the path without any
+query or fragment, in `<project>/.zensu/state/verify-consent-<session-key>.json`,
 written by `O_EXCL` temp plus rename, contained to that directory, and never through a symlink.
 The decision, the prompt text and the memory rules live in `hooks/lib/verify-consent-v1.js`; the
 address, URL and policy predicates live in `hooks/lib/verify-navigation-floor-v1.js`, which the
@@ -1107,6 +1175,12 @@ through Bash.
   not a boundary. A frame a target page embeds from a network-only origin renders inside that
   page, so its content reaches that page's snapshot and screenshot, where the skill reads it as
   that page's content, like data the page fetched.
+- **Three kinds of request leave the run-config fence.** A WebSocket connection and a shared
+  worker's fetch reach an origin outside the run config, and the browser follows a server
+  redirect to one. No check of any kind answers the first two; the third has only the skill's
+  `Page URL` check, which is prose. Measurements: the WebSocket with playwright-cli 0.1.21,
+  0.1.23 and 0.1.24, the shared worker with playwright-cli 0.1.24 driving Google Chrome 157 on
+  loopback `http` origins.
 - **The recorder cannot tell whether the prompt was shown**, only that the call then succeeded.
 - **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
   `playwright-cli`, an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix,
@@ -1407,6 +1481,16 @@ No argument names a directory anywhere in this mode, and neither literal it acce
 value, so the anchor never moves and the source-write gate, whenever it is opted in, compares
 against exactly the root it compared against before. Creating a directory at a path the record already names restores the
 authority the session already had and adds none.
+
+**The session it repairs comes from the environment, and the Bash gate is what keeps a foreign one
+out.** `zensu-session-adopt.sh` hands `CLAUDE_CODE_SESSION_ID` to the report module, and nothing in
+the core compares it with the session the calling process belongs to. The rebind check of the
+source-write gate, which runs whatever `hooks.bashWriteGate` says, refuses a command that sets
+that name or one of the report module's own `ZADOPT_*` inputs, on the command line or inside
+literal code handed to a shell, `eval` or `trap` (§Source-Write Gate). It reads the command text
+of the Bash and PowerShell tools, so code built at run time, a script file, a pipe into a shell,
+interpreter code and a command run through a tool the gate is not registered on, such as a
+main-thread `Monitor` command, still pass: the check prevents accidents and is not a sandbox.
 
 **Carried from the record is not the same as bounded, and only the first is true.** This is the
 one write class whose destination is an arbitrary absolute path: it is **not bounded by location**
@@ -1971,7 +2055,9 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   way to switch the gate off.
 - **Consent to a partial criterion.** `partial` means this environment cannot observe a
   criterion: it needs credentials, an account, a non-loopback host or a signed build, or its
-  driver cannot run here, so no code change turns it. A criterion the run could observe but did not
+  driver cannot run here, so no code change turns it. A driver fence is one more such cause: a
+  state the driver can never show, whoever drives it, which today means a service worker under
+  the `browser` driver. A criterion the run could observe but did not
   prove is verified again, or recorded `fail` when what was observed contradicts it. `zensu-log.sh --chain-done
   --claimed-review-ticket <ticket> --accept-partial AC-004,AC-005` closes a chain whose open
   criteria (active and not `pass`) are exactly the listed ids, are all `partial` on the
@@ -1986,7 +2072,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   `## Manual Acceptance` table whose reason names the same cause category as the `partial` record, which records
   an answer the user gave at planning or when the gap was found, or from the one question `/zensu:build` step 6d, `/zensu:verify-feature --chain` and
   `/zensu:self-review` ask when a gap is found (provide access now, accept as partial, leave the
-  chain open); `skills/verify-feature/rules/acceptance-consent.md` owns both sources. The table is
+  chain open; a driver fence takes only the last two, because no access lifts it);
+  `skills/verify-feature/rules/acceptance-consent.md` owns both sources. The table is
   read by the program that reads the `## Requirements` table, so a decorated, linked or
   comma-listed id counts, and a row whose id is struck out, or whose check is still a `{…}`
   placeholder, covers nothing. The gate

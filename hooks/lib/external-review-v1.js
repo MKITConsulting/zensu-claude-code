@@ -8,6 +8,7 @@ const { ensurePrivateDirectory } = require('./review-evidence-lease-v1.js');
 const { validateSessionId } = require('./claude-hook-session-v1.js');
 const { PRINCIPALS, classifyPreToolPayload } = require('./claude-principal-v1.js');
 const core = require('./session-control-core-v1.js');
+const { waitingNote } = require('./stop-background-wait-v1.js');
 
 const SCHEMA = 'external-review-v1';
 const STORE_SEGMENTS = Object.freeze(['external-review', 'v1']);
@@ -1234,6 +1235,7 @@ function stopWait(payload, options, limits = LIMITS) {
     max,
     workflows: workflows.length,
     names,
+    note: waitingNote(names.map((name) => `the workflow "${name}"`), workflows.length, 'background workflow'),
     line: `wait count=${count + 1} max=${max} workflows=${workflows.length} names=${nameText}`,
   };
 }
@@ -1337,7 +1339,7 @@ function main(argv, env = process.env, io = {}) {
     } catch {
       result = { line: 'nowait reason=fault workflows=0' };
     }
-    write(`${result.line}\n`);
+    write(result.wait && result.note ? `${result.line}\n${result.note}\n` : `${result.line}\n`);
     return 0;
   }
   process.stderr.write('usage: external-review-v1.js record|check|tree|stage|stop-wait\n');

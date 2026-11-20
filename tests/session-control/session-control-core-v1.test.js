@@ -2000,6 +2000,7 @@ test('cancels an owned deferred claim in release-only mode with one durable stat
 test('cancels an owned deferred claim in reset mode to an idle audited state', () => {
   const f = deferredFixture({ ownerSession: 'reset-cancellation' });
   const owner = seedDeferredOwner(f, {
+    codeRoots: [{ label: 'lib', path: '/zf/lib', top: '/zf/lib', commonDir: '/zf/lib/.git', baseline: 'unborn' }],
     workflowActive: true,
     workflowTools: ['Bash'],
     bypasses: ['unit-bypass'],
@@ -2050,6 +2051,7 @@ test('cancels an owned deferred claim in reset mode to an idle audited state', (
   assert.equal(state.deferredReviewCancellation.mode, 'reset');
   assert.equal(state.deferredReviewCancellation.sourceRevision, owner.revision);
   assert.equal(state.deferredReviewCancellation.resultRevision, owner.revision + 1);
+  assert.equal(Object.prototype.hasOwnProperty.call(state, 'codeRoots'), false);
 });
 
 test('owner-only reset cancels an assigned unseeded claim and recovers its prepared receipt', async () => {
@@ -3614,7 +3616,8 @@ test('retirement revalidates live owners and fresh handoff leases before CAS', (
 
 test('retires a foreign deferred owner with one exact CAS and is idempotent', () => {
   const f = deferredFixture();
-  const owner = seedDeferredOwner(f);
+  const codeRoots = [{ label: 'lib', path: '/zf/lib', top: '/zf/lib', commonDir: '/zf/lib/.git', baseline: 'unborn' }];
+  const owner = seedDeferredOwner(f, { codeRoots });
   const prepared = preparedTransfer(f, owner.revision);
   writeDeferredClaim(f, {
     ownerPid: 2147483647,
@@ -3624,6 +3627,7 @@ test('retires a foreign deferred owner with one exact CAS and is idempotent', ()
   const retired = core.retireDeferredReviewOwner(retireDeferredOptions(f, owner.revision));
   assert.equal(retired.revision, owner.revision + 1);
   assert.equal(retired.last_event, 'deferred-review-transfer');
+  assert.deepEqual(retired.codeRoots, codeRoots);
   assert.deepEqual({
     active: retired.active,
     implComplete: retired.implComplete,
@@ -6762,7 +6766,7 @@ test('a remnant whose manifest path cannot be read is not admitted', () => {
   );
 });
 
-test('a retired remnant relaxes neither the sibling root nor the strict read', () => {
+test('a retired remnant whose project root is gone is admitted only by the combined reader', () => {
   const f = prunedReaderFixture();
   const successor = successorInstallation(f, '10.0.0');
   retireToRemnant(f);
@@ -6776,7 +6780,164 @@ test('a retired remnant relaxes neither the sibling root nor the strict read', (
     () => core.readOrphanedProjectRootContext(f.readerOptions),
     /host-specific plugin manifest is missing/,
   );
-  assert.equal(core.adoptableRecord(adoptionOptions(f, successor)).reason, 'record-unreadable');
+  const combined = core.readOrphanedPrunedContext(f.readerOptions);
+  assert.equal(combined.plugin_root, f.currentContext.plugin_root);
+  assert.equal(combined.project_root, f.currentContext.project_root);
+  const verdict = core.adoptableRecord(adoptionOptions(f, successor));
+  assert.equal(verdict.ok, true, JSON.stringify(verdict));
+  assert.equal(verdict.orphanedProjectRoot, true);
+  assert.equal(verdict.prunedPluginRoot, true);
+});
+
+test('the combined reader admits a record whose project root and installation are both gone', () => {
+  const f = prunedReaderFixture();
+  fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(f.currentContext.project_root, { recursive: true, force: true });
+  assert.throws(() => core.readContext(f.readerOptions));
+  assert.throws(
+    () => core.readOrphanedProjectRootContext(f.readerOptions),
+    /context plugin root does not exist/,
+  );
+  assert.throws(
+    () => core.readPrunedPluginRootContext(f.readerOptions),
+    /context project root does not exist/,
+  );
+  const relaxed = core.readOrphanedPrunedContext(f.readerOptions);
+  assert.equal(relaxed.project_root, f.currentContext.project_root);
+  assert.equal(relaxed.plugin_root, f.currentContext.plugin_root);
+  assert.equal(relaxed.runtime_digest, f.currentContext.runtime_digest);
+  assert.equal(relaxed.plugin_version, '9.8.7');
+});
+
+test('the combined reader refuses a record that still has either of its roots', () => {
+  const projectGone = prunedReaderFixture();
+  fs.rmSync(projectGone.currentContext.project_root, { recursive: true, force: true });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(projectGone.readerOptions),
+    /^Error: session-control-v1: context plugin root still exists and still carries its manifest$/,
+  );
+  const pluginGone = prunedReaderFixture();
+  fs.rmSync(pluginGone.pluginRoot, { recursive: true, force: true });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(pluginGone.readerOptions),
+    /^Error: session-control-v1: context project root still exists$/,
+  );
+  const healthy = prunedReaderFixture();
+  assert.throws(
+    () => core.readOrphanedPrunedContext(healthy.readerOptions),
+    /^Error: session-control-v1: context project root still exists$/,
+  );
+  const unmarked = prunedReaderFixture();
+  retireToRemnant(unmarked);
+  fs.rmSync(path.join(unmarked.pluginRoot, '.orphaned_at'));
+  fs.rmSync(unmarked.currentContext.project_root, { recursive: true, force: true });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(unmarked.readerOptions),
+    /^Error: session-control-v1: context plugin root still exists and carries no valid orphan marker$/,
+  );
+  if (process.platform !== 'win32') {
+    const dangling = prunedReaderFixture();
+    fs.rmSync(dangling.pluginRoot, { recursive: true, force: true });
+    fs.rmSync(dangling.currentContext.project_root, { recursive: true, force: true });
+    fs.symlinkSync(path.join(dangling.root, 'nowhere'), dangling.currentContext.project_root);
+    assert.throws(
+      () => core.readOrphanedPrunedContext(dangling.readerOptions),
+      /^Error: session-control-v1: context project root still exists$/,
+    );
+  }
+});
+
+test('the combined reader waives no check beyond the two proven absences', () => {
+  const gone = (f) => {
+    fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+    fs.rmSync(f.currentContext.project_root, { recursive: true, force: true });
+    return f;
+  };
+  const tampered = gone(prunedReaderFixture());
+  rewriteJson(tampered.recordFile, (record) => {
+    record.session_id_hash = `sha256:${'f'.repeat(64)}`;
+    return record;
+  });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(tampered.readerOptions),
+    /context session hash mismatch/,
+  );
+  const drifted = gone(prunedReaderFixture());
+  rewriteJson(drifted.recordFile, (record) => {
+    record.source_revision = `sha256:${'e'.repeat(64)}`;
+    return record;
+  });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(drifted.readerOptions),
+    /source revision must equal its runtime content digest/,
+  );
+  const unparented = prunedReaderFixture();
+  fs.rmSync(unparented.currentContext.project_root, { recursive: true, force: true });
+  fs.rmSync(unparented.cacheParent, { recursive: true, force: true });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(unparented.readerOptions),
+    /context plugin root parent does not exist/,
+  );
+});
+
+test('a record with both roots gone is adopted around its absent project root', () => {
+  const f = prunedReaderFixture();
+  const successor = successorInstallation(f, '10.0.0');
+  fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(f.currentContext.project_root, { recursive: true, force: true });
+  const verdict = core.adoptableRecord(adoptionOptions(f, successor));
+  assert.equal(verdict.ok, true, JSON.stringify(verdict));
+  assert.equal(verdict.orphanedProjectRoot, true);
+  assert.equal(verdict.prunedPluginRoot, true);
+  assert.equal(verdict.recorded, '9.8.7');
+  assert.equal(verdict.executing, '10.0.0');
+  assert.equal(
+    core.restoreRootVerdict(adoptionOptions(f, successor)).reason,
+    core.RESTORE_ROOT_REFUSALS.NOT_SERVED,
+  );
+  const adopted = core.adoptContext(adoptionOptions(f, successor));
+  assert.equal(adopted.orphanedProjectRoot, true);
+  assert.equal(adopted.prunedPluginRoot, true);
+  assert.equal(adopted.context.plugin_root, successor);
+  assert.equal(adopted.context.project_root, f.currentContext.project_root);
+  assert.equal(adopted.provenance, 'no-workflow-document');
+  assert.ok(fs.existsSync(adopted.supersededFile));
+  assert.equal(fs.existsSync(f.currentContext.project_root), false);
+  assert.throws(() => core.readContext(f.readerOptions), /context project root does not exist/);
+  assert.equal(core.readOrphanedProjectRootContext(f.readerOptions).plugin_root, successor);
+  assert.equal(core.adoptableRecord(adoptionOptions(f, successor)).reason, 'already-served');
+});
+
+test('the combined admission relaxes nothing else about adoption or the restore repair', () => {
+  const gone = (f) => {
+    fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+    fs.rmSync(f.currentContext.project_root, { recursive: true, force: true });
+    return f;
+  };
+  const older = prunedReaderFixture();
+  const olderSuccessor = successorInstallation(older, '9.8.6');
+  gone(older);
+  assert.equal(
+    core.adoptableRecord(adoptionOptions(older, olderSuccessor)).reason,
+    'executing-runtime-older',
+  );
+  const foreign = prunedReaderFixture();
+  const foreignRoot = successorInstallation(foreign, '10.0.0');
+  const elsewhere = path.join(foreign.root, 'elsewhere');
+  fs.renameSync(foreignRoot, elsewhere);
+  gone(foreign);
+  assert.equal(
+    core.adoptableRecord(adoptionOptions(foreign, elsewhere)).reason,
+    'not-a-sibling-installation',
+  );
+  const otherStore = prunedReaderFixture();
+  const otherSuccessor = successorInstallation(otherStore, '10.0.0');
+  gone(otherStore);
+  const strangerData = path.join(otherStore.root, 'stranger-data');
+  fs.mkdirSync(strangerData);
+  const strangerOptions = { ...adoptionOptions(otherStore, otherSuccessor), pluginData: strangerData };
+  assert.equal(core.adoptableRecord(strangerOptions).reason, 'plugin-data-mismatch');
+  assert.equal(core.restoreRootVerdict(strangerOptions).reason, core.RESTORE_ROOT_REFUSALS.PLUGIN_DATA);
 });
 
 test('recordReaderRefusals names why each record reader refused the record', () => {
@@ -6792,7 +6953,9 @@ test('recordReaderRefusals names why each record reader refused the record', () 
     core.RECORD_READERS.STRICT,
     core.RECORD_READERS.ORPHANED_PROJECT_ROOT,
     core.RECORD_READERS.PRUNED_PLUGIN_ROOT,
+    core.RECORD_READERS.ORPHANED_PRUNED,
   ]);
+  assert.equal(core.RECORD_READERS.ORPHANED_PRUNED, 'orphaned-and-pruned');
   const unmarkedCauses = byReader(unmarkedVerdicts);
   assert.match(unmarkedCauses.strict, /^host-specific plugin manifest is missing: /);
   assert.match(unmarkedCauses['orphaned-project-root'], /^host-specific plugin manifest is missing: /);
@@ -6800,6 +6963,7 @@ test('recordReaderRefusals names why each record reader refused the record', () 
     unmarkedCauses['pruned-plugin-root'],
     'context plugin root still exists and carries no valid orphan marker',
   );
+  assert.equal(unmarkedCauses['orphaned-and-pruned'], 'context project root still exists');
   assert.equal(core.adoptableRecord(adoptionOptions(unmarked, successor)).reason, 'record-unreadable');
 
   const healthy = prunedReaderFixture();
@@ -6810,27 +6974,256 @@ test('recordReaderRefusals names why each record reader refused the record', () 
     healthyCauses['pruned-plugin-root'],
     'context plugin root still exists and still carries its manifest',
   );
+  assert.equal(healthyCauses['orphaned-and-pruned'], 'context project root still exists');
 
   const retired = prunedReaderFixture();
   retireToRemnant(retired);
   assert.equal(byReader(core.recordReaderRefusals(options(retired)))['pruned-plugin-root'], null);
+
+  const bothGone = prunedReaderFixture();
+  fs.rmSync(bothGone.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(bothGone.currentContext.project_root, { recursive: true, force: true });
+  const bothGoneCauses = byReader(core.recordReaderRefusals(options(bothGone)));
+  assert.match(bothGoneCauses.strict, /does not exist/);
+  assert.equal(bothGoneCauses['orphaned-project-root'], 'context plugin root does not exist');
+  assert.equal(bothGoneCauses['pruned-plugin-root'], 'context project root does not exist');
+  assert.equal(bothGoneCauses['orphaned-and-pruned'], null);
 });
 
 test('recordReaderRefusals never throws and names a session that has no record', () => {
   const f = prunedReaderFixture();
   const missing = core.recordReaderRefusals({ recordsDir: f.recordsDir, sessionId: 'no such session', host: 'claude' });
-  assert.equal(missing.length, 3);
+  assert.equal(missing.length, 4);
   for (const entry of missing) {
     assert.match(entry.refusal, /^missing file: /, entry.reader);
   }
   for (const input of [undefined, null, 'not an object', {}]) {
     const verdicts = core.recordReaderRefusals(input);
-    assert.equal(verdicts.length, 3);
+    assert.equal(verdicts.length, 4);
     for (const entry of verdicts) {
       assert.equal(typeof entry.refusal, 'string', entry.reader);
       assert.equal(entry.refusal.startsWith('session-control-v1: '), false, entry.refusal);
     }
   }
+});
+
+function countedReads(f, action) {
+  const record = path.join(fs.realpathSync.native(f.recordsDir), path.basename(f.recordFile));
+  const pluginTree = path.join(fs.realpathSync.native(f.cacheParent), path.basename(f.pluginRoot)) + path.sep;
+  const originalOpen = fs.openSync;
+  const counts = { record: 0, pluginTree: 0 };
+  fs.openSync = function countingOpen(candidate, ...rest) {
+    const opened = path.resolve(String(candidate));
+    if (opened === record) counts.record += 1;
+    if (opened.startsWith(pluginTree)) counts.pluginTree += 1;
+    return originalOpen.call(fs, candidate, ...rest);
+  };
+  try {
+    return { result: action(), ...counts };
+  } finally {
+    fs.openSync = originalOpen;
+  }
+}
+
+function bothRootsGone(f) {
+  fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(f.currentContext.project_root, { recursive: true, force: true });
+  return f;
+}
+
+function ladderRequest(f) {
+  return { recordsDir: f.recordsDir, sessionId: RAW_SESSION, host: 'claude' };
+}
+
+test('readContextLadder names the reader that admitted the record', () => {
+  const everyRung = Object.values(core.RECORD_READERS);
+  const healthy = prunedReaderFixture();
+  const strict = core.readContextLadder(ladderRequest(healthy), everyRung);
+  assert.equal(strict.reader, core.RECORD_READERS.STRICT);
+  assert.deepEqual(strict.context, core.readContext(healthy.readerOptions));
+
+  const orphaned = prunedReaderFixture();
+  fs.rmSync(orphaned.currentContext.project_root, { recursive: true, force: true });
+  const orphan = core.readContextLadder(ladderRequest(orphaned), everyRung);
+  assert.equal(orphan.reader, core.RECORD_READERS.ORPHANED_PROJECT_ROOT);
+  assert.deepEqual(orphan.context, core.readOrphanedProjectRootContext(orphaned.readerOptions));
+
+  const pruned = prunedReaderFixture();
+  fs.rmSync(pruned.pluginRoot, { recursive: true, force: true });
+  const prunedAdmission = core.readContextLadder(ladderRequest(pruned), everyRung);
+  assert.equal(prunedAdmission.reader, core.RECORD_READERS.PRUNED_PLUGIN_ROOT);
+  assert.deepEqual(prunedAdmission.context, core.readPrunedPluginRootContext(pruned.readerOptions));
+
+  const bothGone = bothRootsGone(prunedReaderFixture());
+  const combined = core.readContextLadder(ladderRequest(bothGone), everyRung);
+  assert.equal(combined.reader, core.RECORD_READERS.ORPHANED_PRUNED);
+  assert.deepEqual(combined.context, core.readOrphanedPrunedContext(bothGone.readerOptions));
+
+  const tampered = prunedReaderFixture();
+  rewriteJson(tampered.recordFile, (record) => {
+    record.session_id_hash = `sha256:${'f'.repeat(64)}`;
+    return record;
+  });
+  assert.equal(core.readContextLadder(ladderRequest(tampered), everyRung), null);
+});
+
+test('readContextLadder enters only the rungs its caller names, in ladder order, and stops at the first admission', () => {
+  const everyRung = Object.values(core.RECORD_READERS);
+  const healthy = prunedReaderFixture();
+  const healthyWalk = countedReads(healthy, () => core.readContextLadder(ladderRequest(healthy), everyRung));
+  assert.equal(healthyWalk.result.reader, core.RECORD_READERS.STRICT);
+  assert.equal(healthyWalk.record, 1);
+
+  const bothGone = bothRootsGone(prunedReaderFixture());
+  const fullWalk = countedReads(bothGone, () => core.readContextLadder(ladderRequest(bothGone), everyRung));
+  assert.equal(fullWalk.result.reader, core.RECORD_READERS.ORPHANED_PRUNED);
+  assert.equal(fullWalk.record, 4);
+  const shortWalk = countedReads(bothGone, () => core.readContextLadder(ladderRequest(bothGone), [
+    core.RECORD_READERS.STRICT,
+    core.RECORD_READERS.ORPHANED_PRUNED,
+  ]));
+  assert.equal(shortWalk.result.reader, core.RECORD_READERS.ORPHANED_PRUNED);
+  assert.equal(shortWalk.record, 2);
+  const reversed = countedReads(bothGone, () => core.readContextLadder(ladderRequest(bothGone), [
+    core.RECORD_READERS.ORPHANED_PRUNED,
+    core.RECORD_READERS.STRICT,
+  ]));
+  assert.equal(reversed.result.reader, core.RECORD_READERS.ORPHANED_PRUNED);
+  assert.equal(reversed.record, 2, 'the ladder order decides, never the order a caller lists');
+
+  const orphaned = prunedReaderFixture();
+  fs.rmSync(orphaned.currentContext.project_root, { recursive: true, force: true });
+  const skipped = countedReads(orphaned, () => core.readContextLadder(ladderRequest(orphaned), [
+    core.RECORD_READERS.STRICT,
+    core.RECORD_READERS.PRUNED_PLUGIN_ROOT,
+    core.RECORD_READERS.ORPHANED_PRUNED,
+  ]));
+  assert.equal(skipped.result, null);
+  assert.equal(skipped.record, 3);
+  assert.equal(skipped.pluginTree, 0);
+  const entered = countedReads(orphaned, () => core.readContextLadder(ladderRequest(orphaned), everyRung));
+  assert.equal(entered.result.reader, core.RECORD_READERS.ORPHANED_PROJECT_ROOT);
+  assert.ok(entered.pluginTree > 0, 'the orphan rung measures the digest of a present plugin root');
+});
+
+test('readContextLadder never throws, walks no rung it was not given and reads nothing without a host', () => {
+  const everyRung = Object.values(core.RECORD_READERS);
+  const healthy = prunedReaderFixture();
+  for (const readers of [undefined, null, 'strict', {}, [], ['not-a-reader']]) {
+    const walk = countedReads(healthy, () => core.readContextLadder(ladderRequest(healthy), readers));
+    assert.equal(walk.result, null, String(readers));
+    assert.equal(walk.record, 0, String(readers));
+  }
+  for (const request of [undefined, null, 'not an object', {}]) {
+    assert.equal(core.readContextLadder(request, everyRung), null);
+  }
+  for (const request of [
+    { recordsDir: healthy.recordsDir, sessionId: RAW_SESSION },
+    { ...ladderRequest(healthy), host: '' },
+    healthy.readerOptions,
+  ]) {
+    const walk = countedReads(healthy, () => core.readContextLadder(request, everyRung));
+    assert.equal(walk.result, null, JSON.stringify(Object.keys(request)));
+    assert.equal(walk.record, 0, JSON.stringify(Object.keys(request)));
+  }
+  const foreignHost = countedReads(healthy, () => core.readContextLadder({ ...ladderRequest(healthy), host: 'codex' }, everyRung));
+  assert.equal(foreignHost.result, null);
+  assert.equal(foreignHost.record, 4);
+});
+
+test('recordReaderRefusals refuses every rung of a request without a host, as readContextLadder does, and reads nothing', () => {
+  const ladderOrder = [
+    core.RECORD_READERS.STRICT,
+    core.RECORD_READERS.ORPHANED_PROJECT_ROOT,
+    core.RECORD_READERS.PRUNED_PLUGIN_ROOT,
+    core.RECORD_READERS.ORPHANED_PRUNED,
+  ];
+  const healthy = prunedReaderFixture();
+  for (const request of [
+    { recordsDir: healthy.recordsDir, sessionId: RAW_SESSION },
+    { ...ladderRequest(healthy), host: '' },
+    healthy.readerOptions,
+  ]) {
+    const label = JSON.stringify(Object.keys(request));
+    const walk = countedReads(healthy, () => core.readContextLadder(request, ladderOrder));
+    assert.equal(walk.result, null, label);
+    const refusals = countedReads(healthy, () => core.recordReaderRefusals(request));
+    assert.deepEqual(
+      refusals.result,
+      ladderOrder.map((reader) => ({ reader, refusal: 'host must be a non-empty string' })),
+      label,
+    );
+    assert.equal(refusals.record, 0, label);
+  }
+  const named = core.recordReaderRefusals(ladderRequest(healthy));
+  assert.equal(named.find((entry) => entry.reader === core.RECORD_READERS.STRICT).refusal, null);
+});
+
+test('the restore verdict and both binder predicates enter only the rungs they consulted before', () => {
+  const combined = prunedReaderFixture();
+  const combinedSuccessor = successorInstallation(combined, '10.0.0');
+  bothRootsGone(combined);
+  const combinedWalk = countedReads(combined, () => core.restoreRootVerdict(adoptionOptions(combined, combinedSuccessor)));
+  assert.equal(combinedWalk.result.reason, core.RESTORE_ROOT_REFUSALS.NOT_SERVED);
+  assert.equal(combinedWalk.record, 3);
+
+  const pruned = prunedReaderFixture();
+  const prunedSuccessor = successorInstallation(pruned, '10.0.0');
+  fs.rmSync(pruned.pluginRoot, { recursive: true, force: true });
+  const prunedWalk = countedReads(pruned, () => core.restoreRootVerdict(adoptionOptions(pruned, prunedSuccessor)));
+  assert.equal(prunedWalk.result.reason, core.RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
+  assert.equal(prunedWalk.record, 3);
+
+  const tampered = prunedReaderFixture();
+  const tamperedSuccessor = successorInstallation(tampered, '10.0.0');
+  rewriteJson(tampered.recordFile, (record) => {
+    record.session_id_hash = `sha256:${'f'.repeat(64)}`;
+    return record;
+  });
+  const tamperedWalk = countedReads(tampered, () => core.restoreRootVerdict(adoptionOptions(tampered, tamperedSuccessor)));
+  assert.equal(tamperedWalk.result.reason, core.RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
+  assert.equal(tamperedWalk.record, 3);
+
+  const hookModule = require(path.join(path.dirname(process.env.SESSION_CONTROL_CORE), 'claude-hook-session-v1.js'));
+  const binderEnvironment = (f) => ({
+    CLAUDE_PLUGIN_ROOT: path.resolve(path.dirname(process.env.SESSION_CONTROL_CORE), '..', '..'),
+    CLAUDE_PLUGIN_DATA: f.pluginData,
+  });
+  const orphaned = prunedReaderFixture();
+  fs.rmSync(orphaned.currentContext.project_root, { recursive: true, force: true });
+  const binderWalk = countedReads(orphaned, () => hookModule.resolvePrunedPluginRoot(
+    { session_id: RAW_SESSION },
+    binderEnvironment(orphaned),
+  ));
+  assert.equal(binderWalk.result, null);
+  assert.equal(binderWalk.record, 3);
+  assert.equal(binderWalk.pluginTree, 0);
+
+  const lineageHealthy = prunedReaderFixture();
+  const healthyLineage = countedReads(lineageHealthy, () => hookModule.resolveIncompatibleRuntime(
+    { session_id: RAW_SESSION },
+    binderEnvironment(lineageHealthy),
+  ));
+  assert.equal(healthyLineage.result.recorded, '9.8.7');
+  assert.equal(healthyLineage.result.orphanedProjectRoot, null);
+  assert.equal(healthyLineage.record, 1);
+
+  const lineageOrphaned = prunedReaderFixture();
+  fs.rmSync(lineageOrphaned.currentContext.project_root, { recursive: true, force: true });
+  const orphanedLineage = countedReads(lineageOrphaned, () => hookModule.resolveIncompatibleRuntime(
+    { session_id: RAW_SESSION },
+    binderEnvironment(lineageOrphaned),
+  ));
+  assert.equal(orphanedLineage.result.orphanedProjectRoot, lineageOrphaned.currentContext.project_root);
+  assert.equal(orphanedLineage.record, 2);
+
+  const lineageCombined = bothRootsGone(prunedReaderFixture());
+  const combinedLineage = countedReads(lineageCombined, () => hookModule.resolveIncompatibleRuntime(
+    { session_id: RAW_SESSION },
+    binderEnvironment(lineageCombined),
+  ));
+  assert.equal(combinedLineage.result, null);
+  assert.equal(combinedLineage.record, 2);
 });
 
 // The safe-version shape is exported so every producer that renders a recorded

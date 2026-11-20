@@ -32,7 +32,9 @@ _zensu_vcs_remote_url() {
   rn="$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"
   rn="${rn%%/*}"
   [ -n "$rn" ] || rn="origin"
-  git -C "$repo" remote get-url "$rn" 2>/dev/null
+  git -C "$repo" remote get-url "$rn" 2>/dev/null && return 0
+  [ "$rn" != origin ] || return 1
+  git -C "$repo" remote get-url origin 2>/dev/null
 }
 
 _zensu_vcs_split_url() {
@@ -45,6 +47,7 @@ _zensu_vcs_split_url() {
   U="$url" node -e '
     var u=(process.env.U||"").trim().replace(/\.git$/,"");
     var host="",path="",m;
+    if(/^file:\/\//i.test(u)||/^[A-Za-z]:[\\\/]/.test(u)){u="";}
     if(m=u.match(/^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^@\/]*@)?([^\/:@]+)(?::[0-9]+)?\/(.*)$/)){host=m[2];path=m[3];}
     else if(m=u.match(/^([^@\/]*@)?([^\/:@]+):(.*)$/)){host=m[2];path=m[3];}
     process.stdout.write(host+"\t"+path);
@@ -246,11 +249,22 @@ _zensu_vcs_detect() {
     shift
   done
 
-  local url host path
+  local url host path pinned spelled="" probed
   url="$(_zensu_vcs_remote_url "$repo")"
+  if [ -z "$url" ]; then
+    url="$(CDPATH= cd -- "$repo" 2>/dev/null && _zensu_vcs_sole_remote_url --one-repository 2>/dev/null)" || url=""
+  fi
   IFS="$(printf '\t')" read -r host path <<EOF
 $(_zensu_vcs_split_url "$url")
 EOF
+  if [ -n "$host" ] && pinned="$(_zensu_vcs_pinned_host "$url" "$host" 2>/dev/null)"; then
+    spelled="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+    case "$spelled" in www.?*) spelled="${spelled#www.}" ;; esac
+    if [ "$spelled" = "$pinned" ] || [ -n "$(_zensu_vcs_classify_host "$spelled")" ]; then
+      spelled=""
+    fi
+    host="$pinned"
+  fi
 
   local provider="" edition=""
   if [ -n "$o_provider" ]; then
@@ -266,7 +280,12 @@ EOF
 $(_zensu_vcs_classify_host "$host")
 EOF
     if [ -z "$provider" ]; then
-      case "$(_zensu_vcs_probe "$host")" in
+      probed="$(_zensu_vcs_probe "$host")"
+      if [ "$probed" = none ] && [ -n "$spelled" ]; then
+        probed="$(_zensu_vcs_probe "$spelled")"
+        [ "$probed" = none ] || host="$spelled"
+      fi
+      case "$probed" in
         gitlab)            provider="gitlab"; edition="selfhosted" ;;
         github-enterprise) provider="github"; edition="enterprise" ;;
         *)
@@ -300,6 +319,212 @@ EOF
   printf 'cliReady=%s\n' "$cli_ready"
   printf 'cliName=%s\n' "$cli"
   printf 'cliState=%s\n' "$cli_state"
+}
+
+_zensu_vcs_gh_host_valid() {
+  local h="${1:-}" rest label
+  [ -n "$h" ] && [ "${#h}" -le 253 ] || return 1
+  case "$h" in *[!a-z0-9.-]*|.*|*.|*..*) return 1 ;; esac
+  rest="$h"
+  while [ -n "$rest" ]; do
+    label="${rest%%.*}"
+    case "$label" in -*|*-) return 1 ;; esac
+    [ "${#label}" -le 63 ] || return 1
+    if [ "$label" = "$rest" ]; then rest=""; else rest="${rest#*.}"; fi
+  done
+  return 0
+}
+
+_zensu_vcs_ssh_alias_valid() {
+  local a="${1:-}"
+  [ -n "$a" ] && [ "${#a}" -le 253 ] || return 1
+  case "$a" in *[!a-z0-9._-]*|-*) return 1 ;; esac
+  return 0
+}
+
+_zensu_vcs_inside_repo() {
+  [ -z "${GIT_DIR:-}" ] || return 0
+  local d parent ceiling rest real ceilings verbatim=0 nl
+  nl='
+'
+  d="$(pwd -P 2>/dev/null)" || return 0
+  case "$d" in /*) ;; *) return 0 ;; esac
+  ceilings="$nl"
+  rest="${GIT_CEILING_DIRECTORIES:-}"
+  while [ -n "$rest" ]; do
+    ceiling="${rest%%:*}"
+    if [ "$ceiling" = "$rest" ]; then rest=""; else rest="${rest#*:}"; fi
+    case "$ceiling" in
+      '') verbatim=1; continue ;;
+      /*) ;;
+      *) continue ;;
+    esac
+    if [ "$verbatim" = 0 ]; then
+      real="$(cd -P -- "$ceiling" 2>/dev/null && pwd -P)" || continue
+      ceiling="$real"
+    fi
+    [ "$ceiling" = / ] || ceiling="${ceiling%/}"
+    ceilings="$ceilings$ceiling$nl"
+  done
+  while :; do
+    [ ! -e "$d/.git" ] || return 0
+    if [ -f "$d/HEAD" ] && [ -d "$d/objects" ] && [ -d "$d/refs" ]; then return 0; fi
+    [ "$d" != / ] || return 1
+    parent="${d%/*}"
+    [ -n "$parent" ] || parent=/
+    case "$ceilings" in *"$nl$parent$nl"*) return 1 ;; esac
+    d="$parent"
+  done
+}
+
+_zensu_vcs_pinned_host() {
+  local url="${1:-}" host="${2:-}" kind=other translated="" key value
+  url="${url#"${url%%[![:space:]]*}"}"
+  case "$url" in
+    *://*)
+      case "${url%%://*}" in
+        [Ss][Ss][Hh]|[Gg][Ii][Tt]+[Ss][Ss][Hh]|[Ss][Ss][Hh]+[Gg][Ii][Tt]) kind=ssh ;;
+        ''|*[!A-Za-z0-9+.-]*|[!A-Za-z]*) kind=ssh ;;
+      esac ;;
+    *) kind=ssh ;;
+  esac
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  if [ "$kind" = ssh ]; then
+    _zensu_vcs_ssh_alias_valid "$host" || {
+      printf 'zensu-vcs: the host of the remote is not a valid host name, so no gh call was made\n' >&2
+      return 1
+    }
+    if command -v ssh >/dev/null 2>&1; then
+      while IFS=' ' read -r key value; do
+        if [ "$key" = hostname ]; then translated="$value"; break; fi
+      done <<EOF
+$(ssh -G -- "$host" </dev/null 2>/dev/null)
+EOF
+    fi
+    if [ -n "$translated" ]; then
+      translated="$(printf '%s' "$translated" | tr '[:upper:]' '[:lower:]')"
+      _zensu_vcs_gh_host_valid "$translated" || {
+        printf 'zensu-vcs: ssh -G translates the host of the remote to a name that is not a valid host name, so no gh call was made\n' >&2
+        return 1
+      }
+      host="$translated"
+    fi
+  fi
+  _zensu_vcs_gh_host_valid "$host" || {
+    printf 'zensu-vcs: the host of the remote is not a valid host name, so no gh call was made\n' >&2
+    return 1
+  }
+  if [ "$kind" = ssh ]; then
+    case "$host" in
+      ssh.github.com) host=github.com ;;
+      altssh.gitlab.com) host=gitlab.com ;;
+    esac
+  fi
+  case "$host" in www.?*) host="${host#www.}" ;; esac
+  printf '%s' "$host"
+}
+
+_zensu_vcs_sole_remote_url() {
+  local names name u h p pin diag nl first="" first_pin="" first_path="" fallback="" seen=0 mixed=0 same=1
+  if ! command -v git >/dev/null 2>&1; then
+    _zensu_vcs_inside_repo || return 0
+    printf 'zensu-vcs: git is not installed, so the remotes of this work tree cannot be read and no gh call was made; install git, or set ZENSU_VCS_REMOTE for a verb given --repo-id\n' >&2
+    return 1
+  fi
+  if ! names="$(git -C . remote 2>/dev/null)"; then
+    _zensu_vcs_inside_repo || return 0
+    nl='
+'
+    diag="$(LC_ALL=C git -C . remote 2>&1 >/dev/null)"
+    diag="$(_zensu_vcs_clamp_diag "${diag%%"$nl"*}")"
+    [ -z "$diag" ] || diag=" ($diag)"
+    printf 'zensu-vcs: git cannot read the remotes of this work tree%s, so no gh call was made; repair its git configuration, or set ZENSU_VCS_REMOTE for a verb given --repo-id; if another account owns the repository, trusting it with git config --global --add safe.directory <path> changes the global git configuration and is for the user to decide, not for an agent\n' "$diag" >&2
+    return 1
+  fi
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    u="$(git -C . remote get-url "$name" 2>/dev/null)" || continue
+    IFS="$(printf '\t')" read -r h p <<EOF_SOLE_URL
+$(_zensu_vcs_split_url "$u")
+EOF_SOLE_URL
+    if [ -z "$h" ]; then
+      [ -n "$fallback" ] || fallback="$u"
+      continue
+    fi
+    pin="$(_zensu_vcs_pinned_host "$u" "$h" 2>/dev/null)" || pin="!$(printf '%s' "$h" | tr '[:upper:]' '[:lower:]')"
+    p="$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')"
+    while [ "$p" != "${p%/}" ]; do p="${p%/}"; done
+    p="${p%.git}"
+    while [ "$p" != "${p#/}" ]; do p="${p#/}"; done
+    if [ "$seen" = 0 ]; then
+      first="$u"
+      first_pin="$pin"
+      first_path="$p"
+      seen=1
+    elif [ "$pin" != "$first_pin" ]; then
+      mixed=1
+    elif [ "$p" != "$first_path" ]; then
+      same=0
+    fi
+  done <<EOF_SOLE_NAMES
+$names
+EOF_SOLE_NAMES
+  if [ "$mixed" = 1 ]; then
+    printf 'zensu-vcs: the current branch tracks no remote and the remotes of this work tree name different hosts, so no gh call was made; set ZENSU_VCS_REMOTE or run git branch --set-upstream-to <remote>/<branch>\n' >&2
+    return 1
+  fi
+  if [ "$same" = 0 ] && [ "${1:-}" = --one-repository ]; then
+    return 0
+  fi
+  [ "$seen" = 1 ] || first="$fallback"
+  printf '%s' "$first"
+}
+
+_zensu_vcs_gh_host() {
+  local url host path env_host login
+  command -v node >/dev/null 2>&1 || {
+    printf 'zensu-vcs: node is required to read the GitHub host of the remote, so no gh call was made\n' >&2
+    return 1
+  }
+  url="$(_zensu_vcs_remote_url .)"
+  if [ -z "$url" ] && [ -z "${ZENSU_VCS_REMOTE:-}" ]; then
+    url="$(_zensu_vcs_sole_remote_url)" || return 1
+  fi
+  IFS="$(printf '\t')" read -r host path <<EOF
+$(_zensu_vcs_split_url "$url")
+EOF
+  if [ -z "$host" ]; then
+    if [ -n "$url" ]; then
+      printf 'zensu-vcs: the remote of this work tree names no GitHub host, so no gh call was made; set ZENSU_VCS_REMOTE to the URL of the GitHub remote for a verb given --repo-id, make the current branch track a remote on the GitHub host with git branch --set-upstream-to <remote>/<branch>, or spell a one-letter SSH alias as ssh://<alias>/<path>\n' >&2
+      return 1
+    fi
+    printf 'github.com'
+    return 0
+  fi
+  host="$(_zensu_vcs_pinned_host "$url" "$host")" || return 1
+  if [ "$host" != github.com ]; then
+    env_host="$(printf '%s' "${GH_HOST:-}" | tr '[:upper:]' '[:lower:]')"
+    if [ "$host" != "$env_host" ]; then
+      login="$(gh config get user -h "$host" </dev/null 2>/dev/null)" || login=""
+      if [ -z "$login" ]; then
+        printf 'zensu-vcs: gh knows no login for %s, the GitHub host of the remote, so no gh call was made; run gh auth login --hostname %s\n' "$host" "$host" >&2
+        return 1
+      fi
+    fi
+  fi
+  printf '%s' "$host"
+}
+
+_zensu_vcs_gh_cmd() {
+  local host="${1:-}" env_host
+  env_host="$(printf '%s' "${GH_HOST:-}" | tr '[:upper:]' '[:lower:]')"
+  if [ "$host" = github.com ] || [ "$host" = "$env_host" ]; then
+    _zensu_vcs_gh_argv=(gh)
+    _zensu_vcs_gh_ctx_argv=(env "GH_HOST=$host" GH_REPO= gh)
+  else
+    _zensu_vcs_gh_argv=(env GH_TOKEN= GITHUB_TOKEN= GH_ENTERPRISE_TOKEN= GITHUB_ENTERPRISE_TOKEN= gh)
+    _zensu_vcs_gh_ctx_argv=(env "GH_HOST=$host" GH_REPO= GH_TOKEN= GITHUB_TOKEN= GH_ENTERPRISE_TOKEN= GITHUB_ENTERPRISE_TOKEN= gh)
+  fi
 }
 
 _zensu_vcs_is_num() {
@@ -530,9 +755,12 @@ _zensu_vcs_pr_state() {
     shift
   done
   [ -n "$provider" ] || return 1
-  local argv
+  local argv host
   case "$provider" in
-    github) argv=(gh pr view --json state -- "$id") ;;
+    github)
+      host="$(_zensu_vcs_gh_host)" || return 1
+      _zensu_vcs_gh_cmd "$host"
+      argv=("${_zensu_vcs_gh_ctx_argv[@]}" pr view --json state -- "$id") ;;
     gitlab) argv=(glab mr view --output json -- "$id") ;;
     *) return 1 ;;
   esac
@@ -553,11 +781,13 @@ _zensu_vcs_locate_pr() {
     shift
   done
   [ -n "$provider" ] || return 1
-  local argv
+  local argv host
   case "$provider" in
     github)
-      if [ -n "$num" ]; then argv=(gh pr view --json number,url,state,headRefName,baseRefName -- "$num")
-      else argv=(gh pr view --json number,url,state,headRefName,baseRefName); fi ;;
+      host="$(_zensu_vcs_gh_host)" || return 1
+      _zensu_vcs_gh_cmd "$host"
+      if [ -n "$num" ]; then argv=("${_zensu_vcs_gh_ctx_argv[@]}" pr view --json number,url,state,headRefName,baseRefName -- "$num")
+      else argv=("${_zensu_vcs_gh_ctx_argv[@]}" pr view --json number,url,state,headRefName,baseRefName); fi ;;
     gitlab)
       if [ -n "$num" ]; then argv=(glab mr view --output json -- "$num")
       else argv=(glab mr view --output json); fi ;;
@@ -606,14 +836,16 @@ _zensu_vcs_review_summary() {
   done
   [ -n "$provider" ] || return 1
   _zensu_vcs_is_num "$id" || return 1
-  local argv=() detail_argv=()
+  local argv=() detail_argv=() host
   case "$provider" in
     github)
+      [ -z "$repoid" ] || _zensu_vcs_is_gh_repoid "$repoid" || return 1
+      host="$(_zensu_vcs_gh_host)" || return 1
+      _zensu_vcs_gh_cmd "$host"
       if [ -n "$repoid" ]; then
-        _zensu_vcs_is_gh_repoid "$repoid" || return 1
-        argv=(gh pr view -R "$repoid" --json reviewDecision,latestReviews -- "$id")
+        argv=("${_zensu_vcs_gh_argv[@]}" pr view -R "$host/$repoid" --json reviewDecision,latestReviews -- "$id")
       else
-        argv=(gh pr view --json reviewDecision,latestReviews -- "$id")
+        argv=("${_zensu_vcs_gh_ctx_argv[@]}" pr view --json reviewDecision,latestReviews -- "$id")
       fi ;;
     gitlab)
       _zensu_vcs_is_gl_repoid "$repoid" || return 1
@@ -702,13 +934,15 @@ _zensu_vcs_fetch_threads() {
   done
   [ -n "$provider" ] || return 1
   _zensu_vcs_is_num "$id" || return 1
-  local argv
+  local argv host
   case "$provider" in
     github)
       _zensu_vcs_is_gh_repoid "$repoid" || return 1
+      host="$(_zensu_vcs_gh_host)" || return 1
       local owner="${repoid%%/*}" name="${repoid#*/}"
       local q='query($owner:String!,$name:String!,$num:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$num){reviewThreads(first:100,after:$endCursor){nodes{id isResolved comments(first:1){nodes{databaseId body path line author{login}}}}pageInfo{hasNextPage endCursor}}}}}'
-      argv=(gh api graphql --paginate --slurp -f query="$q" -f owner="$owner" -f name="$name" -F num="$id") ;;
+      _zensu_vcs_gh_cmd "$host"
+      argv=("${_zensu_vcs_gh_argv[@]}" api graphql --paginate --slurp -f query="$q" -f owner="$owner" -f name="$name" -F num="$id" --hostname "$host") ;;
     gitlab)
       _zensu_vcs_is_gl_repoid "$repoid" || return 1
       argv=(glab api --paginate --output json "projects/$repoid/merge_requests/$id/discussions") ;;
@@ -745,14 +979,16 @@ _zensu_vcs_resolve_thread() {
   _zensu_vcs_is_num "$id" || return 1
   _zensu_vcs_is_id "$thread_id" || return 1
   _zensu_vcs_is_id "$reply_to" || return 1
-  local reply_argv=() resolve_argv=() reply_endpoint=""
+  local reply_argv=() resolve_argv=() reply_endpoint="" host
   case "$provider" in
     github)
       _zensu_vcs_is_gh_repoid "$repoid" || return 1
+      host="$(_zensu_vcs_gh_host)" || return 1
       local owner="${repoid%%/*}" name="${repoid#*/}"
-      [ -n "$reply" ] && reply_argv=(gh api "repos/$owner/$name/pulls/$id/comments/$reply_to/replies" -f body="$reply")
+      _zensu_vcs_gh_cmd "$host"
+      [ -n "$reply" ] && reply_argv=("${_zensu_vcs_gh_argv[@]}" api "repos/$owner/$name/pulls/$id/comments/$reply_to/replies" -f body="$reply" --hostname "$host")
       local m='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{id}}}'
-      resolve_argv=(gh api graphql -f query="$m" -f t="$thread_id") ;;
+      resolve_argv=("${_zensu_vcs_gh_argv[@]}" api graphql -f query="$m" -f t="$thread_id" --hostname "$host") ;;
     gitlab)
       _zensu_vcs_is_gl_repoid "$repoid" || return 1
       [ -n "$reply" ] && reply_endpoint="projects/$repoid/merge_requests/$id/discussions/$thread_id/notes"
@@ -859,11 +1095,13 @@ _zensu_vcs_scout_pr() {
   done
   [ -n "$provider" ] || return 1
   [ -z "$num" ] || _zensu_vcs_is_num "$num" || return 1
-  local argv
+  local argv host
   case "$provider" in
     github)
-      if [ -n "$num" ]; then argv=(gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels -- "$num")
-      else argv=(gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels); fi ;;
+      host="$(_zensu_vcs_gh_host)" || return 1
+      _zensu_vcs_gh_cmd "$host"
+      if [ -n "$num" ]; then argv=("${_zensu_vcs_gh_ctx_argv[@]}" pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels -- "$num")
+      else argv=("${_zensu_vcs_gh_ctx_argv[@]}" pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels); fi ;;
     gitlab)
       if [ -n "$num" ]; then argv=(glab mr view --output json -- "$num")
       else argv=(glab mr view --output json); fi ;;
@@ -908,11 +1146,13 @@ _zensu_vcs_diff_refs() {
   done
   [ -n "$provider" ] || return 1
   [ -z "$id" ] || _zensu_vcs_is_num "$id" || return 1
-  local argv
+  local argv host
   case "$provider" in
     github)
-      if [ -n "$id" ]; then argv=(gh pr view --json headRefOid -- "$id")
-      else argv=(gh pr view --json headRefOid); fi ;;
+      host="$(_zensu_vcs_gh_host)" || return 1
+      _zensu_vcs_gh_cmd "$host"
+      if [ -n "$id" ]; then argv=("${_zensu_vcs_gh_ctx_argv[@]}" pr view --json headRefOid -- "$id")
+      else argv=("${_zensu_vcs_gh_ctx_argv[@]}" pr view --json headRefOid); fi ;;
     gitlab)
       _zensu_vcs_is_num "$id" || return 1
       _zensu_vcs_is_gl_repoid "$repoid" || return 1
@@ -1240,10 +1480,13 @@ _zensu_vcs_review_inventory() {
 }
 
 _zensu_vcs_review_snapshot() {
-  local provider="${1:-}" repoid="${2:-}" id="${3:-}"
+  local provider="${1:-}" repoid="${2:-}" id="${3:-}" host="${4:-}"
   local out
   case "$provider" in
-    github) out="$(_zensu_vcs_run 'reconcile-review snapshot (gh api pulls)' gh api "repos/$repoid/pulls/$id")" || return 1 ;;
+    github)
+      [ -n "$host" ] || { printf 'zensu-vcs: internal error: the review snapshot needs the GitHub host\n' >&2; return 1; }
+      _zensu_vcs_gh_cmd "$host"
+      out="$(_zensu_vcs_run 'reconcile-review snapshot (gh api pulls)' "${_zensu_vcs_gh_argv[@]}" api "repos/$repoid/pulls/$id" --hostname "$host")" || return 1 ;;
     gitlab) out="$(_zensu_vcs_run 'reconcile-review snapshot (glab api merge_requests)' glab api "projects/$repoid/merge_requests/$id")" || return 1 ;;
     *) return 1 ;;
   esac
@@ -1267,13 +1510,15 @@ _zensu_vcs_review_snapshot() {
 }
 
 _zensu_vcs_review_fetch_inventory() {
-  local provider="${1:-}" repoid="${2:-}" id="${3:-}" label="${4:-}"
+  local provider="${1:-}" repoid="${2:-}" id="${3:-}" label="${4:-}" host="${5:-}"
   [ -n "$label" ] || { printf 'zensu-vcs: internal error: the review inventory fetch needs a failure label\n' >&2; return 1; }
   case "$provider" in
     github)
+      [ -n "$host" ] || { printf 'zensu-vcs: internal error: the review inventory fetch needs the GitHub host\n' >&2; return 1; }
       local owner="${repoid%%/*}" name="${repoid#*/}"
       local q='query($owner:String!,$name:String!,$num:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100,after:$endCursor){nodes{id body url}pageInfo{hasNextPage endCursor}}}}}'
-      _zensu_vcs_run "$label (gh api graphql reviews)" gh api graphql --paginate --slurp -f query="$q" -f owner="$owner" -f name="$name" -F num="$id" ;;
+      _zensu_vcs_gh_cmd "$host"
+      _zensu_vcs_run "$label (gh api graphql reviews)" "${_zensu_vcs_gh_argv[@]}" api graphql --paginate --slurp -f query="$q" -f owner="$owner" -f name="$name" -F num="$id" --hostname "$host" ;;
     gitlab)
       local notes discussions
       notes="$(_zensu_vcs_run "$label (glab api notes)" glab api --paginate --output json "projects/$repoid/merge_requests/$id/notes")" || return 1
@@ -1634,16 +1879,24 @@ _zensu_vcs_review_gitlab_call() {
     process.stdout.write(JSON.stringify(request));'
 }
 
-_zensu_vcs_gitlab_post_json() {
-  local label="$1" endpoint="$2"
-  local argv=(glab api --method POST "$endpoint" --header 'Content-Type: application/json' --input -)
+_zensu_vcs_gitlab_send_json() {
+  local label="$1" method="$2" endpoint="$3"
+  local argv=(glab api --method "$method" "$endpoint" --header 'Content-Type: application/json' --input -)
   if _zensu_vcs_dry; then
     printf '%s\n' "${argv[*]}"
     cat
     printf '\n'
     return 0
   fi
-  _zensu_vcs_run "$label" "${argv[@]}" >/dev/null
+  _zensu_vcs_run "$label" "${argv[@]}"
+}
+
+_zensu_vcs_gitlab_post_json() {
+  if _zensu_vcs_dry; then
+    _zensu_vcs_gitlab_send_json "$1" POST "$2"
+    return
+  fi
+  _zensu_vcs_gitlab_send_json "$1" POST "$2" >/dev/null
 }
 
 _zensu_vcs_review_result() {
@@ -1687,6 +1940,8 @@ _zensu_vcs_reconcile_review() (
   _zensu_vcs_is_num "$id" || return 1
   [ -n "$repoid" ] && [ -n "$payload" ] && [ -n "$operation_key" ] || return 1
   case "$provider" in github) _zensu_vcs_is_gh_repoid "$repoid" || return 1 ;; gitlab) _zensu_vcs_is_gl_repoid "$repoid" || return 1 ;; esac
+  local gh_host=""
+  if [ "$provider" = github ]; then gh_host="$(_zensu_vcs_gh_host)" || return 1; _zensu_vcs_gh_cmd "$gh_host"; fi
   expected_head="$(printf '%s' "$expected_head" | tr '[:upper:]' '[:lower:]')"
   local payload_snapshot payload_snapshot_digest gitlab_plan_file="" gitlab_manifest_file="" gitlab_plan_digest="" \
     gitlab_manifest_digest="" gitlab_publisher_id=""
@@ -1708,14 +1963,14 @@ _zensu_vcs_reconcile_review() (
   part_count="$(printf '%s' "$meta" | _zensu_vcs_json_field partCount)"
   marker="$(printf '%s' "$meta" | _zensu_vcs_json_field marker)"
   local before raw inventory present full url status posted_count=0
-  before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id")" || return 1
+  before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id" "$gh_host")" || return 1
   _zensu_vcs_review_assert_head "$before" "$head" || return 1
   url="$(printf '%s' "$before" | _zensu_vcs_json_field url)"
   if [ "$provider" = gitlab ]; then
     if [ -z "$diffrefs" ]; then
       local diff_response diff_attempt=1
       while [ "$diff_attempt" -le 5 ]; do
-        before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id")" || return 1
+        before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id" "$gh_host")" || return 1
         _zensu_vcs_review_assert_head "$before" "$head" || return 1
         diff_response="$(_zensu_vcs_run 'reconcile-review diff refs (glab api merge_requests)' glab api "projects/$repoid/merge_requests/$id")" || return 1
         if diffrefs="$(printf '%s' "$diff_response" | _zensu_vcs_normalize_diff_refs gitlab 2>/dev/null)"; then
@@ -1752,7 +2007,7 @@ _zensu_vcs_reconcile_review() (
     rm -f -- "$gitlab_plan_file"
     gitlab_plan_file=""
   fi
-  raw="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id" 'reconcile-review inventory')" || return 1
+  raw="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id" 'reconcile-review inventory' "$gh_host")" || return 1
   if [ "$provider" = gitlab ]; then
     inventory="$(printf '%s' "$raw" | _zensu_vcs_review_inventory "$provider" "$op_digest" "$payload_digest" "$head" "$part_count" "$gitlab_manifest_file" "$gitlab_publisher_id" "$gitlab_manifest_digest")" || return 1
   else
@@ -1768,7 +2023,7 @@ _zensu_vcs_reconcile_review() (
     fi
   elif [ "$present" = "[]" ] && [ "$provider" = "github" ]; then
     local rendered_review post_response post_url native_payload
-    before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id")" || return 1
+    before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id" "$gh_host")" || return 1
     _zensu_vcs_review_assert_head "$before" "$head" || return 1
     native_payload="$(_zensu_vcs_native_node_path "$payload")" || return 1
     rendered_review="$(PAYLOAD="$native_payload" MARKER="$marker" HEAD_SHA="$head" \
@@ -1790,7 +2045,7 @@ _zensu_vcs_reconcile_review() (
         j.body=process.env.MARKER+"\n\n"+j.body;j.commit_id=process.env.HEAD_SHA;process.stdout.write(JSON.stringify(j));')" || return 1
     post_response="$(printf '%s' "$rendered_review" \
       | _zensu_vcs_run 'reconcile-review POST (gh api pulls reviews)' \
-          gh api -X POST "repos/$repoid/pulls/$id/reviews" --input -)" || return 1
+          "${_zensu_vcs_gh_argv[@]}" api -X POST "repos/$repoid/pulls/$id/reviews" --input - --hostname "$gh_host")" || return 1
     post_url="$(printf '%s' "$post_response" | _zensu_vcs_json_http_url_field html_url)" || return 1
     url="$post_url"; status="posted"; posted_count=1
   elif [ "$provider" = "gitlab" ]; then
@@ -1798,7 +2053,7 @@ _zensu_vcs_reconcile_review() (
     local i=1
     while [ "$i" -le "$part_count" ]; do
       if ! _zensu_vcs_review_has_part "$present" "$i"; then
-        before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id")" || return 1
+        before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id" "$gh_host")" || return 1
         _zensu_vcs_review_assert_head "$before" "$head" || return 1
         local request_json endpoint="projects/$repoid/merge_requests/$id/discussions"
         [ "$i" -ne 1 ] || endpoint="projects/$repoid/merge_requests/$id/notes"
@@ -1814,7 +2069,7 @@ _zensu_vcs_reconcile_review() (
   fi
 
   if [ "$posted_count" -gt 0 ]; then
-    raw="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id" 'reconcile-review inventory')" || return 1
+    raw="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id" 'reconcile-review inventory' "$gh_host")" || return 1
     if [ "$provider" = gitlab ]; then
       inventory="$(printf '%s' "$raw" | _zensu_vcs_review_inventory "$provider" "$op_digest" "$payload_digest" "$head" "$part_count" "$gitlab_manifest_file" "$gitlab_publisher_id" "$gitlab_manifest_digest")" || return 1
     else
@@ -1824,10 +2079,25 @@ _zensu_vcs_reconcile_review() (
     [ "$present" = "$full" ] || return 1
   fi
   local after
-  after="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id")" || return 1
+  after="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id" "$gh_host")" || return 1
   _zensu_vcs_review_assert_head "$after" "$head" || return 1
   _zensu_vcs_review_result "$status" "$marker" "$head" "$part_count" "$posted_count" "$url" "$provider"
 )
+
+_zensu_vcs_require_path() {
+  if [ "$3" = - ]; then
+    printf 'zensu-vcs: %s refused: the %s path is -, which names standard input, so %s\n' "$1" "$2" "$4" >&2
+    return 1
+  fi
+}
+
+_zensu_vcs_require_file() {
+  _zensu_vcs_require_path "$@" || return 1
+  if ! [ -f "$3" ] || ! [ -s "$3" ]; then
+    printf 'zensu-vcs: %s refused: the %s file is missing or empty, so %s\n' "$1" "$2" "$4" >&2
+    return 1
+  fi
+}
 
 _zensu_vcs_post_review() {
   local provider="" repoid="" diffrefs="" id="" payload=""
@@ -1852,12 +2122,18 @@ _zensu_vcs_post_review() {
   [ -n "$repoid" ] || return 1
   [ -n "$payload" ] || return 1
   case "$provider" in
+    github|gitlab) ;;
+    *) return 1 ;;
+  esac
+  _zensu_vcs_require_file post-review payload "$payload" 'nothing was posted' || return 1
+  case "$provider" in
     github)
       _zensu_vcs_is_gh_repoid "$repoid" || return 1
+      local host; host="$(_zensu_vcs_gh_host)" || return 1
+      _zensu_vcs_gh_cmd "$host"
       local owner="${repoid%%/*}" name="${repoid#*/}"
-      local argv=(gh api -X POST "repos/$owner/$name/pulls/$id/reviews" --input "$payload")
+      local argv=("${_zensu_vcs_gh_argv[@]}" api -X POST "repos/$owner/$name/pulls/$id/reviews" --input "$payload" --hostname "$host")
       if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
-      [ -f "$payload" ] || return 1
       local resp
       resp="$(_zensu_vcs_run 'post-review POST (gh api pulls reviews)' "${argv[@]}")" || return 1
       printf '%s' "$resp" | _zensu_vcs_json_http_url_field html_url ;;
@@ -1867,11 +2143,35 @@ _zensu_vcs_post_review() {
   esac
 }
 
-_zensu_vcs_post_review_gitlab() {
-  local repoid="$1" id="$2" payload="$3" diffrefs="$4"
+_zensu_vcs_post_review_gitlab() (
+  local repoid="$1" id="$2" source_payload="$3" diffrefs="$4" payload=""
   command -v node >/dev/null 2>&1 || return 1
   _zensu_vcs_is_gl_repoid "$repoid" || return 1
-  if ! _zensu_vcs_dry; then [ -f "$payload" ] || return 1; fi
+  trap '[ -z "$payload" ] || rm -f -- "$payload"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  if ! { true < "$source_payload"; } 2>/dev/null; then
+    printf 'zensu-vcs: post-review refused: the payload file cannot be read, so nothing was posted\n' >&2
+    return 1
+  fi
+  if ! payload="$(mktemp "${TMPDIR:-/tmp}/zensu-vcs-payload.XXXXXXXX" 2>/dev/null)"; then
+    payload=""
+    printf 'zensu-vcs: post-review failed: no temporary file could be created\n' >&2
+    return 1
+  fi
+  if ! { cat < "$source_payload" > "$payload"; } 2>/dev/null; then
+    printf 'zensu-vcs: post-review failed: the payload could not be copied into its temporary file, so nothing was posted\n' >&2
+    return 1
+  fi
+  local native_payload
+  native_payload="$(_zensu_vcs_native_node_path "$payload")" || return 1
+  if ! ZENSU_PL_PAYLOAD="$native_payload" node -e '
+    var v;try{v=JSON.parse(require("fs").readFileSync(process.env.ZENSU_PL_PAYLOAD,"utf8"));}catch(_){process.exit(1);}
+    if(!v||typeof v!=="object"||Array.isArray(v))process.exit(1);' 2>/dev/null; then
+    printf 'zensu-vcs: post-review refused: the payload file is not a JSON object, so nothing was posted\n' >&2
+    return 1
+  fi
   if [ -z "$diffrefs" ]; then
     if _zensu_vcs_dry; then
       diffrefs='{"base_sha":"BASE_SHA","start_sha":"START_SHA","head_sha":"HEAD_SHA"}'
@@ -1881,15 +2181,14 @@ _zensu_vcs_post_review_gitlab() {
       diffrefs="$(printf '%s' "$diff_response" | _zensu_vcs_normalize_diff_refs gitlab)" || return 1
     fi
   fi
-  local native_payload
-  native_payload="$(_zensu_vcs_native_node_path "$payload")" || return 1
   local ZPLAN='
     var fs=require("fs"),crypto=require("crypto");
     var mode=process.env.ZENSU_PL_MODE||"count";
     var idx=parseInt(process.env.ZENSU_PL_IDX||"0",10);
     var iid=process.env.ZENSU_PL_IID||"";
     var dr={};try{dr=JSON.parse(process.env.ZENSU_PL_DIFFREFS||"{}");}catch(_){}
-    var pl={};try{pl=JSON.parse(fs.readFileSync(process.env.ZENSU_PL_PAYLOAD,"utf8"));}catch(_){}
+    var pl;try{pl=JSON.parse(fs.readFileSync(process.env.ZENSU_PL_PAYLOAD,"utf8"));}catch(_){process.exit(1);}
+    if(!pl||typeof pl!=="object"||Array.isArray(pl))process.exit(1);
     var plan=null;if(process.env.ZENSU_PL_ANCHORS){try{plan=JSON.parse(process.env.ZENSU_PL_ANCHORS);}catch(_){process.exit(1);}
       if(!plan||typeof plan!=="object"||!Array.isArray(plan.comments))process.exit(1);}
     function h(x){return crypto.createHash("sha256").update(String(x)).digest("hex").slice(0,8);}
@@ -1970,7 +2269,7 @@ _zensu_vcs_post_review_gitlab() {
     i=$((i + 1))
   done
   return 0
-}
+)
 
 _zensu_vcs_extract_url() {
   command -v node >/dev/null 2>&1 || { grep -oE 'https?://[^[:space:]]+/(pull|merge_requests)/[0-9]+[^[:space:]]*' | head -n1 | tr -d '[:cntrl:]'; return 0; }
@@ -1989,14 +2288,17 @@ _zensu_vcs_review_markers() {
     shift
   done
   _zensu_vcs_is_num "$id" || return 1
+  local gh_host=""
   case "$provider" in
-    github) _zensu_vcs_is_gh_repoid "$repoid" || return 1 ;;
+    github)
+      _zensu_vcs_is_gh_repoid "$repoid" || return 1
+      gh_host="$(_zensu_vcs_gh_host)" || return 1 ;;
     gitlab) _zensu_vcs_is_gl_repoid "$repoid" || return 1 ;;
     *) return 1 ;;
   esac
   command -v node >/dev/null 2>&1 || return 1
   local inventory
-  inventory="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id" 'review-markers inventory')" || return 1
+  inventory="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id" 'review-markers inventory' "$gh_host")" || return 1
   printf '%s' "$inventory" | _zensu_vcs_body_markers review
 }
 
@@ -2055,16 +2357,22 @@ _zensu_vcs_open_pr() {
   [ -n "$head" ] || return 1
   [ -n "$title" ] || return 1
   [ -n "$bodyfile" ] || return 1
-  local argv
+  _zensu_vcs_require_path open-pr body "$bodyfile" 'no forge call was made' || return 1
+  local argv host
   case "$provider" in
     github)
-      argv=(gh pr create --title "$title" --body-file "$bodyfile" --base "$base" --head "$head")
+      host="$(_zensu_vcs_gh_host)" || return 1
+      _zensu_vcs_gh_cmd "$host"
+      argv=("${_zensu_vcs_gh_ctx_argv[@]}" pr create --title "$title" --body-file "$bodyfile" --base "$base" --head "$head")
       if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
       [ -f "$bodyfile" ] || return 1 ;;
     gitlab)
       if ! _zensu_vcs_dry; then [ -f "$bodyfile" ] || return 1; fi
       local body=""
-      [ -f "$bodyfile" ] && body="$(cat "$bodyfile")"
+      if [ -f "$bodyfile" ] && ! body="$({ cat < "$bodyfile"; } 2>/dev/null)"; then
+        printf 'zensu-vcs: open-pr refused: the body file cannot be read, so no forge call was made\n' >&2
+        return 1
+      fi
       argv=(glab mr create --title "$title" --description "$body" --source-branch "$head" --target-branch "$base" --yes)
       if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi ;;
     *) return 1 ;;
@@ -2075,7 +2383,282 @@ _zensu_vcs_open_pr() {
   printf '%s' "$out" | _zensu_vcs_extract_url
 }
 
-export -f _zensu_vcs_clamp_diag _zensu_vcs_report_failure _zensu_vcs_run _zensu_vcs_native_node_path _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_gitlab_post_json _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_review_markers _zensu_vcs_body_markers _zensu_vcs_open_pr _zensu_vcs_no_pr_message _zensu_vcs_review_summary _zensu_vcs_normalize_review_summary _zensu_vcs_conventions 2>/dev/null || true
+_zensu_vcs_stream() (
+  label="$1"; shift
+  out_file=""; err_file=""
+  trap '[ -z "$out_file" ] || rm -f -- "$out_file"; [ -z "$err_file" ] || rm -f -- "$err_file"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  if ! out_file="$(mktemp "${TMPDIR:-/tmp}/zensu-vcs-out.XXXXXXXX" 2>/dev/null)"; then
+    out_file=""
+    printf 'zensu-vcs: %s failed: no temporary file could be created\n' "$label" >&2
+    exit 1
+  fi
+  if ! err_file="$(mktemp "${TMPDIR:-/tmp}/zensu-vcs-err.XXXXXXXX" 2>/dev/null)"; then
+    err_file=""
+    printf 'zensu-vcs: %s failed: no temporary file could be created\n' "$label" >&2
+    exit 1
+  fi
+  "$@" >"$out_file" 2>"$err_file"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    _zensu_vcs_report_failure "$label" "$rc" "" "$(cat "$err_file" 2>/dev/null)"
+    exit "$rc"
+  fi
+  cat -- "$out_file"
+)
+
+_zensu_vcs_render_gitlab_diff() {
+  command -v node >/dev/null 2>&1 || return 1
+  node -e '
+    var fs=require("fs"),chunks=[];
+    function fail(reason){fs.writeSync(2,"zensu-vcs: pr-diff failed: "+reason+"\n");process.exit(1);}
+    process.stdin.on("data",function(c){chunks.push(c);});process.stdin.on("end",function(){
+      var pages;try{pages=JSON.parse(Buffer.concat(chunks).toString("utf8"));}catch(_){fail("the diffs listing is not JSON");}
+      var files=[],out=[],unsafe=/[\u0000-\u001f\u007f]/;
+      function flatten(v,depth){
+        if(!Array.isArray(v)||depth>8)fail("the diffs listing is not an array of pages");
+        v.forEach(function(x){if(Array.isArray(x))flatten(x,depth+1);else files.push(x);});
+      }
+      function mode(m){return typeof m==="string"&&/^[0-7]{6}$/.test(m)?m:"";}
+      flatten(pages,0);
+      files.forEach(function(d){
+        if(!d||typeof d!=="object")fail("an entry of the diffs listing is not an object");
+        if(typeof d.old_path!=="string"||!d.old_path||typeof d.new_path!=="string"||!d.new_path
+            ||unsafe.test(d.old_path)||unsafe.test(d.new_path))fail("an entry of the diffs listing names no valid path");
+        var name=d.new_path;
+        ["new_file","renamed_file","deleted_file","collapsed","too_large"].forEach(function(k){
+          if(d[k]!=null&&typeof d[k]!=="boolean")fail("the entry for "+name+" carries a flag that is not a boolean");
+        });
+        ["a_mode","b_mode"].forEach(function(k){
+          if(d[k]!=null&&(typeof d[k]!=="string"||!/^[0-7]{1,6}$/.test(d[k])))fail("the entry for "+name+" carries a file mode that is not octal");
+        });
+        if(typeof d.diff!=="string")fail("the entry for "+name+" carries a diff that is not text");
+        if(d.too_large===true)fail("GitLab withheld the diff of "+name+" as too large");
+        if(d.collapsed===true&&d.diff==="")fail("GitLab withheld the diff of "+name+" as collapsed");
+        var a=mode(d.a_mode),b=mode(d.b_mode),added=d.new_file===true,removed=d.deleted_file===true;
+        out.push("diff --git a/"+d.old_path+" b/"+d.new_path+"\n");
+        if(added&&b)out.push("new file mode "+b+"\n");
+        else if(removed&&a)out.push("deleted file mode "+a+"\n");
+        else if(!added&&!removed&&a&&b&&a!==b)out.push("old mode "+a+"\nnew mode "+b+"\n");
+        if(d.renamed_file===true)out.push("rename from "+d.old_path+"\nrename to "+d.new_path+"\n");
+        if(d.diff!==""){
+          out.push("--- "+(added?"/dev/null":"a/"+d.old_path)+"\n");
+          out.push("+++ "+(removed?"/dev/null":"b/"+d.new_path)+"\n");
+          out.push(d.diff.slice(-1)==="\n"?d.diff:d.diff+"\n");
+        }
+      });
+      process.stdout.write(out.join(""));
+    });'
+}
+
+_zensu_vcs_pr_diff() {
+  local provider="" repoid="" id="" seen_provider=0 seen_repoid=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) [ "$seen_provider" -eq 0 ] && [ $# -ge 2 ] || return 1; provider="$2"; seen_provider=1; shift ;;
+      --repo-id) [ "$seen_repoid" -eq 0 ] && [ $# -ge 2 ] || return 1; repoid="$2"; seen_repoid=1; shift ;;
+      -*) return 1 ;;
+      *) [ -z "$id" ] || return 1; id="$1" ;;
+    esac
+    shift
+  done
+  _zensu_vcs_is_num "$id" || return 1
+  local argv=() host listing
+  case "$provider" in
+    github)
+      [ -z "$repoid" ] || _zensu_vcs_is_gh_repoid "$repoid" || return 1
+      host="$(_zensu_vcs_gh_host)" || return 1
+      _zensu_vcs_gh_cmd "$host"
+      if [ -n "$repoid" ]; then
+        argv=("${_zensu_vcs_gh_argv[@]}" pr diff -R "$host/$repoid" --color never -- "$id")
+      else
+        argv=("${_zensu_vcs_gh_ctx_argv[@]}" pr diff --color never -- "$id")
+      fi
+      if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
+      _zensu_vcs_stream 'pr-diff (gh pr diff)' "${argv[@]}" ;;
+    gitlab)
+      if ! _zensu_vcs_is_gl_repoid "$repoid"; then
+        printf 'zensu-vcs: pr-diff refused: GitLab needs --repo-id with the URL-encoded project path that the repo= line of --detect prints\n' >&2
+        return 1
+      fi
+      argv=(glab api --paginate --output json "projects/$repoid/merge_requests/$id/diffs")
+      if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
+      command -v node >/dev/null 2>&1 || return 1
+      listing="$(_zensu_vcs_run 'pr-diff (glab api diffs)' "${argv[@]}")" || return 1
+      printf '%s' "$listing" | _zensu_vcs_render_gitlab_diff ;;
+    *)
+      printf 'zensu-vcs: pr-diff refused: --provider must be github or gitlab\n' >&2
+      return 1 ;;
+  esac
+}
+
+_zensu_vcs_edit_pr_body() {
+  local provider="" repoid="" bodyfile="" id="" seen_provider=0 seen_repoid=0 seen_body=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) [ "$seen_provider" -eq 0 ] && [ $# -ge 2 ] || return 1; provider="$2"; seen_provider=1; shift ;;
+      --repo-id) [ "$seen_repoid" -eq 0 ] && [ $# -ge 2 ] || return 1; repoid="$2"; seen_repoid=1; shift ;;
+      --body-file) [ "$seen_body" -eq 0 ] && [ $# -ge 2 ] || return 1; bodyfile="$2"; seen_body=1; shift ;;
+      -*) return 1 ;;
+      *) [ -z "$id" ] || return 1; id="$1" ;;
+    esac
+    shift
+  done
+  _zensu_vcs_is_num "$id" || return 1
+  [ -n "$bodyfile" ] || return 1
+  case "$provider" in
+    github|gitlab) ;;
+    *)
+      printf 'zensu-vcs: edit-pr-body refused: --provider must be github or gitlab\n' >&2
+      return 1 ;;
+  esac
+  _zensu_vcs_require_file edit-pr-body body "$bodyfile" 'no forge call was made' || return 1
+  local argv=() host out native_body request_json
+  case "$provider" in
+    github)
+      [ -z "$repoid" ] || _zensu_vcs_is_gh_repoid "$repoid" || return 1
+      host="$(_zensu_vcs_gh_host)" || return 1
+      _zensu_vcs_gh_cmd "$host"
+      if [ -n "$repoid" ]; then
+        argv=("${_zensu_vcs_gh_argv[@]}" pr edit -R "$host/$repoid" --body-file "$bodyfile" -- "$id")
+      else
+        argv=("${_zensu_vcs_gh_ctx_argv[@]}" pr edit --body-file "$bodyfile" -- "$id")
+      fi
+      if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
+      out="$(_zensu_vcs_run 'edit-pr-body (gh pr edit)' "${argv[@]}")" || return 1
+      printf '%s' "$out" | _zensu_vcs_extract_url ;;
+    gitlab)
+      _zensu_vcs_is_gl_repoid "$repoid" || return 1
+      command -v node >/dev/null 2>&1 || return 1
+      native_body="$(_zensu_vcs_native_node_path "$bodyfile")" || return 1
+      request_json="$(BODY_FILE="$native_body" node -e 'process.stdout.write(JSON.stringify({description:require("fs").readFileSync(process.env.BODY_FILE,"utf8")}))')" || return 1
+      if _zensu_vcs_dry; then
+        printf '%s' "$request_json" | _zensu_vcs_gitlab_send_json 'edit-pr-body PUT (glab api merge_requests)' PUT "projects/$repoid/merge_requests/$id"
+        return 0
+      fi
+      out="$(printf '%s' "$request_json" | _zensu_vcs_gitlab_send_json 'edit-pr-body PUT (glab api merge_requests)' PUT "projects/$repoid/merge_requests/$id")" || return 1
+      printf '%s' "$out" | _zensu_vcs_json_http_url_field web_url ;;
+  esac
+}
+
+_zensu_vcs_post_comment() {
+  local provider="" repoid="" id="" payload="" pos=0 seen_provider=0 seen_repoid=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) [ "$seen_provider" -eq 0 ] && [ $# -ge 2 ] || return 1; provider="$2"; seen_provider=1; shift ;;
+      --repo-id) [ "$seen_repoid" -eq 0 ] && [ $# -ge 2 ] || return 1; repoid="$2"; seen_repoid=1; shift ;;
+      -?*) return 1 ;;
+      *)
+        case "$pos" in
+          0) id="$1" ;;
+          1) payload="$1" ;;
+          *) return 1 ;;
+        esac
+        pos=$((pos + 1)) ;;
+    esac
+    shift
+  done
+  case "$provider" in
+    github) ;;
+    gitlab)
+      printf 'zensu-vcs: --post-comment is the GitHub per-comment fallback; GitLab posts every comment as its own discussion through --post-review\n' >&2
+      return 1 ;;
+    *) return 1 ;;
+  esac
+  _zensu_vcs_is_num "$id" || return 1
+  _zensu_vcs_is_gh_repoid "$repoid" || return 1
+  [ -n "$payload" ] || return 1
+  _zensu_vcs_require_file post-comment payload "$payload" 'nothing was posted' || return 1
+  local host resp owner="${repoid%%/*}" name="${repoid#*/}"
+  host="$(_zensu_vcs_gh_host)" || return 1
+  _zensu_vcs_gh_cmd "$host"
+  local argv=("${_zensu_vcs_gh_argv[@]}" api -X POST "repos/$owner/$name/pulls/$id/comments" --input "$payload" --hostname "$host")
+  if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
+  resp="$(_zensu_vcs_run 'post-comment POST (gh api pulls comments)' "${argv[@]}")" || return 1
+  printf '%s' "$resp" | _zensu_vcs_json_http_url_field html_url
+}
+
+_zensu_vcs_normalize_review() {
+  local review="${1:-}"
+  command -v node >/dev/null 2>&1 || return 1
+  REVIEW_ID="$review" node -e '
+    var fs=require("fs"),chunks=[];
+    function fail(reason){fs.writeSync(2,"zensu-vcs: fetch-review failed: "+reason+"\n");process.exit(1);}
+    process.stdin.on("data",function(c){chunks.push(c);});process.stdin.on("end",function(){
+      var s=Buffer.concat(chunks).toString("utf8"),cut=s.indexOf("\u0000"),r,pages;
+      if(cut<0)fail("the comments listing is missing");
+      try{r=JSON.parse(s.slice(0,cut));}catch(_){fail("the review answer is not JSON");}
+      try{pages=JSON.parse(s.slice(cut+1));}catch(_){fail("the comments listing is not JSON");}
+      var want=Number(process.env.REVIEW_ID),unsafe=/[\u0000-\u001f\u007f]/,author="",submitted="",url,seen={},count=0;
+      if(!r||typeof r!=="object"||Array.isArray(r)||!Number.isSafeInteger(r.id)||r.id<1||r.id!==want)fail("the answer is not review "+process.env.REVIEW_ID);
+      if(typeof r.state!=="string"||!r.state||r.state.length>64||unsafe.test(r.state))fail("the review carries no state");
+      if(r.user!=null){
+        if(typeof r.user!=="object"||Array.isArray(r.user)||(r.user.login!=null&&(typeof r.user.login!=="string"||unsafe.test(r.user.login))))fail("the review author is malformed");
+        author=r.user.login||"";
+      }
+      if(r.submitted_at!=null){
+        if(typeof r.submitted_at!=="string"||unsafe.test(r.submitted_at))fail("the review submission time is malformed");
+        submitted=r.submitted_at;
+      }
+      url=r.html_url;
+      try{
+        if(typeof url!=="string"||/[\s\u0000-\u001f\u007f]/.test(url))throw new Error();
+        var u=new URL(url);if(!["http:","https:"].includes(u.protocol)||!u.hostname||u.username||u.password)throw new Error();
+      }catch(_){fail("the review carries no valid URL");}
+      function walk(v,depth){
+        if(!Array.isArray(v)||depth>2)fail("the comments listing is not an array of pages");
+        v.forEach(function(c){
+          if(Array.isArray(c)){walk(c,depth+1);return;}
+          if(!c||typeof c!=="object"||!Number.isSafeInteger(c.id)||c.id<1)fail("a comment of the listing is malformed");
+          if(c.pull_request_review_id!=null&&c.pull_request_review_id!==want)fail("the listing holds a comment of another review");
+          if(!Object.prototype.hasOwnProperty.call(seen,c.id)){seen[c.id]=true;count++;}
+        });
+      }
+      walk(pages,0);
+      process.stdout.write(JSON.stringify({id:String(r.id),state:r.state,author:author,submittedAt:submitted,url:url,comments:count}));
+    });'
+}
+
+_zensu_vcs_fetch_review() {
+  local provider="" repoid="" id="" review="" pos=0 seen_provider=0 seen_repoid=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) [ "$seen_provider" -eq 0 ] && [ $# -ge 2 ] || return 1; provider="$2"; seen_provider=1; shift ;;
+      --repo-id) [ "$seen_repoid" -eq 0 ] && [ $# -ge 2 ] || return 1; repoid="$2"; seen_repoid=1; shift ;;
+      -*) return 1 ;;
+      *)
+        case "$pos" in
+          0) id="$1" ;;
+          1) review="$1" ;;
+          *) return 1 ;;
+        esac
+        pos=$((pos + 1)) ;;
+    esac
+    shift
+  done
+  case "$provider" in
+    github) ;;
+    gitlab)
+      printf 'zensu-vcs: --fetch-review reads a GitHub review object, which GitLab does not have\n' >&2
+      return 1 ;;
+    *) return 1 ;;
+  esac
+  _zensu_vcs_is_num "$id" || return 1
+  _zensu_vcs_is_num "$review" || return 1
+  _zensu_vcs_is_gh_repoid "$repoid" || return 1
+  local host review_json comments_json owner="${repoid%%/*}" name="${repoid#*/}"
+  host="$(_zensu_vcs_gh_host)" || return 1
+  _zensu_vcs_gh_cmd "$host"
+  local review_argv=("${_zensu_vcs_gh_argv[@]}" api "repos/$owner/$name/pulls/$id/reviews/$review" --hostname "$host")
+  local comments_argv=("${_zensu_vcs_gh_argv[@]}" api --paginate --slurp "repos/$owner/$name/pulls/$id/reviews/$review/comments?per_page=100" --hostname "$host")
+  if _zensu_vcs_dry; then printf '%s\n%s\n' "${review_argv[*]}" "${comments_argv[*]}"; return 0; fi
+  review_json="$(_zensu_vcs_run 'fetch-review (gh api pulls reviews)' "${review_argv[@]}")" || return 1
+  comments_json="$(_zensu_vcs_run 'fetch-review comments (gh api pulls review comments)' "${comments_argv[@]}")" || return 1
+  { printf '%s' "$review_json"; printf '\0'; printf '%s' "$comments_json"; } | _zensu_vcs_normalize_review "$review"
+}
+
+export -f _zensu_vcs_clamp_diag _zensu_vcs_report_failure _zensu_vcs_run _zensu_vcs_native_node_path _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_gh_host_valid _zensu_vcs_ssh_alias_valid _zensu_vcs_inside_repo _zensu_vcs_pinned_host _zensu_vcs_sole_remote_url _zensu_vcs_gh_host _zensu_vcs_gh_cmd _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_gitlab_send_json _zensu_vcs_gitlab_post_json _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_require_path _zensu_vcs_require_file _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_review_markers _zensu_vcs_body_markers _zensu_vcs_open_pr _zensu_vcs_no_pr_message _zensu_vcs_review_summary _zensu_vcs_normalize_review_summary _zensu_vcs_conventions _zensu_vcs_stream _zensu_vcs_render_gitlab_diff _zensu_vcs_pr_diff _zensu_vcs_edit_pr_body _zensu_vcs_post_comment _zensu_vcs_normalize_review _zensu_vcs_fetch_review 2>/dev/null || true
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in
@@ -2093,6 +2676,10 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     --review-markers) shift; _zensu_vcs_review_markers "$@" ;;
     --review-summary) shift; _zensu_vcs_review_summary "$@" ;;
     --conventions)    shift; _zensu_vcs_conventions "$@" ;;
-    *) printf 'usage: zensu-vcs.sh --detect|--pr-state|--locate-pr|--fetch-threads|--resolve-thread|--scout-pr|--fetch-pr-ref|--diff-refs|--reconcile-review|--post-review|--open-pr|--review-markers|--review-summary|--conventions [--provider github|gitlab] [--repo-id R] [--repo DIR] [--template PATH] [--reply TEXT] [--diff-refs-json JSON] [--expected-head SHA] [--operation-key KEY] [--base B] [--head H] [--title T] [--body-file F] [args]\n' >&2; exit 2 ;;
+    --pr-diff)        shift; _zensu_vcs_pr_diff "$@" ;;
+    --edit-pr-body)   shift; _zensu_vcs_edit_pr_body "$@" ;;
+    --post-comment)   shift; _zensu_vcs_post_comment "$@" ;;
+    --fetch-review)   shift; _zensu_vcs_fetch_review "$@" ;;
+    *) printf 'usage: zensu-vcs.sh --detect|--pr-state|--locate-pr|--fetch-threads|--resolve-thread|--scout-pr|--fetch-pr-ref|--diff-refs|--reconcile-review|--post-review|--open-pr|--review-markers|--review-summary|--conventions|--pr-diff|--edit-pr-body|--post-comment|--fetch-review [--provider github|gitlab] [--repo-id R] [--repo DIR] [--template PATH] [--reply TEXT] [--diff-refs-json JSON] [--expected-head SHA] [--operation-key KEY] [--base B] [--head H] [--title T] [--body-file F] [args]\n' >&2; exit 2 ;;
   esac
 fi

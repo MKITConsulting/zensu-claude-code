@@ -5,8 +5,8 @@ the actual source code**, correctly typed, and useful — not a restatement of
 feature metadata.
 
 This is the single source of truth referenced by `agents/zensu-plm.md`,
-`skills/implement/SKILL.md`, and `skills/ghost-scan/SKILL.md`. Read it before
-creating any wiki page or linked doc.
+`skills/docs/SKILL.md`, `skills/implement/SKILL.md`, and
+`skills/ghost-scan/SKILL.md`. Read it before creating any wiki page or linked doc.
 
 ## What a Zensu doc IS
 
@@ -15,11 +15,12 @@ endpoints, function signatures, request/response shapes, config keys, error
 codes, data flow. It is written for a specific **audience** and a specific
 **doc type** (see below).
 
-`get_doc_generation_context` returns the **map, not the territory**: the feature
-title, description, `detectedSourceFiles` paths, security posture, tiers,
-journeys, and symbol metadata. It tells you *which* files matter and *what*
-security/tier constraints apply. It does **not** contain the source code. You
-must open and read those files yourself before writing.
+`zensu doc gen-context <feature-id> --doc-type <type>` returns the
+**map, not the territory**: the feature title, description, `detectedSourceFiles`
+paths, security posture, tiers, journeys, and symbol metadata. It tells you
+*which* files matter and *what* security/tier constraints apply. It does **not**
+contain the source code. You must open and read those files yourself before
+writing.
 
 The agent has filesystem access. Reading the real source produces docs that are
 *better* than the backend's frontend-only generator (which sees only extracted
@@ -27,8 +28,8 @@ symbol metadata, never full source).
 
 ## Anti-pattern (forbidden): the metadata dump
 
-The failure this guide exists to prevent: condensing
-`get_doc_generation_context` metadata straight into Markdown without reading any
+The failure this guide exists to prevent: condensing the
+`zensu doc gen-context` metadata straight into Markdown without reading any
 source. It produces generic, templated pages that just re-list feature
 attributes — e.g.:
 
@@ -64,15 +65,36 @@ each type must contain — it mirrors the backend doc generator verbatim.
 
 Audiences: `end_user`, `developer`, `admin`, `internal`.
 
-Pick the type by what the reader needs. A confidential backend feature usually
-warrants `internal` (+ `api_reference` if it exposes endpoints); a user-visible
-capability warrants `user_facing`; an architectural choice warrants `adr`.
+## Required doc types (the release gate)
+
+The release gate counts a feature's docs as complete (`docs_complete`) only once
+every doc type its `feature_scope` requires has a linked, current doc; until then
+a gate that requires docs reports `documentation must be complete before release`.
+So the scope picks the type, not the security classification, the kind of code or
+the reader who seems likely. Read `feature_scope` and `estimated_effort` from
+`zensu features get <feature-id>` and author one doc per required type, for the
+audience the table gives it:
+
+| `feature_scope` | Required `doc_type`(s) | Audience |
+|---|---|---|
+| unset (`null`, the default) | `user_facing` | `end_user` |
+| `api` | `api_reference` | `developer` |
+| `internal_only` | `adr` | `internal` |
+| `public_facing` | `user_facing` — **plus** `tutorial` when `estimated_effort` ∈ {L, XL} | `user_facing`→`end_user`; `tutorial`→`developer` |
+
+A response without a `feature_scope` field counts as unset: author `user_facing`
+and say so. When a `public_facing` feature's `estimated_effort` is unknown, author
+the `user_facing` doc and note that the `tutorial` was skipped for lack of an effort
+signal; do not guess. A confidential backend feature with an unset scope still
+needs `user_facing`. An `internal` or `api_reference` doc may be worth writing
+beside it, but a type the table does not require for the scope never completes the
+gate.
 
 ## Procedure (read-source-first)
 
-1. **Get the map.** Call `get_doc_generation_context` with the `feature_id` and
-   the target `doc_type`. Note the `detectedSourceFiles`, symbols, security
-   posture, tiers, and journeys.
+1. **Get the map.** Run `zensu doc gen-context <feature-id> --doc-type <type>`
+   with a required doc type from the table above. Note the `detectedSourceFiles`,
+   symbols, security posture, tiers, and journeys.
 2. **Read the territory.** Open the source files named in the context (Read /
    Grep). For `api_reference`, find the real route definitions and DTOs; for
    `internal`, trace the data flow across the files; for `user_facing`, find the
@@ -84,47 +106,54 @@ capability warrants `user_facing`; an architectural choice warrants `adr`.
 4. **Publish, updating a page that already exists.** A re-run changes the page it
    published before; it never creates a second one. Look the page up first: the
    context's `existingDocs` entry for the `doc_type` carries the linked page's
-   `wikiPageId`, and `list_wiki_pages` (`zensu wiki list --product <id> --json`)
-   returns every page with its `id` and `path`. A feature-linked page lives at
+   `wikiPageId`, and `zensu wiki list --product <id> --json` returns every page
+   with its `id` and `path`. A feature-linked page lives at
    `/features/<feature slug>/<doc_type>`, an unlinked one at
    `/custom/<slug of the title>`.
-   - **The page exists:** `update_wiki_page` with its `page_id`, the new markdown
-     `content`, and a `change_summary` (`zensu wiki update <page-id> --content
-     <markdown> --change-summary <text>`).
-   - **No page yet:** `create_wiki_page` with the markdown `content`, `entity_type`,
-     `entity_id`, `doc_type`, and `audience` (`zensu wiki create`). Create never
-     changes an existing page: when a page already exists at the new page's path,
-     it fails, names that page's id and path, and leaves it unchanged. Update the
-     page it names. Never retry the create under another title to get past the
-     error; that leaves the old page stale beside a duplicate. A client that does
-     not send `createOnly` (an older zensu-cli or MCP server), or a Zensu backend
-     before v0.89.2 or wiki before v0.15.1, does not refuse: create then updates
-     the existing page and still reports a created one, which is why the lookup
-     comes first.
+   - **The page exists:** `zensu wiki update <page-id> --content-file <path>
+     --change-summary <text>` replaces its markdown with the file's.
+   - **No page yet:** `zensu wiki create --product <id> --title <title> --content-file
+     <path> --entity-type feature --entity-id <feature-id> --doc-type <type>
+     --audience <audience>`. Create never changes an existing page: when a page
+     already exists at the new page's path, it fails, names that page's id and
+     path, and leaves it unchanged. Update the page it names. Never retry the
+     create under another title to get past the error; that leaves the old page
+     stale beside a duplicate. zensu-cli sends this create-only request
+     (`createOnly`) from 0.12.0 on, so every zensu-cli the plugin supports sends it.
+     A zensu-cli before 0.12.0, or a Zensu backend before v0.89.2 or wiki before
+     v0.15.1, does not refuse: create then updates the existing page and still
+     reports a created one, which is why the lookup comes first.
 
-   Then `link_docs` to update the feature's docs score. Use `link_docs` alone (no
-   wiki page) only for docs that already live in the repo or at an external URL.
+   Then `zensu link docs <feature-id> --doc-type <type>` updates the feature's
+   docs score. Use `zensu link docs` alone (no wiki page) only for docs that
+   already live in the repo or at an external URL (`--file <path>` or
+   `--external-url <url>`).
 
    *CLI one-call form.* For a feature that has no page for the `doc_type` yet,
-   `zensu link docs <feature-id> --doc-type <type> --content <markdown>` folds
-   these two steps into one — `--content` creates the feature-linked wiki page and
-   recomputes the score. It never changes an existing page, so a re-run updates
-   the page as above and then runs `zensu link docs` without `--content`. The
+   `zensu link docs <feature-id> --doc-type <type> --content-file <path>` folds
+   these two steps into one — `--content-file` creates the feature-linked wiki page
+   and recomputes the score. It never changes an existing page, so a re-run updates
+   the page as above and then runs `zensu link docs` without `--content-file`. The
    `/zensu:docs` skill uses this form under the same rule; the two-step
-   `create_wiki_page` + `link_docs` above stays valid when you want explicit
-   control over the page.
+   `zensu wiki create` + `zensu link docs` above stays valid when you want
+   explicit control over the page. Every `--content-file` names a file of
+   markdown: write it through a heredoc with a quoted delimiter as `/zensu:docs`
+   does, and never type the markdown into a double-quoted argument, where the shell
+   runs its backtick spans and expands its `$` names. zensu-cli reads the file
+   itself and refuses a missing, empty, blank or non-UTF-8 file before it sends
+   anything.
 
-## Tools
+## CLI commands
 
-| Tool | Role |
-|------|------|
-| `get_doc_generation_context` | Fetch the context (the map). Read the named source before writing. |
-| `list_wiki_pages` | List a product's wiki pages with their `id` and `path`, to find the page a re-run updates. |
-| `create_wiki_page` / `update_wiki_page` | Publish authored markdown to the wiki (`content` is the full markdown). Create a new page with `create_wiki_page`; change a page that already exists with `update_wiki_page`. |
-| `link_docs` | Register a doc against a feature and update the docs score. Via the CLI, `zensu link docs <feature-id> --doc-type <type> --content <markdown>` also creates the linked wiki page when the feature has none for that doc type yet, and never changes an existing one; `--file` / `--external-url` register a repo or external doc. |
+| Command | Role |
+|---------|------|
+| `zensu doc gen-context <feature-id> --doc-type <type>` | Fetch the context (the map). Read the named source before writing. |
+| `zensu wiki list --product <id> --json` | List a product's wiki pages with their `id` and `path`, to find the page a re-run updates. |
+| `zensu wiki create` / `zensu wiki update <page-id>` | Publish authored markdown to the wiki (`--content-file` names the file that holds the full markdown). Create a new page with `zensu wiki create`; change a page that already exists with `zensu wiki update`. |
+| `zensu link docs <feature-id> --doc-type <type>` | Register a doc against a feature and update the docs score. With `--content-file <path>` it also creates the linked wiki page when the feature has none for that doc type yet, and never changes an existing one; `--file` / `--external-url` register a repo or external doc. |
 
 The rich `POST /api/features/{id}/docs/generate` streaming LLM path is
-**frontend-only** — it is not exposed as an MCP tool. Agents do not call it;
+**frontend-only** — no `zensu` command calls it. Agents do not call it;
 they self-author from real source per the procedure above.
 
 ## Quality checklist
@@ -136,3 +165,4 @@ Before publishing, confirm:
 - [ ] It matches the doc type's Focus and is written for the stated audience.
 - [ ] It is not the anti-pattern (a reformatted feature record).
 - [ ] `doc_type` and `audience` are from the canonical sets above.
+- [ ] Every doc type the feature's `feature_scope` requires has its doc (Required doc types).

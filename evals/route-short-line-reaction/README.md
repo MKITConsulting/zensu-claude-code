@@ -7,16 +7,21 @@ context generation (see [`.claude/rules/prompt-ledger.md`](../../.claude/rules/p
   in vanilla implementation mode, while the route field reads `ask`;
 - the two decided lines of the same hook, while `hooks.defaultDeliveryRoute` decides the route
   (`build` and `direct`);
+- the attended ask short line and the attended full text of the same hook, captured with a person
+  present so they offer Autopilot, in runs that offer `AskUserQuestion`, to grade the ranked route
+  question: the recommended option first and the only label ending in ` (Recommended)`;
 - the short planning notice of [`hooks/user-prompt-intent-router.sh`](../../hooks/user-prompt-intent-router.sh).
 
-Each scenario delivers ONE of these lines ALONE, with no full text before it. That is the worst case
+Each short-line scenario delivers ONE of these lines ALONE, with no full text before it. That is the worst case
 of a long context in which the full reminder has faded, and the only case in which a failure points
 at the short line and at nothing else. The decided lines have no shorter form: the hook prints the
 same decided line on every prompt, so their scenarios test that line as it always reads.
 
-This is the lean core. It covers the vanilla-mode ask and decided lines and the router line. The
-strict-mode lines, the CI-event line and the session-marker source of the decided lines are not
-covered here.
+This is the lean core. It covers the vanilla-mode ask and decided lines, the attended vanilla ask
+short line and full text, and the router line. The strict-mode lines, the CI-event line and the
+session-marker source of the decided lines are not covered here. The attended full text is the one
+scenario shape that is not a short line: it is what the first prompt of a context generation
+carries, and the ranking it asks for has to hold there as well.
 
 ## Scenarios
 
@@ -36,6 +41,16 @@ covered here.
   the Zensu workflow through the Skill tool without asking, as the line's headless clause says, or
   asks a complete route question. It never edits first and never records a route itself. After an
   unanswered route question it runs the workflow or stops.
+- **`ask-attended-trivial-change.yaml`** and **`ask-attended-feature-change.yaml`** — the attended
+  ask short line, which offers Autopilot, on a one-line change and on a whole feature meant to
+  reach a pull request, in runs that offer `AskUserQuestion`. The model asks the route question
+  through the tool before any edit, offers the three labels and all their disclosures, and puts the
+  option it recommends first as the only label ending in ` (Recommended)`. Autopilot may lead the
+  feature request and never the one-line change. After the unanswered question it runs the
+  workflow or stops, and it never records a route.
+- **`ask-full-attended-trivial-change.yaml`** and **`ask-full-attended-feature-change.yaml`** — the
+  same two requests and the same graders on the attended full text, the first prompt of a context
+  generation.
 - **`decided-tdd-code-change.yaml`** — the decided `build` line. The reply begins with
   `Executing via /zensu:build (vanilla mode, route: hooks.defaultDeliveryRoute)` and runs the workflow
   through the Skill tool with the request as its argument, with no route question and no record
@@ -60,6 +75,13 @@ covered here.
   source shows that an allowed call runs: no hook of the installed runtime answers it in the
   probe's place, and the sandbox lets Claude Code write its own temporary files. The channel check
   cannot show this: a hook that blocks every allowed call leaves its denied Skill call unchanged.
+- **`preflight/ask-tool-check.yaml`** — the third preflight run, on the `ask-attended` source, so
+  the run offers the tool the attended scenarios need. The user asks for one `AskUserQuestion` call
+  that is not a code change. A probe record of that call answered `CONTINUE`, whose result carries
+  the probe's own reason, shows that this CLI still offers the tool under
+  `--permission-prompt-tool stdio` and that the probe answers it before any permission channel. A
+  CLI that stopped offering it would otherwise fail every attended scenario in a way that reads like
+  the model's choice.
 
 ## How a run works
 
@@ -82,8 +104,12 @@ source (`route-eval-source: <source>`); the rest is the user message.
    routing eval.
 3. It captures the line under test from THIS tree's hook. The hook runs in a sandbox after a
    `SessionStart`, fires twice, and the second output is kept, because the ledger gives the full
-   text on the first prompt and the short line on every later one. The capture checks the opening
-   shape, the route field and that no placeholder is left.
+   text on the first prompt and the short line on every later one; the `ask-full-attended` source
+   keeps the first. The `ask-attended` and `ask-full-attended` sources fire the hook as the CLI
+   does, with `CLAUDE_CODE_ENTRYPOINT=cli`, so its human-present field reads `yes` and the line
+   offers Autopilot; every other source fires it with no entrypoint, which reads `unknown`. The
+   capture checks the opening shape, the route field, the human-present field where the source
+   names one, and that no placeholder is left.
 4. It writes run settings that add [`lib/decision-probe.js`](lib/decision-probe.js), which sees
    every tool call, and, unless the source is `none`, [`lib/inject-context.js`](lib/inject-context.js),
    which delivers the captured line as `additionalContext`. The same settings pin `ZENSU_CONFIG` to `eval-config.json` and switch
@@ -91,7 +117,11 @@ source (`route-eval-source: <source>`); the rest is the user message.
    sandbox lets the hooks write nowhere else that lasts; the provider refuses any other place.
 5. It runs [`scripts/claude-promptfoo-wrapper.sh`](../../scripts/claude-promptfoo-wrapper.sh) on the
    immutable fixture `test-projects/cart-app`, with the settings passed through
-   `ZENSU_WRAPPER_SETTINGS` and `ZENSU_CONFIG` pointing at `eval-config.json`. After the wrapper's
+   `ZENSU_WRAPPER_SETTINGS` and `ZENSU_CONFIG` pointing at `eval-config.json`. For the
+   `ask-attended` and `ask-full-attended` sources it also sets `ZENSU_WRAPPER_ASK_TOOL=1`, and the
+   wrapper adds `--permission-prompt-tool stdio`: Claude Code 2.1.323 offers `AskUserQuestion` in
+   print mode only with that flag, and a run against a local mock of the API showed the probe
+   receiving the question's options in order and the run ending normally after its deny. After the wrapper's
    attestation it prints one `[route-eval-hook]` line for each probe and inject record and one
    `[route-eval-capture]` line.
 
@@ -100,10 +130,10 @@ The probe answers each call with one of five decisions:
 | Decision | Calls | Effect |
 |---|---|---|
 | `ALLOW` | `Read`, `Glob`, `Grep`, `LS`, `LSP`, `WebSearch`, `WebFetch`, `BashOutput`, task-list tools, `ToolSearch`, and a single-line Bash command whose every part is a plain `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `tree`, `file`, `stat`, `cd`, `grep`, `rg`, `find`, `echo`, `printf` or `nl`, `true`, `test` or `[` (none of these three with `-v` or `-R`), a `sed -n` that prints a numbered line range, the fixture's test command, a read-only `git status`, `log`, `diff`, `show`, `ls-files`, `rev-parse` or `check-ignore`, `git remote` with at most `-v`, or exactly `node --version` or `node -v`, with no substitution, no redirection except to `/dev/null` or of stderr to stdout, and no flag that writes, runs a program or waits (`--stdin` included) | runs; not decisive |
-| `SETUP` | `EnterWorktree`, and a Bash command that runs `git worktree`, `git branch`, `checkout` or `switch`, listings included and also behind `--no-pager`, beside nothing but allowed parts | denied with "work in the current directory"; not decisive |
-| `CONTINUE` | `AskUserQuestion` | denied with "no person can answer"; decisive when it is a route or triage question |
+| `SETUP` | `EnterWorktree`; a Bash command that runs `git worktree`, `git branch`, `checkout` or `switch`, listings included and also behind `--no-pager`, beside nothing but allowed parts, or on one line whose only signals are such commands; and a Bash command that names the installed runtime's work-capture helper `ai-work-capture-v1.js` or runs `zensu ai-work`, when its only signals are such commands and the parts that name the helper or run it with `node` through a variable the same command sets to its path | denied with "work in the current directory", a capture call with "continue the task without it"; not decisive |
+| `CONTINUE` | `AskUserQuestion` | denied with "no person can answer"; decisive when it is a route or triage question; its record carries the flattened question and the option labels of each question in order |
 | `RETRY` | a Bash command the probe cannot prove read-only that shows no write, execution or route signal: an unlisted program, a loop, a `$` expansion or substitution, a line break, an unparsable quote, or a flag that waits, such as `tail -f` or `--watch`; at most three per run | denied with "use plain read commands"; not decisive |
-| `END` | every Bash command with a signal (a write or execution program, a program name built from an expansion, a glob or braces, a redirection to a file, a heredoc, a background job, an assignment prefix, a write flag, a `git -c` override, a `git` subcommand that is not a read, a worktree or branch command included once the first reading has failed, `zensu-delivery-route.sh --build` or `--direct`, `--tdd-begin`, or a Zensu CLI mutation), the fourth `RETRY` of a run, and every other tool, the Skill tool and every edit included | denied with "end your turn now"; decisive |
+| `END` | every other Bash command with a signal (a write or execution program, a program name built from an expansion, a glob or braces, a redirection to a file, a heredoc, a background job, an assignment prefix, a write flag, a `git -c` override, a `git` subcommand that is not a read, a worktree or branch command on a command of several lines, `zensu-delivery-route.sh --build` or `--direct`, `--tdd-begin`, or a Zensu CLI mutation), the fourth `RETRY` of a run, and every other tool, the Skill tool and every edit included | denied with "end your turn now"; decisive |
 
 The probe reads a Bash command twice. The first reading proves it read-only or setup: it splits
 the command at `&&`, `||`, `|`, `;` and parentheses, outside quotes only. A quoted string counts
@@ -116,7 +146,9 @@ substitutions into the commands they run, input redirections included, skips loo
 command's program and flags, quoted text included. A command with a signal gets `END`, and one
 without gets `RETRY`. The record of every Bash call carries the decision's code, such as
 `program:mkdir`, `redirect`, `expansion` or `unlisted`, and for a denied call the part that
-decided it.
+decided it. A worktree, branch or work-capture part never decides an `END`: the record names the
+first other signal, or the code `multi-line` and the first line when worktree or branch commands
+span several lines.
 
 `END` denies the call and asks the model to end its turn, but the model may go on. `RETRY` denies
 the call without ending the turn, so the model can read again with a plain command; it is never
@@ -124,8 +156,9 @@ decisive, and like an allowed call it ends the window of `status-line-exact.js` 
 look in `router-triage-first.js`. The probe answers the fourth such call of a run with `END` and
 marks it as capped, and `harness-isolation.js` fails that run as a probe limit.
 `first-decisive.js` and `after-ask.js` judge the first decisive call and the one after an
-unanswered route question. `no-route-question.js`, `no-delegation.js` and
-`route-question-complete.js` read only what comes before the first `END`. `no-record-command.js`,
+unanswered route question. `no-route-question.js`, `no-delegation.js`,
+`route-question-complete.js` and `route-question-ranked.js` read only what comes before the first
+`END`. `no-record-command.js`,
 `no-route-status.js`, `no-placeholder-copy.js` and `router-triage-first.js` read the whole run, so
 a record command, a status line or a look after the deny still fails it.
 
@@ -134,12 +167,23 @@ when its path lies inside the fixture the wrapper attests; an edit anywhere else
 file, is `edit-outside`. `first-decisive.js` names the part and the code that decided an
 `other:` action and lists the calls answered `RETRY` before it. A question counts as a route
 question when it offers the Zensu workflow and implementing directly in a wording that
-`ROUTE_WORKFLOW` and `ROUTE_DIRECT` in [`lib/envelope.js`](lib/envelope.js) know; only the ask
-scenario's completeness grader also requires the exact labels and disclosures. Its
+`ROUTE_WORKFLOW` and `ROUTE_DIRECT` in [`lib/envelope.js`](lib/envelope.js) know; the completeness
+grader of the ask scenario and of the four attended scenarios also requires the exact labels and
+every disclosure in a wording its needles accept, and the ranking grader requires the exact
+labels too. The session-memory disclosure is judged per sentence: a Yes, choice or answer that is
+remembered, saved, stored or kept, or that holds for, to or through the rest of this session,
+counts in either word order, and so does such a phrase, or a memory verb scoped to this session,
+in the Yes option's own description, the segment right after its label. A negation such as not,
+never, nothing or a contraction, a scope of this request, a last pick before the subject that
+names No, or a `/zensu:delivery-route` mention before the phrase refuses the match, while
+"won't be asked again" still counts. After a memory verb only the words up to the session it
+names are judged, and a phrase before its subject also needs the rest of the subject's clause to
+be affirmative. Its
 `autopilot_option` var says whether the injected line offers Autopilot: `offered` also requires the
 Autopilot label, the branch push and pull request and the gh or glab CLI, and `absent` fails a
 question that offers Autopilot anyway. The ask scenario sets `absent`, because the capture runs with
-no host entrypoint, so the line's human-present field reads `unknown`. A question counts as
+no host entrypoint, so the line's human-present field reads `unknown`; the attended scenarios set
+`offered`, because their capture runs with `CLAUDE_CODE_ENTRYPOINT=cli`. A question counts as
 the triage when its three topics stand in sentences that ask, or in list items under a lead-in that
 asks; a statement before a dash, colon or semicolon in such a sentence is left out, but a guess
 joined to a question by a comma still counts. A question asked through the tool counts as `ask` only
@@ -164,7 +208,14 @@ allowed call shows no hook error, and a denied call is an error that carries the
 A call that another `PreToolUse` hook answered fails the run as a harness fault, so it is never
 read as model behaviour. A run in which the probe hit its `RETRY` cap fails the same way.
 
-The behaviour graders are listed in each scenario. They are unit-tested in both directions by
+The behaviour graders are listed in each scenario. `route-question-ranked.js` takes the first route
+question asked through the tool and, inside that call, the first question whose own labels offer
+the routes, so a clarifying question bundled before it is not graded in its place: every label names
+one route, the routes are the scenario's `expected_routes`, exactly one label ends in
+` (Recommended)`, that label is the first, and under `autopilot_first: forbidden` Autopilot does not
+lead. A route question asked only in prose fails it, because prose carries no option order the
+host would show. When every attended scenario fails it with no question asked, read the preflight's
+`ask-tool-check` first. The behaviour graders are unit-tested in both directions by
 [`tests/structure/route-short-line-graders.test.js`](../../tests/structure/route-short-line-graders.test.js),
 which [`tests/structure/test-route-short-line-eval.sh`](../../tests/structure/test-route-short-line-eval.sh)
 drives in CI. That suite also captures every line from this tree and pins each scenario's
@@ -175,12 +226,22 @@ silent under `eval-config.json`, and runs the provider dry.
 
 - **The host's own instructions load.** The eval session reads the user's global `CLAUDE.md` and
   settings. A global rule that asks for a worktree first is answered by the probe as `SETUP`, listings
-  of worktrees and branches included, and is not graded. Other reads such a rule may start with, such
+  of worktrees and branches included, also when the model bundles them on one line with reads the
+  probe cannot prove, and is not graded. Other reads such a rule may start with, such
   as `git status` or `ls`, are allowed calls: one before the status line ends the window of
   `status-line-exact.js`, and one before the triage counts as a look in `router-triage-first.js`.
   Other global rules can still shape a reply. Read the controls first:
   `control-no-injection.yaml` for the code-change scenarios and `control-planning-no-injection.yaml`
   for the router. A control that fails means the host, not the short line, steers the run.
+- **The installed runtime asks for work capture first.** Its `SessionStart` primer tells the model
+  to run the AI-work capture helper's preflight before any implementation, and no switch silences it.
+  In a live pre-check of the attended scenarios (Claude Code 2.1.323, runtime 0.40.1) nine of twelve
+  runs did that first and ended there, before any route question. The probe therefore answers a Bash
+  command that names `ai-work-capture-v1.js` or runs `zensu ai-work` as `SETUP` with "continue the
+  task without it" when nothing beside the capture call carries a signal: the call never runs and is
+  not graded, while a write bundled with it still ends the run. Two of the other three bundled a host
+  rule's worktree setup with reads on one line, which the probe now answers as `SETUP` as well; the
+  third added a `git config` call, which the probe does not list as a read, so it still ends the run.
 - **The other enabled plugins are switched off through `--settings`.** That `enabledPlugins` in a
   `--settings` file overrides the user's settings is an assumption until a live run shows no other
   plugin's skills or hooks in the transcript.
@@ -194,6 +255,19 @@ silent under `eval-config.json`, and runs the provider dry.
   cannot reach the tool takes the headless arm or asks in prose, so the ask scenario allows both the
   headless arm and a complete route question, and its result shows what the line does when the
   model cannot ask through the tool.
+- **The attended scenarios tell the model that a person is present, and the probe answers for
+  nobody.** Their line reads `ZENSU HUMAN PRESENT: yes` and the run offers `AskUserQuestion`, so
+  asking through the tool is the right first move, and the probe then denies the question with "no
+  person can answer". What follows the deny is graded only as the workflow or a stop. The flag that
+  offers the tool, `--permission-prompt-tool stdio`, is the SDK's permission-prompt channel. No
+  prompt is expected, because the probe answers every call and the run skips permissions; whether a
+  run that met one would wait or fail was not measured. That the CLI offers the tool under the flag
+  at all was measured once, on Claude Code 2.1.323; the preflight's `ask-tool-check` re-checks it on
+  the CLI that runs the eval.
+- **The attended scenarios grade a person-present line only.** Without a person confirmed present
+  the reminder keeps its workflow option first, and no scenario offers `AskUserQuestion` to that
+  shape, so its order is pinned by `R13h` in `tests/structure/test-delivery-route.sh` and by no live
+  run.
 - **The ask line names paths of the capture.** Its record command carries the capture sandbox's
   plugin-data path and this tree's script path. The probe denies the command and
   `no-record-command.js` flags it, so the stale paths cannot change state.
@@ -208,7 +282,7 @@ silent under `eval-config.json`, and runs the provider dry.
 
 ## Run
 
-Run the preflight first. It costs two model runs and shows whether the graded runs can mean
+Run the preflight first. It costs three model runs and shows whether the graded runs can mean
 anything. Always pass `--no-cache`: promptfoo keys its cache on the provider script, the prompt and
 the options, so without it a second run returns the stored transcript, and an edited hook line,
 probe or installed runtime is graded against the old one.
@@ -222,6 +296,6 @@ promptfoo eval --no-cache --no-share -c promptfooconfig.yaml
 ```
 
 Both are live: they need the `claude` CLI, promptfoo and an enabled `zensu@zensu` install, and they
-cost API credits. Like every promptfoo eval in this repository, this one is local-only and never a
-CI gate. `ROUTE_EVAL_DRY_RUN=1 ./provider.sh "$(printf 'route-eval-source: ask\nhello')"` prints the
+cost API credits. This eval is local-only and never a CI gate: the scheduled `live-evals.yml` does not
+run it, because its provider needs a user-scope `zensu@zensu` install that the runner does not have. `ROUTE_EVAL_DRY_RUN=1 ./provider.sh "$(printf 'route-eval-source: ask\nhello')"` prints the
 settings, environment and capture of a run without starting a model.

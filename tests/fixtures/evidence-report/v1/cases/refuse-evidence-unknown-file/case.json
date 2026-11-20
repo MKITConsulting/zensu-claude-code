@@ -1,0 +1,15 @@
+{
+  "description": "An evidence item that names a file the manifest does not list.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "evidence.unknown-file",
+        "at": "evidence.e2.file"
+      }
+    ]
+  }
+}

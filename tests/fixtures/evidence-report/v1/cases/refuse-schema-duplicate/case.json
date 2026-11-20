@@ -1,0 +1,12 @@
+{
+  "description": "A driver listed twice in run.drivers.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "schema.duplicate",
+        "at": "run.drivers[1]"
+      }
+    ]
+  }
+}

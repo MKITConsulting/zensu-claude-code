@@ -14,10 +14,10 @@
 # (how an agent *gains* the context the gate wants), the explicit per-command
 # `ZENSU_MCP_GATE=off` prefix of a main-thread command, or a write whose target backend
 # (`--api-url` flag / `ZENSU_API_URL` env) is localhost — a throwaway dev/test DB
-# where the dedup/journey/classification conventions are meaningless. A --help/-h or
-# localhost call the parse reads as one, without the inline prefix, leaves before the
-# bind; a read or a prefixed call passes only once the session binds, and a PowerShell
-# call it cannot judge is denied.
+# where the dedup/journey/classification conventions are meaningless. A call read
+# as --help/-h, or as a localhost call to a verb that sends a request, leaves
+# before the bind unless it carries the inline prefix; a read or a prefixed call
+# passes only once the session binds, and a PowerShell call it cannot judge is denied.
 #
 # This is a convention-nudge, not an airtight boundary: once the CLI's OAuth
 # token is cached on disk an agent can curl the API directly. The gate enforces
@@ -96,6 +96,13 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     if (w.indexOf(OPQ) !== -1) return true;
     return w !== "" && w[0] !== "-" && !/^[0-9]*[<>]/.test(w) && /[^0-9]/.test(w) && w.indexOf("/") === -1;
   }
+  const NO_REQUEST = new Set(["ai-work\trecover"]);
+  const NO_REQUEST_VERBS = new Set(Array.from(NO_REQUEST, (form) => form.split("\t")[1]));
+  function sendsNoRequest(rest) {
+    if (!reader) return rest.some((word) => NO_REQUEST_VERBS.has(lib().unquoted(word)));
+    const words = reader.commandWords(rest), noun = reader.commandNoun(words[0] || "");
+    return noun !== "" && NO_REQUEST.has(noun + "\t" + reader.commandVerb(noun, (words[1] || "").split(/[\t\r\n]/)[0]));
+  }
   function dynamicReadings(c) {
     if (!c.rest.some(lib().isDynamic)) return [];
     const skipped = c.rest.filter((t) => !lib().isDynamic(t)), consumed = [];
@@ -156,7 +163,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       continue;
     }
     if (rest.indexOf("--help") !== -1 || rest.indexOf("-h") !== -1) continue;      // --help/-h is a read, never a mutation
-    if (backendLocal(invocation)) continue;   // localhost/dev backend → conventions moot, not the tracked product
+    if (backendLocal(invocation) && !sendsNoRequest(rest)) continue;   // localhost/dev backend → conventions moot, not the tracked product
     if (!reader) { if (rest.some(couldNameSubcommand)) out.add(UNR + "the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded"); continue; }
     const found = reader.commandWords(rest), first = found[0] || "";
     if (ps && first.indexOf(OPQ) !== -1) { out.add(UNJ + "the noun of a zensu call is built at run time"); continue; }
@@ -303,8 +310,6 @@ while IFS="$(printf '\t')" read -r noun verb third; do
   zensu_is_read_tool "$TOOL" && continue              # read → allow
   zensu_is_mutation_tool "$TOOL" || continue          # not a known mutation → allow (safety)
   if [ "$IS_SUBAGENT" != true ]; then
-    # Capture only reports an agreed goal/version. It also works in direct mode;
-    # the backend requires personal OAuth and exposes no acceptance operation.
     zensu_tool_in_list "$TOOL" "$ZENSU_AI_WORK_CAPTURE_TOOL_NAMES" && continue
     work_order_session_owns "$TOOL" && continue
     if ! zensu_is_human_decision_tool "$TOOL" && ! zensu_is_work_order_tool "$TOOL"; then
@@ -367,12 +372,14 @@ elif [ -n "$UNJUDGED" ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
 elif [ -n "$UNJUDGED" ]; then
   REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Run the zensu call through the Bash tool, or as a plain PowerShell command with a literal noun and verb (zensu <noun> <verb> ...) that no other command starts and no text built at run time names. Reads and --help pass; a mutation still needs the matching skill — ${ALL_ROUTES}."
+elif [ "$IS_SUBAGENT" = true ] && zensu_tool_in_list "$DENY_TOOL" "$ZENSU_AI_WORK_CAPTURE_TOOL_NAMES"; then
+  REASON="Zensu AI-work capture command (maps to '${DENY_TOOL}') was blocked. Capture commands are reserved for the interactive main thread, which runs them directly, without a skill window. Do not retry this command, with or without a prefix. Report the operation you need to the main thread."
 elif [ "$IS_SUBAGENT" = true ]; then
-  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. Zensu CLI mutations are reserved for the interactive main thread: a subagent never borrows the main thread's skill window, and the per-command gate escape is a deliberate one-off for the main thread, never a route for a subagent. Do not retry this command, with or without a prefix. Report the operation you need to the main thread, which runs it through the matching skill — ${ROUTE_TEXT}."
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. Zensu CLI mutations are reserved for the interactive main thread: a subagent never borrows the main thread's skill window. Do not retry this command, with or without a prefix. Report the operation you need to the main thread, which runs it through the matching skill — ${ROUTE_TEXT}."
 elif [ "$TOOL_NAME" = PowerShell ]; then
-  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — ${ROUTE_TEXT} — in the interactive main thread. A PowerShell command has no inline gate escape. --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL in the session environment."
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — ${ROUTE_TEXT} — in the interactive main thread. --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL in the session environment."
 else
-  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — ${ROUTE_TEXT} — in the interactive main thread. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline). --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL, as an inline prefix of the call or in the session environment."
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — ${ROUTE_TEXT} — in the interactive main thread. --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL, as an inline prefix of the call or in the session environment."
 fi
 
 if zensu_is_human_decision_tool "$DENY_TOOL"; then

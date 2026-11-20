@@ -391,6 +391,14 @@ markers_rc=$?
 eq "GL56 --review-markers lists exactly one marker, the first part of the reconciled review" \
   "$markers_rc $(printf '%s\n' "$markers" | grep -c 'zensu-review:v1:')" "0 1"
 has "GL57 the marker names the reviewed head and the part count" "$markers" ":$HEAD_SHA:3:part=1/3 -->"
+pr_diff="$(vcs --pr-diff --provider gitlab --repo-id "$RID" "$IID" 2>"$WORK/diff.err")"
+pr_diff_rc=$?
+eq "GL58 --pr-diff rebuilds the merge request diff with one header per changed file" \
+  "$pr_diff_rc $(printf '%s\n' "$pr_diff" | grep -c '^diff --git ')" "0 3" "$WORK/diff.err"
+eq "GL59 the rebuilt diff carries the added, the removed and the renamed file's lines" \
+  "$(printf '%s\n' "$pr_diff" | grep -cxE 'diff --git a/src/old\.js b/src/new\.js|\+added10|-removed5|-two|\+TWO')" "5"
+eq "GL59b the renamed file carries its rename lines" \
+  "$(printf '%s\n' "$pr_diff" | grep -cxE 'rename from src/old\.js|rename to src/new\.js')" "2"
 
 threads_commit="$(api POST "projects/$PROJECT_ID/repository/commits" "$(cat "$WORK/threads.json")" 2>&1)" \
   || abort "GL60 --open-pr opens the merge request and prints its URL" "$threads_commit"
@@ -457,5 +465,13 @@ eq "GL71 the approval leaves a system note without a resolution state" \
   "$(discussions2 | json 'd.some((x) => x.notes.some((n) => n.system && typeof n.resolved !== "boolean"))')" "true"
 eq "GL72 --fetch-threads still lists the unresolved threads after the approval" \
   "$(fetch_threads "$IID2" "$THREAD_LINES")" ":null src/b.js:2"
+
+printf 'Edited by the live check.\n\n- keeps `code`, $HOME and a "quote" literal\n' > "$WORK/mr2-edit.md"
+edited="$(vcs --edit-pr-body --provider gitlab --repo-id "$RID" --body-file "$WORK/mr2-edit.md" "$IID2" 2>"$WORK/edit.err")"
+edit_rc=$?
+eq "GL73 --edit-pr-body updates the merge request and prints its URL" \
+  "$edit_rc $edited" "0 $URL/root/$NAME/-/merge_requests/$IID2" "$WORK/edit.err"
+eq "GL74 GitLab stores the edited description verbatim" \
+  "$(api GET "projects/$PROJECT_ID/merge_requests/$IID2" | json 'd.description')" "$(cat "$WORK/mr2-edit.md")"
 
 finish

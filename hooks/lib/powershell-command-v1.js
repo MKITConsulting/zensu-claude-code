@@ -1371,6 +1371,12 @@ function isCommandOption(option) {
   return option === 'cwa' || 'command'.startsWith(option) || 'commandwithargs'.startsWith(option);
 }
 
+function isTerminalOption(option, host) {
+  const bare = option.replace(/^-/, '');
+  if (!bare) return false;
+  return bare === '?' || 'help'.startsWith(bare) || (host === 'pwsh' && 'version'.startsWith(bare));
+}
+
 function takesPowerShellValue(option) {
   return POWERSHELL_VALUE_OPTIONS.some(([full, shortest]) => option.length >= shortest.length && full.startsWith(option));
 }
@@ -1396,6 +1402,7 @@ function powershellCode(values, host) {
       continue;
     }
     if (option.includes(OPAQUE_ARGUMENT)) return { ...result, dynamicOption: true };
+    if (candidates.length === 0 && isTerminalOption(option, host)) return result;
     const attached = attachedValue(value);
     if (isCommandOption(option)) {
       candidates.push([attached, ...values.slice(index + 1)].filter((part) => part !== null).join(' ') || '-');
