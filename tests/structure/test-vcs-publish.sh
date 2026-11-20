@@ -197,6 +197,10 @@ hs_reached() {
   if [ "$HS_RC" -eq 0 ] && [ "$HS_OUT" = "$want" ] && [ "$count" = "$calls" ] && [ "$stray" = 0 ]; then check "$label" PASS
   else check "$label (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS' err='$HS_ERR')" FAIL; fi
 }
+hs_tokens() {
+  if [ "$HS_RC" -eq 0 ] && gh_host_fake_env_all "$HS_ENV" ghe.example.com; then check "$1" PASS
+  else check "$1 (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL; fi
+}
 HS_SCOUT='{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","base":"main","head":"feat","author":"alice","labels":["bug"]}'
 hs_run bash "$LIB" --scout-pr --provider github
 hs_reached "HS1 --scout-pr of the current branch reaches the remote's github.com while GH_HOST names another host" "$HS_SCOUT" github.com
@@ -210,24 +214,21 @@ hs_run ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git FAKE_GH_PR_HOST=ghe.
   bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
 hs_reached "HS5 --post-review posts to the GitHub Enterprise host of an SSH remote while GH_HOST names another host" "https://github.test/acme/widget/pull/42#pullrequestreview-1" ghe.example.com
 HS_GHE=(ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com)
-hs_run "${HS_GHE[@]}" bash "$LIB" --scout-pr --provider github
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --scout-pr --provider github
 hs_reached "HS6 --scout-pr of the current branch reaches the GitHub Enterprise host of the remote" "$HS_SCOUT" ghe.example.com
-hs_run "${HS_GHE[@]}" bash "$LIB" --scout-pr --provider github 42
+hs_tokens "HS6b --scout-pr of the current branch sends no environment token to a host accepted for its stored gh login"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --scout-pr --provider github 42
 hs_reached "HS7 --scout-pr by number reaches the GitHub Enterprise host of the remote" "$HS_SCOUT" ghe.example.com
-hs_run "${HS_GHE[@]}" bash "$LIB" --diff-refs --provider github 42
+hs_tokens "HS7b --scout-pr by number sends no environment token to that host"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --diff-refs --provider github 42
 hs_reached "HS8 --diff-refs reaches the GitHub Enterprise host of the remote" '{"base_sha":"","start_sha":"","head_sha":"abcdef0"}' ghe.example.com
-hs_run "${HS_GHE[@]}" GH_TOKEN=t1 GITHUB_TOKEN=t2 GH_ENTERPRISE_TOKEN=t3 GITHUB_ENTERPRISE_TOKEN=t4 \
-  bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
-if [ "$HS_RC" -eq 0 ] && [ "$HS_ENV" = ghe.example.com ]; then
-  check "HS9 --post-review to a host accepted for its stored login posts without the environment tokens" PASS
-else
-  check "HS9 --post-review to a host accepted for its stored login posts without the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
-fi
+hs_tokens "HS8b --diff-refs sends no environment token to that host"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
+hs_tokens "HS9 --post-review to a host accepted for its stored login posts without the environment tokens"
 CPAY="$WORK/hostpin/comment.json"
 printf '%s' '{"path":"src/a.js","line":10,"side":"RIGHT","body":"fix `this` for $HOME","commit_id":"abc123"}' > "$CPAY"
 HS_COMMENT_URL='https://github.test/acme/widget/pull/42#discussion_r901'
 HS_REVIEW='{"id":"7","state":"COMMENTED","author":"zensu-bot","submittedAt":"2026-11-19T10:00:00Z","url":"https://github.test/acme/widget/pull/42#pullrequestreview-7","comments":3}'
-HS_TOKENS=(GH_TOKEN=t1 GITHUB_TOKEN=t2 GH_ENTERPRISE_TOKEN=t3 GITHUB_ENTERPRISE_TOKEN=t4)
 hs_run FAKE_GH_COMMENT_LOG="$WORK/hostpin/sent.json" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
 hs_reached "HS10 --post-comment posts to github.com while GH_HOST names another host and prints the comment URL" "$HS_COMMENT_URL" github.com
 if cmp -s "$CPAY" "$WORK/hostpin/sent.json"; then
@@ -244,21 +245,17 @@ hs_run bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
 hs_reached "HS12 --fetch-review reads the review and every page of its comments from github.com while GH_HOST names another host" "$HS_REVIEW" github.com 2
 hs_run "${HS_GHE[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
 hs_reached "HS13 --fetch-review reads both from the GitHub Enterprise host of the remote" "$HS_REVIEW" ghe.example.com 2
-hs_run "${HS_GHE[@]}" "${HS_TOKENS[@]}" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
-if [ "$HS_RC" -eq 0 ] && [ "$HS_ENV" = ghe.example.com ]; then
-  check "HS14 --post-comment to a host accepted for its stored login posts without the environment tokens" PASS
-else
-  check "HS14 --post-comment to a host accepted for its stored login posts without the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
-fi
-hs_run "${HS_GHE[@]}" "${HS_TOKENS[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
-if [ "$HS_RC" -eq 0 ] && [ "$HS_ENV" = "$(printf 'ghe.example.com\nghe.example.com')" ]; then
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_tokens "HS14 --post-comment to a host accepted for its stored login posts without the environment tokens"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+if [ "$HS_RC" -eq 0 ] && gh_host_fake_env_all "$HS_ENV" ghe.example.com && [ "$(printf '%s\n' "$HS_ENV" | grep -c .)" = 2 ]; then
   check "HS14b both --fetch-review reads to that host run without the environment tokens" PASS
 else
   check "HS14b both --fetch-review reads to that host run without the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
 fi
-hs_run "${HS_TOKENS[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+hs_run "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
 HS_KEPT='github.com GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN'
-if [ "$HS_RC" -eq 0 ] && [ "$HS_ENV" = "$(printf '%s\n%s' "$HS_KEPT" "$HS_KEPT")" ]; then
+if [ "$HS_RC" -eq 0 ] && gh_host_fake_env_all "$HS_ENV" "$HS_KEPT" && [ "$(printf '%s\n' "$HS_ENV" | grep -c .)" = 2 ]; then
   check "HS14c --fetch-review reads to github.com keep the environment tokens" PASS
 else
   check "HS14c --fetch-review reads to github.com keep the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL

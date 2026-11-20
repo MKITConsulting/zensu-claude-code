@@ -91,6 +91,10 @@ cliState=ready|unauthed|missing   # distinguishes "CLI absent" from "present-but
    - `github.com` → github/cloud (also `www.github.com`, and `ssh.github.com` over SSH)
    - `gitlab.com` → gitlab/cloud (also `www.gitlab.com`, and `altssh.gitlab.com` over SSH)
    - unknown host → **API probe** (step 3)
+   - no host: a local path, a `file://` URL or a Windows drive-letter path (`C:\…`, `C:/…`)
+     → `provider=unknown` with an empty `apiBase` and `repo`, whatever the repo markers say
+     (`D18b`, `D18c` in `test-vcs-detect.sh`); `repoIdentity` in `hooks/lib/ci-contract-v1.js`
+     reads such a remote the same way, as no usable git remote
 3. **API probe** (self-hosted disambiguation) — an HTTP liveness check
    (`curl -sS -o /dev/null -w '%{http_code}' --max-time 5`) treating **200/401/403**
    as "endpoint present":
@@ -195,12 +199,32 @@ repository (`HEAD`, `objects` and `refs`), counts a set `GIT_DIR` as inside, and
 one is resolved through symlinks, a later one is compared as written, and a relative one is
 ignored. A work tree whose remotes git cannot read, such as one with a malformed configuration
 or one `safe.directory` refuses, is therefore refused instead of pinned to github.com, and so is
-a working directory whose physical path cannot be read. A remote URL that yields
-no host, such as a local path, is refused. One helper, `_zensu_vcs_pinned_host <url> <host>`,
-takes a remote's URL to the host it pins, for the verbs, the comparison above and `--detect`
-alike. An SSH remote (scp-like, `ssh://`, `git+ssh://`, `ssh+git://`, or a URL whose part
-before `://` is no valid scheme, which git reads as scp-like) is translated through
-`ssh -G -- <alias>` and its `hostname` line, and
+a working directory whose physical path cannot be read. That refusal carries the first line of
+git's own diagnostic, read under `LC_ALL=C` so it is never translated and clamped like a failed
+call's output, so its causes stay apart. It names the remedies: repair the git configuration, or
+set `ZENSU_VCS_REMOTE` for a verb given `--repo-id`, because a verb without one runs gh in the
+work tree, where gh reads the same remotes. It names
+`git config --global --add safe.directory <path>` only as a decision for the user, not for an
+agent, because that command changes the global git configuration and widens which repositories
+git trusts. Without git installed, the refusal names installing git instead. A remote that
+`git remote` lists but `git remote get-url` refuses, such as one that only the global git
+configuration names (git answers `get-url` only for a remote of the repository's own
+configuration, even when the global one gives it a URL), takes no part in the agreement of the
+remotes. A remote URL that yields no host
+is refused as naming no GitHub host before ssh or gh runs, whatever login gh holds, and the
+fallback over every remote leaves it out: a local path, a `file://` URL in any letter case, with
+or without a host part, and a Windows drive-letter path (a letter in either case, a colon, then a
+slash or a backslash). A one-letter SSH alias before a
+relative path (`g:owner/repo`) stays an SSH remote; before an absolute path (`g:/srv/repo`) it
+reads as a drive-letter path and is refused. That refusal names the ways past it: set
+`ZENSU_VCS_REMOTE` to the URL of the GitHub remote for a verb given `--repo-id`, make the
+current branch track a remote on the GitHub host with
+`git branch --set-upstream-to <remote>/<branch>`, or spell a one-letter SSH alias as
+`ssh://<alias>/<path>`. One helper, `_zensu_vcs_pinned_host <url> <host>`, takes a remote's URL
+to the host it pins, for the verbs, the comparison above and `--detect` alike. An SSH remote
+(scp-like, `ssh://`, `git+ssh://`, `ssh+git://`, or a URL whose part before `://` is no valid
+scheme, which git reads as scp-like) is translated through `ssh -G -- <alias>` and its
+`hostname` line, and
 `ssh.github.com` reads as github.com; the host is lowercased and a leading `www.` is dropped.
 Measured with gh 2.101.0, that is how gh itself reads the host of a remote. An SSH remote of
 `altssh.gitlab.com`, GitLab's host for SSH over port 443, reads as gitlab.com in the same step,
@@ -246,13 +270,27 @@ keeps its `gh auth status` readiness check.
 
 - Tests: `HD1`-`HD49` in `test-vcs-detect.sh` drive the derivation with a fake ssh, a fake gh
   and git fixtures for a local upstream, a tracked remote and an `origin` beside a remote on
-  another host, remotes on different hosts, a sole remote not named `origin`, remotes on one
+  another host, remotes on different hosts, a sole remote not named `origin` (on a GitHub
+  Enterprise host in `HD32`, on github.com in `HD32b`), remotes on one
   host, an unreadable configuration, bare repositories, directories reached through a symlink,
   ceilings (plain, spelled through a symlink, after an empty entry, relative), a work tree
-  without a remote, and an SSH alias, a `www.` and an `ssh.github.com` spelling, a local path and
-  a refused alias beside another remote; `HD50`-`HD66b` drive `--detect` with the same fake ssh,
-  a sentinel curl and the probe off or stubbed, for those spellings, `--provider github`, the
-  fallback to remotes that agree, name different hosts or name different repositories, remotes
+  without a remote, and an SSH alias, a `www.` and an `ssh.github.com` spelling, a local path, a
+  `file://` URL, a drive-letter path and a refused alias beside another remote (`HD47b` and
+  `HD47c` for the `file://` URL and the drive-letter path); `HD29c`-`HD29f` refuse `file://`
+  URLs and drive-letter paths while gh holds a
+  login for the name the URL parse once produced, `HD29h` and `HD29i` do so for a capitalized
+  scheme and a lowercase drive letter, `HD29g` keeps a one-letter alias before a relative path an
+  SSH remote, and `HD29j` requires the ways past the no-host refusal; `HD33b` and `HD33c` give a
+  remote that only the global git configuration names no part in the agreement; `HD34c` requires
+  the remedies of the unreadable-remotes refusal and leaves the `safe.directory` exception to the
+  user, and `HD34d` its untranslated git diagnostic, through a git shim that marks every call made
+  outside the C locale (`HD34i` shows the shim marks such a call); `HD34g` shows that git refuses a work tree it treats as owned by another
+  account with a diagnostic of more than one line that ends in the exception command, and `HD34h`
+  requires the refusal to carry only the first line, never that command; `HD34e` and `HD34f`
+  require the missing-git refusal, which names no git configuration remedy; `HD50`-`HD66b` drive
+  `--detect` with the same fake ssh, a sentinel curl and the probe off or stubbed, for those
+  spellings, `--provider github`, the fallback to remotes that agree, name different hosts or
+  name different repositories, a `file://` remote beside another remote (`HD56b`), remotes
   of one repository spelled with other letter case, a leading or trailing slash or `.git`, a
   spelled host equal to the pinned one, which is probed once, and an uppercase `www.` spelling,
   which is probed lowercased and without it, a gitlab.com SSH remote
@@ -266,10 +304,12 @@ keeps its `gh auth status` readiness check.
   in `test-vcs-publish.sh` and `HR1`-`HR5` in `test-vcs-review-marker-reconcile.sh` run every
   GitHub verb under
   `GH_HOST=example.invalid`, against a github.com remote, a GitHub Enterprise remote gh is
-  logged in to and one it is not. `HP17`, `HP17b`, `HP26`-`HP26d`, `HS9`, `HS14`, `HS14b` and
-  `HR5` set all four token variables and require that no call to a host accepted for its stored
-  login alone carries one; `HP18`, `HP19`, `HP26e` and `HS14c` require that github.com and the
-  `GH_HOST` host keep them; `HP20`, `HP20b`, `HP27` and `HP27b` set `GH_REPO=other.example/acme/x`.
+  logged in to and one it is not. The GitHub Enterprise run of every GitHub verb sets all four
+  token variables and requires that no call to a host accepted for its stored login alone
+  carries one (`HP8b`, `HP12b`-`HP16b`, `HP17`, `HP17b`, `HP26`-`HP26d`, `HS6b`-`HS8b`, `HS9`,
+  `HS14`, `HS14b`, `HR4b` and `HR5`); `HP18`, `HP19`, `HP26e` and `HS14c` require that
+  github.com and the `GH_HOST` host keep them; `HP20`, `HP20b`, `HP27` and `HP27b` set
+  `GH_REPO=other.example/acme/x`.
   `HP21`-`HP30c` drive `--pr-diff` and `--edit-pr-body`: `HP28` requires the diff byte for byte,
   `HP29` that a failed read prints no partial diff, and `HP30`-`HP30c` that the body file reaches
   gh and that an empty or missing one is refused before any gh call, and `EB1` that the refusal
@@ -319,14 +359,14 @@ keeps its `gh auth status` readiness check.
   answers `gh config get user -h` from `FAKE_GH_LOGINS` (exit 0 with an empty answer for a host
   in `FAKE_GH_EMPTY_LOGINS`), appends the host and the names of the non-empty token variables
   of each call to `FAKE_GH_ENV_LOG`, and refuses any host other than `FAKE_GH_PR_HOST`
-  (github.com by default) with `error connecting to <host>`. The dry argv checks name the pin
-  as well.
+  (github.com by default) with `error connecting to <host>`. The same file holds the four token
+  assignments every token run sets (`GH_HOST_FAKE_TOKENS`) and the check each token test applies
+  to that log (`gh_host_fake_env_all`: at least one line, and every line exactly the expected
+  host and token names). The dry argv checks name the pin as well.
 - Known gaps: in its two exceptions `--detect` and the GitHub verbs still name different hosts:
   a host the pin refuses classifies while the verbs refuse it, and a spelled host whose probe
   answers where the translation's did not is the host `apiBase` names while the verbs pin the
-  translation. A `file://` URL and a Windows drive-letter path parse with a host (`file`, the
-  drive letter), so the fallback compares them instead of leaving them out. The
-  walk does not stop at a file system boundary, where git stops unless
+  translation. The walk does not stop at a file system boundary, where git stops unless
   `GIT_DISCOVERY_ACROSS_FILESYSTEM` is set, so a directory on another file system below a work
   tree, where git finds no repository, reads as inside one, and the verb refuses. `SK1` is a
   text scan of five skills: it does not see a call spelled another way, such as through a

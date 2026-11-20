@@ -141,6 +141,7 @@ function remoteUrl(projectRoot, env, limits = LIMITS) {
 
 function repoIdentity(url) {
   const trimmed = String(url || '').trim().replace(/\.git$/, '');
+  if (/^file:\/\//i.test(trimmed) || /^[A-Za-z]:[\\/]/.test(trimmed)) return { provider: 'unknown', host: null, repo: null };
   let host = '';
   let repoPath = '';
   let match = trimmed.match(/^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^@/]*@)?([^/:@]+)(?::[0-9]+)?\/(.*)$/);
