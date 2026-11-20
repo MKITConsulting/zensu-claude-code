@@ -5,7 +5,8 @@ set -u
 # Pins: the skill exists with its SKILL.md, follows the namespaced title-line +
 # frontmatter convention, is workflow-wrapped (the write-gate marker) and declares
 # exactly the doc mutations it runs, carries the docs_complete contract (the three
-# hard rules), the feature_scope -> doc_type mapping, the read-source-first
+# hard rules), the feature_scope -> doc_type derivation through the shared
+# guide's table, the read-source-first
 # code-grounding discipline (references the shared guide + the forbidden metadata
 # dump), the batch read-only Explore fan-out, docs_complete verification, no silent
 # truncation, is English-only, uses the namespaced command form, leaks no
@@ -66,12 +67,21 @@ pin "D5a contract: fresh (require_fresh / is_outdated)" "$SKILL_MD" "is_outdated
 pin "D5b contract: not over-shared (shared_doc_max / <= 3 features)" "$SKILL_MD" "shared_doc_max"
 pin "D5c contract: one doc PER feature" "$SKILL_MD" "one doc PER feature"
 
-# D6 — feature_scope -> doc_type mapping (all four scopes + the tutorial rule).
+# D6 — feature_scope -> doc_type: the skill derives the type from the scope through
+# the shared guide's table, the one copy /zensu:implement Step 6 reads too; the
+# guide's rows and the no-copy rule are pinned by test-doc-generation-guidance.sh.
+NORM_SKILL="$(tr -s '[:space:]' ' ' < "$SKILL_MD")"
+npin() {
+  if printf '%s' "$NORM_SKILL" | grep -qF -- "$2"; then check "$1" PASS; else check "$1" FAIL; fi
+}
 pin "D6a maps feature_scope" "$SKILL_MD" "feature_scope"
-pin "D6b default -> user_facing" "$SKILL_MD" "user_facing"
-pin "D6c api -> api_reference row" "$SKILL_MD" '`api` | `api_reference`'
-pin "D6d internal_only -> adr row" "$SKILL_MD" '`internal_only` | `adr`'
-pin "D6e public_facing tutorial rule keys on estimated_effort" "$SKILL_MD" "estimated_effort"
+pin "D6b the public_facing tutorial rule keys on estimated_effort" "$SKILL_MD" "estimated_effort"
+npin "D6c reads the guide's required doc types table at the plugin-absolute path before naming a type" \
+  'Read the table under "Required doc types (the release gate)" in `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md` before you name a target type'
+npin "D6d names the guide's table as the one copy implement Step 6 reads too" \
+  'That table is the one copy of the rule, and `/zensu:implement` Step 6 reads it too.'
+npin "D6e Phase 2 derives the type from the guide's table" \
+  "Derive the required \`doc_type\`(s) from the guide's table (Doc type by feature scope above)."
 
 # D7 — the CLI mechanics: gen-context (context map) + link docs (publish + recompute).
 pin "D7a reads the gen-context map" "$SKILL_MD" "zensu doc gen-context"
