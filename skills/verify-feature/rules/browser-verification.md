@@ -222,6 +222,23 @@ Maintain the report table while driving. For each row, capture:
 - relevant console/network signals;
 - exact reproduction for a failure.
 
+**Report captures.** Each capture enters the evidence report through `rules/report.md`
+section 2, right after you inspected it:
+
+- Right after every `open` without `--device` or `--mobile`, run
+  `playwright-cli -s=<session> resize 1440 900`, so every screenshot is 1440 by 900 at scale 1.
+- Take viewport screenshots in the default PNG type, and add `--full-page` only when a criterion
+  needs the whole page. The command prints a link relative to the working directory that names a
+  file in the run directory's `browser/` folder; add it by its absolute path:
+  `--report-add --report <id> --kind image --file "<run dir>/browser/<file>" --viewport 1440x900@1`.
+  A screenshot taken after a `resize` to another size names that size instead.
+- A request or a console item enters only for an unauthenticated target, under the same rule that
+  admits `console` and `requests`: `--report-add --report <id> --kind request --method <METHOD> --path '<path>' --status <code>`
+  for every request the row asserts, and
+  `--report-add --report <id> --kind signal --source console --class '<class>'` with the sanitized
+  message on stdin.
+- The semantic snapshot is read, not added: write its fact into the row's `observed:` line.
+
 Run `playwright-cli -s=<session> close` even after a failed assertion or cancelled login. The
 parent skill owns the remaining process, container, and temp-dir cleanup.
 

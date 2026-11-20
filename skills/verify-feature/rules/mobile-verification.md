@@ -118,6 +118,7 @@ is PARTIAL and names the missing tool.
 
 ### Evidence
 
+- **Capture folder**: create it once before the first screenshot, `mkdir -p "$RUN_DIR/shots"`.
 - **Screenshot**: `xcrun simctl io <UDID> screenshot "$RUN_DIR/shots/<row>-<step>.png"`, or the
   host tool's screenshot. Open each image with the Read tool and describe what it shows.
 - **Accessibility hierarchy** from Maestro or the accessibility CLI. Without one, the state plane
@@ -170,6 +171,7 @@ under the SDK root); otherwise every Android row is PARTIAL and names the missin
 - **Driving the UI**: Maestro with the run's device selected, else
   `adb -s <serial> shell input tap <x> <y>`, `input text` and `input keyevent`, with coordinates
   read from the hierarchy.
+- **Capture folder.** Create it once before the first screenshot, `mkdir -p "$RUN_DIR/shots"`.
 - **Evidence.** Hierarchy: `adb -s <serial> shell uiautomator dump /sdcard/window.xml`, then
   `adb -s <serial> pull` it into `$RUN_DIR`. Screenshot:
   `adb -s <serial> exec-out screencap -p > "$RUN_DIR/shots/<row>-<step>.png"`. Log: `logcat -d`

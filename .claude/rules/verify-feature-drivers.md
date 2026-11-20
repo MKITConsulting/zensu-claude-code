@@ -35,8 +35,9 @@ sits on the shrink-only allowlist of `tests/structure/test-skill-text-budget.sh`
 (`.claude/rules/skill-text-budget.md`). `SKILL.md` keeps only what must run before any rule file
 is read or on every run: the `--driver` row, the in-memory remote refusal of step 0, step 6,
 the matrix's `Driver` column, the Phase 4 teardown and the verdict rules. Everything a
-non-`browser` row does in each phase is in section 8. Two browser blocks moved out for the same
-budget, both free of `${CLAUDE_PLUGIN_ROOT}` and of line pins: attach mode to `rules/attach.md`
+non-`browser` row does in each phase is in section 8. The Phase 5 report format moved out for the
+same budget, to `rules/report.md` section 5 beside the evidence report verbs (`P11c`). Two browser
+blocks moved out for the same budget, both free of `${CLAUDE_PLUGIN_ROOT}` and of line pins: attach mode to `rules/attach.md`
 (`P10m`), and the consent details to `rules/browser-verification.md` section 1, which a
 consent-mode run reads before its first browser call (`P10n`). `SKILL.md` keeps the consent
 sentences `P4z` pins and the rule that the consent memory is never written.
@@ -143,6 +144,10 @@ with `cp -Rc` into the run directory and passes `-clonedSourcePackagesDirPath` w
   `${NAME:?}` spelling in the `rules/setup.md` examples ↔ the "Run-owned devices under autopilot"
   paragraph of `skills/autopilot/rules/drivers.md`, the only place where `/zensu:autopilot`
   assigns them.
+- The report captures of `rules/drivers.md` §8 and `rules/browser-verification.md` §5 ↔ the
+  capture commands of the mobile, desktop and CLI rule files, which `P11f` holds equal ↔
+  `rules/report.md` sections 2 to 4 ↔ `VERB_ARGUMENTS` of `hooks/lib/evidence-report-v1.js` and
+  the report arm's flag list in `zensu-log.sh`, which `P11b` holds every call against.
 - The driver-fence bullet of `rules/drivers.md` §3 and the last paragraph of
   `rules/browser-verification.md` §1 ↔ the cause list that `rules/acceptance-consent.md` owns
   and the other sites that spell it (`.claude/rules/acceptance-verification-gate.md` names them

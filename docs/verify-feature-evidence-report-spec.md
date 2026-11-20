@@ -1,7 +1,9 @@
 # Verify-Feature Evidence Report — Specification
 
-Status: draft, 2026-11-07. Build step 1 of §9 is implemented: the core module, its `zensu-log.sh`
-verbs and the conformance corpus; nothing else described here is. The spec plans four parts that
+Status: draft, 2026-11-07. Build steps 1 and 2 of §9 are implemented: the core module, its
+`zensu-log.sh` verbs and the conformance corpus, and the wiring that has `/zensu:verify-feature`
+write a report on every run (`skills/verify-feature/rules/report.md`); nothing else described here
+is. The spec plans four parts that
 ship from different repositories: the plugin (this repository), its ports to other hosts, the
 `zensu` CLI, and the Zensu service with its web viewer. For the CLI and the service it fixes
 behavior and contract only; this repository is public, so it names no internal module of either.
@@ -265,7 +267,7 @@ Field rules:
   32 characters, such as `claude-code`, `codex`, `kiro`, `antigravity` or `copilot`. It is not an
   enum, so a new host needs no new schema version.
 - `run.chain` is `null` outside chain mode, `run.recipe` without a recipe. `run.authenticated`
-  turns `true` once any row used a manual login.
+  turns `true` once any row ran signed in, through a recipe login or a visible manual login.
 - `target.repository` comes from the origin remote with userinfo stripped, `null` without one.
   `target.origin` is set in remote mode only and holds scheme, host and port.
 - `target.tree` is the tree measured at render and `target.begin_tree` the one measured at
@@ -926,3 +928,14 @@ Of 2026-11-07, the basis of decision 5:
   the other reports inside the tier's time. At the end of the first year on a 12-month tier that
   is 0.10 GB at the measured rate and 0.53 GB at an assumed 21 uploads a month, one per working
   day.
+
+Of 2026-11-20, the basis of the browser capture rules of build step 2, measured with playwright-cli
+0.1.24, headless, on a plain session outside the consent gate, against a loopback server and with
+the run config the run-config helper writes:
+
+- A fresh browser starts with a 1280 by 720 viewport, and `resize 1440 900` sets it to 1440 by
+  900 (`page.setViewportSize`).
+- After that `resize`, `screenshot --hires`, which asks for the device scale, still wrote a 1440
+  by 900 PNG, so the device scale factor is 1; `--full-page` wrote 1440 by 2514 for the probe page.
+- The link the command prints is relative to the working directory and names a file in the run
+  directory's `browser/` folder, so the skill adds it by its absolute path.
