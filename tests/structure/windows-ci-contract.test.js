@@ -392,7 +392,7 @@ test('pull-request deterministic suite remains complete and Ubuntu-only', () => 
   assert.equal(/--shard=\d+\/\d+/.test(runner.run), false);
 });
 
-test('one stable blocking check validates exact same-run shard evidence', () => {
+test('one stable blocking check validates the newest same-run report of every shard', () => {
   const job = workflow.jobs?.['windows-shard-summary'];
   assert.ok(job);
   assert.equal(job.name, 'Deterministic suite (windows-latest)');
@@ -407,11 +407,8 @@ test('one stable blocking check validates exact same-run shard evidence', () => 
   assert.ok(downloads.every(
     (step) => step.uses === 'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093',
   ));
-  assert.equal(
-    downloads[0].with.pattern,
-    'windows-profile-*-${{ github.sha }}-${{ github.run_attempt }}',
-  );
-  assert.equal(downloads[0].with['merge-multiple'], true);
+  assert.equal(downloads[0].with.pattern, 'windows-profile-*-${{ github.sha }}-*');
+  assert.equal(downloads[0].with['merge-multiple'], false);
   const summarize = job.steps.find((step) => step.name === 'Validate blocking shard evidence');
   assert.match(summarize.run, /summarize-windows-observation\.js summarize-shards/);
   assert.match(summarize.run, /test "\$ZENSU_SHARD_JOB_RESULT" = success/);

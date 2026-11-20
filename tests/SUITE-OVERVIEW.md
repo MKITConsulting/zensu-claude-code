@@ -524,7 +524,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/verify-navigation-floor-v1.test.js` | 22 | – | `test-verify-consent.sh` | The navigation floor the consent gate and the run-config helper share: local hosts, address classes and URL refusals. |
 | `structure/verify-run-resources.test.js` | 18 | win32 15 | `test-verify-feature-skill.sh` | The verify-feature run-resource helper: owned names, the run ledger, simulator and emulator teardown, and supervised process groups. |
 | `structure/windows-ci-contract.test.js` | 12 | – | `test-windows-ci-contract.sh` (metadata, all) | Windows CI manifest invariants: the shards, their deadlines, the command catalog and the workflow job. |
-| `structure/windows-observation.test.js` | 11 | – | `test-windows-ci-contract.sh` (metadata, all) | The Windows observation summarizer. |
+| `structure/windows-observation.test.js` | 12 | – | `test-windows-ci-contract.sh` (metadata, all) | The Windows observation summarizer, including the shard summary that judges every profile by its newest run attempt. |
 | `structure/windows-profile-contract.test.js` | 4 | – | `test-windows-ci-contract.sh` (metadata, all) | The Windows profile contract. |
 | `structure/windows-safety-shard.test.js` | 5 | – | `test-windows-ci-contract.sh` (metadata, all) | Windows Safety shard partitioning, with no suite duplicated or lost. |
 | `structure/work-order-v1.test.js` | 107 | win32 not run | `test-work-order-runtime.sh` | The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading, its redirections removed as the shell removes them after the released reading allowed a command, the command substitutions of an unquoted heredoc body, its refusal when that reader cannot load and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan. |
@@ -622,11 +622,14 @@ per-profile deadlines; a supervisor alive until the whole process tree is dead;
 disposable home/temp tree; strict env allowlist (no credentials, auth homes,
 interpreter preloads, or live/API modes).
 
-The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 9
-reports and validates SHA / run-attempt consistency, the exact ordered suite inventory,
-and a complete execution-contract digest binding manifest + catalog + runner +
-supervisor + Job-Object helper + summarizer + workflow config + every referenced suite
-file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profiles.
+The aggregate check `Deterministic suite (windows-latest)` downloads the reports of every
+run attempt, judges each of those 9 profiles by its newest report, and validates SHA / run
+consistency, that each report carries its artifact's attempt and none is later than the
+check's own, the exact ordered suite inventory, and a complete execution-contract digest
+binding manifest + catalog + runner + supervisor + Job-Object helper + summarizer +
+workflow config + every referenced suite file. Fails closed on missing, failed, timed-out,
+or incompletely-cleaned profiles. A re-run of only the failed jobs can turn it green; the
+shard job's `success` result keeps an older report from standing in for a newer failed run.
 
 ## 8. CI wiring
 
