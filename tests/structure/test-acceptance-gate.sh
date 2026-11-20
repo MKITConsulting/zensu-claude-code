@@ -2453,6 +2453,56 @@ else
   check "V16 the run bind, the run-facts mode and the state machine's sha check bound a pull-request head alike" FAIL
 fi
 
+VF="$WORK/val-facts"
+if val_setup "val-facts" "$VF" val_run_facts false; then
+  VF_FILE="$VAL_RUN_FILE"
+  FACTS_UNREADABLE="$WORK/run-facts-unreadable.js"
+  cat > "$FACTS_UNREADABLE" <<'JS'
+if (process.env.ZENSU_AVR_MODE === 'run-facts') {
+  const fs = require('fs');
+  const read = fs.readFileSync;
+  fs.readFileSync = function (file, ...rest) {
+    if (file !== 0) return read.call(fs, file, ...rest);
+    read.call(fs, file, ...rest);
+    return '{"runId":';
+  };
+}
+JS
+  FACTS_FAULT="$WORK/run-facts-fault.js"
+  cat > "$FACTS_FAULT" <<'JS'
+if (process.env.ZENSU_AVR_MODE === 'run-facts') {
+  process.stdout.write = () => {
+    throw new Error('the run facts could not be written');
+  };
+}
+JS
+  VF_BEFORE="$(file_sha "$VF_FILE")"
+  NODE_OPTIONS="--require=$FACTS_UNREADABLE" bash "$LOG" --acceptance-status --run val_run_facts >"$WORK/vsout" 2>"$WORK/vserr"; RC_UNREADABLE=$?
+  UNREADABLE_OUT="$(cat "$WORK/vsout")"
+  UNREADABLE_ERR="$(cat "$WORK/vserr")"
+  NODE_OPTIONS="--require=$FACTS_FAULT" bash "$LOG" --acceptance-status --run val_run_facts >"$WORK/vsout" 2>"$WORK/vserr"; RC_FACTS_FAULT=$?
+  FACTS_FAULT_OUT="$(cat "$WORK/vsout")"
+  FACTS_FAULT_ERR="$(cat "$WORK/vserr")"
+  bash "$LOG" --acceptance-status --run val_run_facts >"$WORK/vsout" 2>"$WORK/vserr"; RC_PLAIN=$?
+  if [ "$RC_UNREADABLE" -eq 2 ] && [ -z "$UNREADABLE_OUT" ] \
+    && printf '%s\n' "$UNREADABLE_ERR" | grep -qxF 'zensu-log.sh --acceptance-status: the record of the active Autopilot run could not be read' \
+    && ! printf '%s\n' "$UNREADABLE_ERR" | grep -qF 'run /zensu:doctor' \
+    && [ "$RC_FACTS_FAULT" -eq 2 ] && [ -z "$FACTS_FAULT_OUT" ] \
+    && printf '%s\n' "$FACTS_FAULT_ERR" | grep -qxF 'zensu-log.sh --acceptance-status: the acceptance module could not read the active Autopilot run (status 2); run /zensu:doctor to check the plugin installation' \
+    && ! printf '%s\n' "$FACTS_FAULT_ERR" | grep -qF 'the record of the active Autopilot run could not be read' \
+    && [ "$RC_PLAIN" -eq 1 ] && grep -qF 'ACCEPTANCE STATUS — autopilot run val_run_facts | plan: ' "$WORK/vsout" \
+    && [ "$(file_sha "$VF_FILE")" = "$VF_BEFORE" ]; then
+    check "V16b the run bind refuses a run record its run-facts call cannot parse (status 3) and a run-facts call that fails another way (status 2), each with exit 2 and its own refusal, and changes no run" PASS
+  else
+    check "V16b the run bind keeps the run-facts status split (unreadable=$RC_UNREADABLE fault=$RC_FACTS_FAULT plain=$RC_PLAIN)" FAIL
+    printf '%s\n%s\n%s\n%s\n' "$UNREADABLE_OUT" "$UNREADABLE_ERR" "$FACTS_FAULT_OUT" "$FACTS_FAULT_ERR"
+    cat "$WORK/vsout" "$WORK/vserr"
+  fi
+else
+  check "V16b drive an Autopilot run to VALIDATE for the run-facts status split" FAIL
+fi
+cd "$PROJ" || exit 1
+
 VS="$WORK/val-shadow"
 if val_setup "val-shadow" "$VS" val_run_shadow false "" 7; then
   VS_ABBREV="$VAL_HEAD"
