@@ -12,6 +12,8 @@ const SHA = /^[a-f0-9]{40}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const ID = /^[0-9]{1,32}$/;
 const EVENT = /^(?:pull_request|push)$/;
+const ATTEMPT = /^[1-9][0-9]{0,31}$/;
+const PROFILE_ARTIFACT = /^windows-profile-(.+)-([a-f0-9]{40})-([1-9][0-9]{0,31})$/;
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
 const SUMMARY_KEYS = new Set([
   'schemaVersion',
@@ -195,12 +197,15 @@ function readProfiles(reportsDirectory, expected, contract = currentContract()) 
       `profile report inventory must contain exactly ${EXPECTED_PROFILES.length} expected files`,
     );
   }
-  const profiles = EXPECTED_PROFILES.map((profile) => validateProfile(
+  return requireOneContract(EXPECTED_PROFILES.map((profile) => validateProfile(
     readJson(path.join(directory, `${profile}.json`), `${profile} report`),
     profile,
     expected,
     contract,
-  ));
+  )));
+}
+
+function requireOneContract(profiles) {
   const manifestHashes = new Set(profiles.map((report) => report.manifestSha256));
   const catalogHashes = new Set(profiles.map((report) => report.commandCatalogSha256));
   const contractHashes = new Set(profiles.map((report) => report.profileContractSha256));
@@ -208,6 +213,51 @@ function readProfiles(reportsDirectory, expected, contract = currentContract()) 
     throw new ObservationError('profile reports do not share one complete execution contract');
   }
   return profiles;
+}
+
+function newestProfileArtifacts(artifactsDirectory, expected) {
+  const directory = fs.realpathSync.native(artifactsDirectory);
+  const currentAttempt = BigInt(requireString(expected.runAttempt, ATTEMPT, 'current runAttempt'));
+  const newest = new Map();
+  for (const name of fs.readdirSync(directory).sort()) {
+    const match = PROFILE_ARTIFACT.exec(name);
+    const entry = path.join(directory, name);
+    if (!match || !EXPECTED_PROFILES.includes(match[1])
+        || match[2] !== expected.sourceGitRevision
+        || !fs.lstatSync(entry).isDirectory()) {
+      throw new ObservationError(`${name} is not a profile report artifact of this commit`);
+    }
+    const [, profile, , attempt] = match;
+    if (BigInt(attempt) > currentAttempt) {
+      throw new ObservationError(`${name} comes from a later run attempt than this one`);
+    }
+    const known = newest.get(profile);
+    if (!known || BigInt(attempt) > BigInt(known.attempt)) newest.set(profile, { attempt, entry });
+  }
+  const missing = EXPECTED_PROFILES.filter((profile) => !newest.has(profile));
+  if (missing.length) {
+    throw new ObservationError(`profile report inventory has no report for ${missing.join(', ')}`);
+  }
+  return newest;
+}
+
+function readNewestProfiles(artifactsDirectory, expected, contract = currentContract()) {
+  const newest = newestProfileArtifacts(artifactsDirectory, expected);
+  return requireOneContract(EXPECTED_PROFILES.map((profile) => {
+    const { attempt, entry } = newest.get(profile);
+    const report = `${profile}.json`;
+    if (JSON.stringify(fs.readdirSync(entry)) !== JSON.stringify([report])) {
+      throw new ObservationError(
+        `${profile} artifact of run attempt ${attempt} must hold exactly ${report}`,
+      );
+    }
+    return validateProfile(
+      readJson(path.join(entry, report), `${profile} report`),
+      profile,
+      { ...expected, runAttempt: attempt },
+      contract,
+    );
+  }));
 }
 
 function profileOutcome(profiles) {
@@ -258,12 +308,12 @@ function summarize({ reportsDirectory, legacyFile, expected }) {
   };
 }
 
-function summarizeShards({ reportsDirectory, expected }) {
-  const profiles = readProfiles(reportsDirectory, expected);
+function summarizeShards({ artifactsDirectory, expected }) {
+  const profiles = readNewestProfiles(artifactsDirectory, expected);
   const { shardOutcome, complete } = profileOutcome(profiles);
   const cutoverComplete = shardOutcome === 'success' && complete;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: 'windows-shard-summary',
     sourceGitRevision: expected.sourceGitRevision,
     runId: expected.runId,
@@ -275,7 +325,10 @@ function summarizeShards({ reportsDirectory, expected }) {
     profileContractSha256: profiles[0].profileContractSha256,
     status: cutoverComplete ? 'passed' : 'failed',
     complete: cutoverComplete,
-    profiles: summarizedProfiles(profiles),
+    profiles: summarizedProfiles(profiles).map((entry, index) => ({
+      ...entry,
+      runAttempt: profiles[index].runAttempt,
+    })),
   };
 }
 
@@ -452,7 +505,7 @@ function main({
     }
     if (mode === 'summarize-shards' && args.length === 2) {
       const value = summarizeShards({
-        reportsDirectory: args[0],
+        artifactsDirectory: args[0],
         expected: environmentContext(environment),
       });
       writeJson(args[1], value);
@@ -468,7 +521,7 @@ function main({
       return 0;
     }
     throw new ObservationError(
-      'usage: summarize-windows-observation.js record-legacy <output> | summarize <reports-dir> <legacy.json> <output> | summarize-shards <reports-dir> <output> | audit-ledger <ledger.json>',
+      'usage: summarize-windows-observation.js record-legacy <output> | summarize <reports-dir> <legacy.json> <output> | summarize-shards <artifacts-dir> <output> | audit-ledger <ledger.json>',
     );
   } catch (error) {
     if (!(error instanceof ObservationError)) throw error;

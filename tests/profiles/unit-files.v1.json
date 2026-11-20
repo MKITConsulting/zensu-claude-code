@@ -341,9 +341,9 @@
       "summary": "Windows CI manifest invariants: the shards, their deadlines, the command catalog and the workflow job."
     },
     {
-      "path": "tests/structure/windows-observation.test.js", "registered": 11,
+      "path": "tests/structure/windows-observation.test.js", "registered": 12,
       "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
-      "summary": "The Windows observation summarizer."
+      "summary": "The Windows observation summarizer, including the shard summary that judges every profile by its newest run attempt."
     },
     {
       "path": "tests/structure/windows-profile-contract.test.js", "registered": 4,

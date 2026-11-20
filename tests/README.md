@@ -64,14 +64,20 @@ CI writes the atomic report below the private runner temp directory. A manual
 run creates a random private report directory and prints its absolute path at
 the end.
 
-Pull-request CI runs all five profiles as blocking Windows contract profiles
-and uploads their provenance-bound timing reports. The stable
-`Deterministic suite (windows-latest)` check downloads exactly those five
-reports, validates SHA/run-attempt consistency plus the exact ordered suite
-inventory and complete execution-contract digest, and fails closed on a missing,
-failed, timed-out, or incompletely cleaned profile. That digest binds the
-manifest, command catalog, runner, supervisor, Windows Job Object helper,
-summarizer, complete CI workflow configuration, and every referenced suite file.
+Pull-request CI runs all nine profiles as blocking Windows contract profiles
+and uploads their provenance-bound timing reports, one artifact per profile and
+run attempt. The stable `Deterministic suite (windows-latest)` check downloads
+the reports of every attempt of its run, judges each profile by its newest
+report, validates SHA/run consistency, that each report carries the attempt its
+artifact names and that none comes from a later attempt than the check's own,
+plus the exact ordered suite inventory and complete execution-contract digest,
+and fails closed on a missing, failed, timed-out, or incompletely cleaned
+profile. That digest binds the manifest, command catalog, runner, supervisor,
+Windows Job Object helper, summarizer, complete CI workflow configuration, and
+every referenced suite file. Re-running only the failed jobs can therefore turn
+the check green. The check also requires the shard job's result to be
+`success`, so an older report never stands in for a shard whose newest run
+failed before uploading one.
 
 The complete deterministic non-Promptfoo suite remains blocking on Ubuntu. The former
 per-pull-request Windows monolith is preserved in a separate scheduled,

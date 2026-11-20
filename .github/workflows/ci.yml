@@ -143,12 +143,12 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
-      - name: Download all profile reports
+      - name: Download the profile reports of every run attempt
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: windows-profile-*-${{ github.sha }}-${{ github.run_attempt }}
+          pattern: windows-profile-*-${{ github.sha }}-*
           path: ${{ runner.temp }}/windows-shards/profiles
-          merge-multiple: true
+          merge-multiple: false
       - name: Validate blocking shard evidence
         env:
           GITHUB_SHA: ${{ github.sha }}
