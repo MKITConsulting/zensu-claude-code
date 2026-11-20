@@ -408,5 +408,68 @@ else
   show
 fi
 
+REPORT_MD="$PLUGIN_DIR/skills/verify-feature/rules/report.md"
+DOC_RUN="$PROJ/.zensu/verify-feature-runs/r2"
+DOC_BLOCKS="$WORK/report-doc-blocks"
+mkdir -p "$DOC_RUN/browser" "$DOC_BLOCKS"
+cp "$PNG_SOURCE" "$DOC_RUN/browser/page.png"
+DOC_COUNT="$(node -e '
+  const fs = require("fs");
+  const [file, out, root, data, run] = process.argv.slice(1);
+  const blocks = [];
+  const fence = /^```bash\n([\s\S]*?)^```$/gm;
+  let match;
+  while ((match = fence.exec(fs.readFileSync(file, "utf8"))) !== null) {
+    if (/--report-(begin|add|step|render)\b/.test(match[1])) blocks.push(match[1]);
+  }
+  const verbs = blocks.map((block) => /--report-(begin|add|step|render)\b/.exec(block)[1]).join(",");
+  if (verbs !== "begin,add,add,step,render") {
+    process.stdout.write(`unexpected blocks: ${verbs}`);
+    process.exit(0);
+  }
+  blocks.forEach((block, index) => {
+    const filled = block.split("<absolute-plugin-data>").join(data)
+      .split("<absolute-plugin-root>").join(root)
+      .split("<run dir>").join(run)
+      .split("<file>").join("page.png")
+      .split("<hex>").join("5e1f0c3a");
+    fs.writeFileSync(`${out}/${index + 1}.sh`, filled);
+  });
+  process.stdout.write(String(blocks.length));
+' "$REPORT_MD" "$DOC_BLOCKS" "$PLUGIN_DIR" "$CLAUDE_PLUGIN_DATA" "$DOC_RUN" 2>&1)"
+DOC_RCS=""
+DOC_ID=""
+DOC_HTML=""
+if [ "$DOC_COUNT" = 5 ]; then
+  (cd "$WORK" && bash "$DOC_BLOCKS/1.sh") >"$OUT" 2>"$ERRF" </dev/null
+  DOC_RCS="$?"
+  DOC_ID="$(sed -n 's/^zensu evidence report: begun \(vr1_[0-9]*_[0-9a-f]*\) .*/\1/p' "$OUT")"
+  for n in 2 3 4 5; do
+    [ -n "$DOC_ID" ] || break
+    SCRIPT="$(cat "$DOC_BLOCKS/$n.sh")"
+    printf '%s\n' "${SCRIPT//<id>/$DOC_ID}" > "$DOC_BLOCKS/$n.sh"
+    if grep -qE '<[a-z][a-z ]*>' "$DOC_BLOCKS/$n.sh"; then
+      DOC_RCS="$DOC_RCS placeholder-left-in-$n"
+      break
+    fi
+    (cd "$WORK" && bash "$DOC_BLOCKS/$n.sh") >"$OUT" 2>"$ERRF" </dev/null
+    DOC_RCS="$DOC_RCS $?"
+  done
+  DOC_HTML="$(sed -n 's/^Evidence report: \(.*\/index\.html\)$/\1/p' "$OUT")"
+fi
+if [ "$DOC_RCS" = "0 0 0 0 0" ] && [ -n "$DOC_HTML" ] && [ -f "$DOC_HTML" ] && node -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const states = m.coverage.criteria.map((c) => `${c.id}:${c.state}`).join(",");
+  const ok = m.verdict === "PASS" && states === "AC-001:pass" && m.steps.length === 1
+    && Object.keys(m.evidence).join(",") === "e1,e2" && m.sections.consent.length === 1
+    && m.sections.limitations.length >= 1 && m.sections.resources.length === 1;
+  process.exit(ok ? 0 : 1);
+' "$(dirname "$DOC_HTML")/manifest.json"; then
+  check "R22 the rules/report.md command blocks run as written, from outside the project, and render the report" PASS
+else
+  check "R22 the rules/report.md command blocks run as written, from outside the project, and render the report (blocks=$DOC_COUNT, rc=$DOC_RCS)" FAIL
+  show
+fi
+
 unit_check_done "R0z every unit file the registry gives this suite was graded"
 finish

@@ -370,8 +370,9 @@ consent; a run validated from one records `acceptance-plan-unapproved` there as 
 
 An evidence report is one static page per `/zensu:verify-feature` run: every criterion, every row
 of the evidence matrix and every capture, kept outside the repository
-([the evidence report spec](verify-feature-evidence-report-spec.md)). The core module and its
-verbs ship first; the skill does not call them yet. Every verb is bound to the session and its
+([the evidence report spec](verify-feature-evidence-report-spec.md)). `/zensu:verify-feature`
+calls these verbs on every run that creates its run directory, as
+`skills/verify-feature/rules/report.md` says. Every verb is bound to the session and its
 project root, and free text (a feature, a caption, a step's title, expected and observed text, a
 limitation) arrives on stdin, never as an argument:
 

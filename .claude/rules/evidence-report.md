@@ -7,13 +7,15 @@ paths:
   - "tests/structure/test-evidence-report.sh"
   - "tests/fixtures/evidence-report/**"
   - "docs/verify-feature-evidence-report-spec.md"
+  - "skills/verify-feature/rules/report.md"
+  - "tests/structure/test-verify-feature-skill.sh"
 ---
 
 # Evidence Report Core (`hooks/lib/evidence-report-v1.js` + `zensu-log.sh --report-*`)
 
-Build step 1 of `docs/verify-feature-evidence-report-spec.md` §9: the host-agnostic core, its six
-verbs and the conformance corpus. `/zensu:verify-feature` does not call the verbs yet; that is
-step 2.
+Build steps 1 and 2 of `docs/verify-feature-evidence-report-spec.md` §9: the host-agnostic core,
+its six verbs and the conformance corpus, and the wiring that has `/zensu:verify-feature` call the
+verbs on every run that creates its run directory (§"The skill wiring" below).
 
 **One owner, host-agnostic (AC-018).** The module owns the manifest schema (`MANIFEST_KEYS` and one
 exact key set per object), the binding sidecar (`BINDING_SCHEMA`), the ids (`vr1_…`), the store
@@ -275,6 +277,23 @@ on, and a project `true` the user's `false` overrides is disclosed. `keep` is me
 lives in the core, so a port hands its own layers and inherits it; the shell reads the user layer
 through `ucfg()` and the project layer through `pcfg()` of `_ZENSU_CFG_JS`, which `cfg()` merges.
 
+**The skill wiring (step 2).** `skills/verify-feature/rules/report.md` is the one owner of how the
+skill calls the verbs: begin right after the run directory exists, add each capture right after
+it was inspected and never in a batch, one row per matrix row, undriven rows as `skip`, render
+after Phase 4, and the report format that moved out of `SKILL.md` Phase 5, which keeps three
+pointers, the verdict rules and the verdict line. A begin that exits 1 or 2 leaves the run going
+with its verdict unchanged and `Evidence report: none — <cause>` above the verdict line, exit 3
+leaves no location line, and the skill never edits an ignore file to satisfy a remedy: the plugin
+writes no consuming repository's `.gitignore`. A `verdict.*` refusal is answered with the verdict
+the core's remedy opens with (`state FAIL` or `state PARTIAL`), stated in the chat report too, so
+the report and the chat never disagree; `criterion.no-image` is answered by linking an inspected
+image through one more row, else in matrix mode by a `skip` row and PARTIAL. Only a file beneath
+the run directory enters, so a host tool's in-conversation screenshot needs a file capture beside
+it; the capture commands are in `rules/drivers.md` §8 and `rules/browser-verification.md` §5, and
+a browser screenshot is 1440 by 900 at scale 1 after `resize` (measured, spec Appendix A). Rule
+files spell `<absolute-plugin-root>` and `<absolute-plugin-data>`, which the Phase 2 pointer
+defines, because only `SKILL.md` is substituted. No core change was needed.
+
 **Coupled sites.** The verb arm and `_zensu_report_native_dir` / `_zensu_report_native_file` in
 `zensu-log.sh`; `zensu_evidence_report_config_json` in `zensu-config.sh`; §Evidence Reports and the
 §Config Resolution Order deviation paragraph in `docs/configuration.md`, and `config.example.json`;
@@ -294,14 +313,26 @@ the `work tree: ` prefix), and which unit cases drive through the real functions
 `inspectExternalProcessLock` of `session-control-core-v1.js`; `redact` and `rootSpellings` of
 `zensu-artifact-redact-v1.js`; and `scan`, `ALLOW_MARKER` and `PLACEHOLDER` of `secret-patterns.js`. A renderer change moves
 every rendering digest in the corpus in the same commit, and a new fault code needs its corpus case
-in the same commit.
+in the same commit. The wiring adds: `VERB_ARGUMENTS` and the report arm's flag list in
+`zensu-log.sh`, which every `--report-<verb>` call in `rules/report.md`, `rules/drivers.md` and
+`rules/browser-verification.md` must fit (`P11b` in `tests/structure/test-verify-feature-skill.sh`);
+the opening words of the `verdict.*` remedies and the `criterion.no-image` remedy, which
+`rules/report.md` §4 follows (`P11e`); begin's exit-3 line (`P11d`); `ROUTE_RE`, which admits
+shell characters in a request path, so every `--path` value in the three rule files stays
+single-quoted (`P11g`); `ALLOWED_COMMANDS` of
+`verify-consent-v1.js`, which must keep admitting `resize` and `screenshot --full-page` (`P11f`);
+the begin, add, step and render blocks of `rules/report.md`, which `R22` in
+`tests/structure/test-evidence-report.sh` runs as written; and the `verify-feature` entry of
+`tests/structure/test-skill-text-budget.sh`.
 
 **Version: `patch`.** A new module, new verbs, a new private store and sidecar, and a new config
 subtree read permissively. No context-record or workflow-state field moves, no strict key set an
 earlier reader knows changes (the manifest, the binding and the store ship for the first time, so
 `begin_tree`, the binding's `begin_failure`, the `v1` directory of a configured store and the
 draft's `zensu` reach no released reader), and no hook, matcher or attestation moves. The store was deliberately not added to the
-protected-root lists of `reviewer-capability-v1.js`: a gate that denies more is a `minor`.
+protected-root lists of `reviewer-capability-v1.js`: a gate that denies more is a `minor`. The
+wiring of step 2 is `patch` on the same walk: skill text, docs and structure checks, with no
+hook, matcher, schema field, key set, config key or attestation moved.
 
 **Known gaps.**
 
@@ -322,4 +353,14 @@ protected-root lists of `reviewer-capability-v1.js`: a gate that denies more is 
   target whose every git read failed at render from one outside git, so it accepts that PASS;
   only render, which reads `begin_failure` from the binding, refuses it unless begin found the
   target outside git.
+- The wiring is skill text: no hook checks that a run began, fed or rendered its report, so a run
+  that skips a verb shows only in the missing location line.
+- A `desktop` row off macOS has no window-scoped file capture, so a criterion that passes through
+  it links no image, and render's `criterion.no-image` rule leaves it partial in matrix mode.
+- A second chain-mode pass on an unchanged tree renders every plan criterion, and render refuses a
+  UI-driver `pass` whose rows in this report link no image, so the pass takes one fresh screenshot
+  of each criterion it skips (`rules/report.md` section 3). Applying the rule only to criteria that
+  have a row in the report being rendered is a core change, not built.
+- The page labels `run.authenticated` `Manual login`, although a recipe login sets it too. Renaming
+  the label moves every rendering digest of the corpus, so it waits for a core change.
 - No ports were included.
