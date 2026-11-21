@@ -6,13 +6,17 @@ const SUBJECT = /\b(?:yes|choice|answer)\b/gi;
 const MEMORY = /\b(?:remember(?:ed)?|saved|stored|kept)\b/gi;
 const DURATION = /\b(?:for|to|through|throughout|during|over)\s+the\s+rest\s+of\s+(?:this|the)\s+session\b/gi;
 const SESSION_SCOPE = /\b(?:this|the)\s+session\b/i;
-const REQUEST_SCOPE = /\b(?:this|that|the|each|every|one)\s+request\b/i;
+const REQUEST_SCOPE = /\b(?:this|that|the|one)\s+request\b/i;
 const NEGATION = /\b(?:not|never|cannot|no longer|nothing|none|neither|nor|rather than|instead of)\b|n['’]t\b/i;
 const ASKED_AGAIN = /\b(?:won['’]t|will not|isn['’]t|is not|not|never)\s+(?:be\s+)?asked\s+again\b/gi;
 const PICK = /\b(?:pick|picks|choose|chooses|select|selects|answer|answers|say|says)\s+[*_"'“‘]*(yes|no)\b/gi;
 const ROUTE_CHANGE = /\/zensu:delivery-route\b/i;
 const CLAUSE_BREAK = /[,;]|:(?=\s|$)/;
 const LABEL_LEAD = /^[\s*_`"'“”‘’>•-]+/;
+const LEAD_ONLY = /^\W*(?:(?:and|but|or|so|yet|then|however|although|though|even|because|since|as|if|when|once|unless|until|while|whilst|whereas|that|also|now|still|thus|therefore|hence|too|meanwhile|otherwise|instead|nevertheless|nonetheless|moreover|furthermore|besides|indeed|likewise)\b\W*)*$/i;
+const NEW_CLAUSE = /\b(?:but|though|although|while|whilst|whereas|because)\b|\b(?:and|so|then|yet|since|as|once|when|if|unless|until)\s+(?=(?:it|its|this|that|you|your|the|a|an|there|zensu|i|we|they|my|our|their|no)\b)/i;
+const NO_SUBJECT = /^\W*(?:(?:[Aa]|[Tt]he|[Yy]our)\s+)?["'“‘*_]*No\b/;
+const HOLDING = /\b(?:remember(?:s|ed)?|sav(?:e|es|ed)|stor(?:e|es|ed)|keeps?|kept|record(?:s|ed)?|appl(?:y|ies|ied)|holds?|held|carr(?:y|ies|ied)|lasts?|stays?|remains?|persists?)\b/i;
 const GAP = 80;
 
 function affirmative(span) {
@@ -39,6 +43,21 @@ function unblocked(sentence, predicate) {
   return affirmative(clauseBefore(sentence, predicate.start)) && !ROUTE_CHANGE.test(sentence.slice(0, predicate.start));
 }
 
+function negatesHolding(clause) {
+  return clause.replace(ASKED_AGAIN, ' ').split(NEW_CLAUSE).some((part, k) => {
+    if (k > 0 && NO_SUBJECT.test(part)) return false;
+    const negation = NEGATION.exec(part);
+    return Boolean(negation) && HOLDING.test(part.slice(negation.index));
+  });
+}
+
+function settled(sentence, duration) {
+  const lead = clauseBefore(sentence, duration.start).split(SUBJECT).pop();
+  if (!LEAD_ONLY.test(lead)) return true;
+  const host = sentence.slice(duration.end).split(CLAUSE_BREAK).find((clause) => !LEAD_ONLY.test(clause));
+  return !negatesHolding(host || '');
+}
+
 function memoryHolds(sentence, memory) {
   const after = clauseAfter(sentence, memory.end);
   return unblocked(sentence, memory) && affirmative(after.split(SESSION_SCOPE)[0]) && !REQUEST_SCOPE.test(after);
@@ -62,7 +81,7 @@ function startsWith(segment, label) {
 function disclosesYes(sentence, tied) {
   const subjects = spans(SUBJECT, sentence).filter((s) => !pickedNo(sentence, s));
   const memories = spans(MEMORY, sentence).filter((m) => memoryHolds(sentence, m));
-  const durations = spans(DURATION, sentence).filter((d) => unblocked(sentence, d));
+  const durations = spans(DURATION, sentence).filter((d) => unblocked(sentence, d) && settled(sentence, d));
   const predicates = [...memories, ...durations];
   if (subjects.some((s) => predicates.some((p) => joined(sentence, s, p)))) return true;
   return tied && (durations.length > 0 || memories.some((m) => SESSION_SCOPE.test(clauseAfter(sentence, m.end))));
