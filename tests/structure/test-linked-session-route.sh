@@ -82,12 +82,45 @@ L3C_OUT="$(node -e '
     show("win32", { APPDATA: "/a", ZENSU_CCD_STORE: "/d/store" }),
     show("linux", { HOME: "/h", ZENSU_CCD_STORE: "relative/store" }),
     show("darwin", { HOME: "/h", ZENSU_CCD_STORE: "   " }),
+    show("darwin", { HOME: "/h", ZENSU_CCD_STORE: "/s/x/../store/" }),
   ].join("\n"));
 ' "$RESOLVER" 2>/dev/null)"
-L3C_WANT="$(printf '%s\n' '/s/store' '/s/store' 'D:/store' 'none' '/h/Library/Application Support/Claude/claude-code-sessions')"
+L3C_WANT="$(printf '%s\n' '/s/store' '/s/store' 'D:\store' 'none' '/h/Library/Application Support/Claude/claude-code-sessions' '/s/store')"
 [ "$L3C_OUT" = "$L3C_WANT" ] \
-  && check "L3c ZENSU_CCD_STORE is the only candidate when set, as session-trail reads it: trimmed, MSYS drive mapped on win32, a relative value names no store, a blank one is ignored" PASS \
+  && check "L3c ZENSU_CCD_STORE is the only candidate when set, as session-trail reads it: trimmed, MSYS drive mapped on win32, resolved without a trailing separator, a relative value names no store, a blank one is ignored" PASS \
   || check "L3c store override ($(printf '%s' "$L3C_OUT" | tr '\n' ';'))" FAIL
+L3M_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const m = require(process.argv[1]);
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-hub-")));
+  try {
+    const profiles = path.join(scratch, "Library", "Application Support", "Zensu Session Hub", "Claude-Profile");
+    for (const name of ["bbbbbbbb-2222-4222-8222-222222222222", "aaaaaaaa-1111-4111-8111-111111111111", "CCCCCCCC-3333-4333-8333-333333333333", "notes"]) {
+      fs.mkdirSync(path.join(profiles, name), { recursive: true });
+    }
+    const show = (platform, env) => m.storeCandidates(platform, env).map((store) => store.split(scratch).join("~")).join("|") || "none";
+    process.stdout.write([
+      show("darwin", { HOME: scratch }),
+      show("darwin", { HOME: scratch, ZENSU_CCD_EXTRA_STORES: " /n/one/ : relative/two ::/n/x/../three" }),
+      show("linux", { HOME: scratch, ZENSU_CCD_EXTRA_STORES: "/n/one" }),
+      show("win32", { APPDATA: "/a", ZENSU_CCD_EXTRA_STORES: "/d/named; /e/other ;" }),
+      show("darwin", { HOME: scratch, ZENSU_CCD_EXTRA_STORES: "/n/one", ZENSU_CCD_STORE: "/s/store" }),
+      show("darwin", { HOME: scratch, ZENSU_CCD_EXTRA_STORES: path.join(scratch, "Library", "Application Support", "Claude", "claude-code-sessions") }),
+      show("darwin", { HOME: scratch, ZENSU_CCD_EXTRA_STORES: "  :  " }),
+    ].join("\n"));
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+' "$RESOLVER" 2>/dev/null)"
+L3M_DEFAULT='~/Library/Application Support/Claude/claude-code-sessions'
+L3M_HUB='~/Library/Application Support/Zensu Session Hub/Claude-Profile/aaaaaaaa-1111-4111-8111-111111111111/claude-code-sessions|~/Library/Application Support/Zensu Session Hub/Claude-Profile/bbbbbbbb-2222-4222-8222-222222222222/claude-code-sessions'
+L3M_WANT="$(printf '%s\n' "$L3M_DEFAULT|$L3M_HUB" "/n/one|/n/three|$L3M_DEFAULT|$L3M_HUB" '/n/one|~/.config/Claude/claude-code-sessions' \
+  'D:\named|E:\other|/a/Claude/claude-code-sessions' '/s/store' "$L3M_DEFAULT|$L3M_HUB" "$L3M_DEFAULT|$L3M_HUB")"
+[ "$L3M_OUT" = "$L3M_WANT" ] \
+  && check "L3m the candidates are every store ZENSU_CCD_EXTRA_STORES names, split by the platform's list separator, trimmed, MSYS drive mapped on win32, resolved without a trailing separator, blank and relative entries naming none, then the platform's defaults, then on macOS every Session Hub profile whose folder name is a canonical lowercase UUID, each spelling once, and ZENSU_CCD_STORE still alone" PASS \
+  || check "L3m named and profile stores ($(printf '%s' "$L3M_OUT" | tr '\n' ';'))" FAIL
 L3D_LITERALS="$(grep -c 'zensu\.session-control' "$RESOLVER" 2>/dev/null || true)"
 L3D_FROM_CORE="$(grep -cE 'controlCore\(\)\.SCHEMA\b.*controlCore\(\)\.SCHEMA_VERSION\b' "$RESOLVER" 2>/dev/null || true)"
 [ "$L3D_LITERALS" = "0" ] && [ "${L3D_FROM_CORE:-0}" -ge 1 ] \
@@ -144,6 +177,126 @@ L3E_WANT="$(printf '%s\n' 'linked/resolved/root' 'linked/parent-context-unavaila
 [ "$L3E_OUT" = "$L3E_WANT" ] \
   && check "L3e a parent record whose session hash, schema, schema version or host is another one or missing leaves the session linked and uninherited, while the matching record resolves" PASS \
   || check "L3e parent identity ($(printf '%s' "$L3E_OUT" | tr '\n' ';'))" FAIL
+L3N_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const m = require(process.argv[1]);
+  const core = require(process.argv[2]);
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-stores-")));
+  try {
+    const account = "11111111-1111-4111-8111-111111111111";
+    const organization = "22222222-2222-4222-8222-222222222222";
+    const childHost = "local_33333333-3333-4333-8333-333333333333";
+    const parentHost = "local_44444444-4444-4444-8444-444444444444";
+    const childCli = "55555555-5555-4555-8555-555555555555";
+    const parentCli = "66666666-6666-4666-8666-666666666666";
+    const support = path.join(scratch, "Library", "Application Support");
+    const defaultStore = path.join(support, "Claude", "claude-code-sessions");
+    const profile = path.join(support, "Zensu Session Hub", "Claude-Profile", "aaaaaaaa-1111-4111-8111-111111111111");
+    const profileStore = path.join(profile, "claude-code-sessions");
+    const named = path.join(scratch, "named");
+    const desk = (store) => path.join(store, account, organization);
+    for (const store of [defaultStore, profileStore, named]) fs.mkdirSync(desk(store), { recursive: true });
+    const write = (store, host, cli, parent) => {
+      const record = { sessionId: host, cliSessionId: cli };
+      if (parent) record.spawnedFrom = { sessionId: parent };
+      fs.writeFileSync(path.join(desk(store), host + ".json"), JSON.stringify(record));
+    };
+    const clear = (store) => {
+      for (const host of [childHost, parentHost]) fs.rmSync(path.join(desk(store), host + ".json"), { force: true });
+    };
+    const records = path.join(scratch, "records");
+    const root = path.join(scratch, "root");
+    fs.mkdirSync(records);
+    fs.mkdirSync(root);
+    fs.writeFileSync(path.join(records, core.sessionKey(parentCli) + ".json"), JSON.stringify({ schema: core.SCHEMA, schema_version: core.SCHEMA_VERSION, host: "claude", session_id_hash: core.sessionIdHash(parentCli), project_root: root }));
+    const resolve = (platform, extra) => {
+      const env = Object.assign({ HOME: scratch, CLAUDE_CODE_HOST_SESSION_ID: childHost, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization }, extra || {});
+      const v = m.resolveLinkedSession({ env, platform, sessionId: childCli, pluginData: scratch, deps: { recordsDirectory: () => records } });
+      return v.kind + "/" + v.reason + "/" + (v.parentRoot === root ? "root" : "-");
+    };
+    const out = [];
+    write(profileStore, childHost, childCli, parentHost);
+    write(profileStore, parentHost, parentCli, null);
+    out.push(resolve("darwin"));
+    out.push(resolve("darwin", { ZENSU_CCD_STORE: defaultStore }));
+    out.push(resolve("linux"));
+    fs.symlinkSync(profile, path.join(scratch, "alias"));
+    out.push(resolve("darwin", { ZENSU_CCD_EXTRA_STORES: path.join(scratch, "alias", "claude-code-sessions") }));
+    write(named, childHost, childCli, parentHost);
+    out.push(resolve("darwin", { ZENSU_CCD_EXTRA_STORES: named }));
+    clear(profileStore);
+    write(named, parentHost, parentCli, null);
+    out.push(resolve("darwin", { ZENSU_CCD_EXTRA_STORES: named }));
+    clear(named);
+    write(profileStore, childHost, childCli, parentHost);
+    write(profileStore, parentHost, parentCli, null);
+    fs.chmodSync(profileStore, 0o775);
+    out.push(resolve("darwin"));
+    fs.chmodSync(profileStore, 0o755);
+    fs.renameSync(profile, path.join(path.dirname(profile), "CCCCCCCC-3333-4333-8333-333333333333"));
+    out.push(resolve("darwin"));
+    write(named, childHost, childCli, parentHost);
+    write(named, parentHost, parentCli, null);
+    fs.symlinkSync(named, path.join(scratch, "named-link"));
+    out.push(resolve("darwin", { ZENSU_CCD_EXTRA_STORES: path.join(scratch, "named-link") + path.sep }));
+    out.push(resolve("darwin", { ZENSU_CCD_EXTRA_STORES: named + path.sep }));
+    process.stdout.write(out.join("\n"));
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+' "$RESOLVER" "$CORE" 2>/dev/null)"
+L3N_WANT="$(printf '%s\n' 'linked/resolved/root' 'unresolved/own-record-missing/-' 'none/no-session-store/-' 'linked/resolved/root' \
+  'none/own-record-ambiguous/-' 'linked/resolved/root' 'unresolved/own-record-missing/-' 'unresolved/own-record-missing/-' \
+  'unresolved/own-record-missing/-' 'linked/resolved/root')"
+[ "$L3N_OUT" = "$L3N_WANT" ] \
+  && check "L3n the own record is looked up in every usable store: a record only in a Session Hub profile store resolves beside a default store that lacks it, ZENSU_CCD_STORE still names the only store, Linux probes no profile, a profile reached through a linked folder counts once, a record two stores hold answers own-record-ambiguous, a record only in a named store resolves, a group-writable or upper-case profile is no store, and a named entry that reaches a store through a symbolic link with a trailing separator names no store while the store's own path with one does" PASS \
+  || check "L3n lookup across stores ($(printf '%s' "$L3N_OUT" | tr '\n' ';'))" FAIL
+L3O_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { execFileSync } = require("child_process");
+  const m = require(process.argv[1]);
+  const trail = process.argv[2];
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-parity-")));
+  try {
+    const profiles = path.join(scratch, "Library", "Application Support", "Zensu Session Hub", "Claude-Profile");
+    for (const name of ["bbbbbbbb-2222-4222-8222-222222222222", "aaaaaaaa-1111-4111-8111-111111111111", "CCCCCCCC-3333-4333-8333-333333333333", "notes"]) {
+      fs.mkdirSync(path.join(profiles, name), { recursive: true });
+    }
+    const bare = path.join(scratch, "bare-home");
+    fs.mkdirSync(bare);
+    const one = path.join(scratch, "one");
+    const layouts = [
+      ["named", 5, { HOME: scratch, ZENSU_CCD_EXTRA_STORES: [one, path.join(scratch, "two") + path.sep, path.join(scratch, "Library", "Application Support", "Claude", "claude-code-sessions")].join(path.delimiter) }],
+      ["override", 1, { HOME: scratch, ZENSU_CCD_STORE: "  " + path.join(scratch, "override") + path.sep + "  ", ZENSU_CCD_EXTRA_STORES: one }],
+      ["blank-override", 4, { HOME: scratch, ZENSU_CCD_STORE: "   ", ZENSU_CCD_EXTRA_STORES: [" " + one + " ", "", " " + one + path.sep + " ", ""].join(path.delimiter) }],
+      ["no-profiles", 2, { HOME: bare, ZENSU_CCD_EXTRA_STORES: one }],
+    ];
+    const otherPlatforms = new Set(["Windows APPDATA (unverified)", "Windows LOCALAPPDATA (unverified)", "XDG_CONFIG_HOME (unverified)", "Linux ~/.config (unverified)"]);
+    const differ = [];
+    for (const [name, length, env] of layouts) {
+      const resolver = m.storeCandidates("darwin", env);
+      let trailed;
+      try {
+        const report = JSON.parse(execFileSync(process.execPath, [trail, "lineage", "--diagnose", "--json", "--config-dir", path.join(scratch, ".claude")], { env: { PATH: process.env.PATH, ...env }, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+        trailed = report.probes.filter((probe) => !otherPlatforms.has(probe.source)).map((probe) => probe.dir);
+      } catch (_) {
+        differ.push(name + " trail-failed");
+        continue;
+      }
+      if (resolver.length !== length || JSON.stringify(resolver) !== JSON.stringify(trailed)) differ.push(name + " resolver=" + JSON.stringify(resolver) + " trail=" + JSON.stringify(trailed));
+    }
+    process.stdout.write(differ.length === 0 ? "same" : "differ " + differ.join(" | "));
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+' "$RESOLVER" "$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs" 2>/dev/null)"
+[ "$L3O_OUT" = same ] \
+  && check "L3o the resolver's macOS store candidates equal the probes of session-trail's lineage --diagnose in the same order once the other platforms' defaults are left out, in four layouts: named stores with a trailing separator and a named copy of the default store beside lower-case, upper-case and non-UUID profile folders; a padded ZENSU_CCD_STORE with a trailing separator that stays alone beside a named store; a blank ZENSU_CCD_STORE that names no store beside blank, padded and repeated named entries; and a home without a Session Hub profiles folder" PASS \
+  || check "L3o store parity with session-trail ($L3O_OUT)" FAIL
 L3F_INNER='
   const cp = require("child_process");
   const fs = require("fs");
@@ -529,7 +682,7 @@ fi
 T="$(cd "$T" && pwd -P)"
 trap 'rm -rf "$T"' EXIT
 
-unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID XDG_CONFIG_HOME ZENSU_CCD_STORE \
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID XDG_CONFIG_HOME ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES \
   CLAUDE_CODE_SESSION_ID CLAUDE_PROJECT_DIR CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_CHAIN ZDOC_DELIVERY_ROUTE \
   2>/dev/null || true
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
@@ -1142,5 +1295,43 @@ else
     && check "L44 an own desktop record another account owns answers none, a parent record another account owns leaves the session linked, noted and uninherited, and the parent record back in the caller's hands passes build on again" PASS \
     || check "L44 foreign-owned records (own='$(last_field "$FO_OUT")' linked=$(linked_state "$WT" "$FO_CLI") parent='$(last_field "$FP_OUT")' linked=$(linked_state "$WT" "$FP_CLI") restored='$(last_field "$FR_OUT")')" FAIL
 fi
+
+echo "== Stores of their own: a Session Hub profile store and a store ZENSU_CCD_EXTRA_STORES names =="
+DEFAULT_DESK="$DESK"
+if [ "$PLATFORM" != darwin ]; then
+  check "L46 a linked session whose records sit only in a Session Hub profile store (the profile path is the macOS one)" SKIP
+else
+  DESK="$HOME/Library/Application Support/Zensu Session Hub/Claude-Profile/cccccccc-3333-4333-8333-333333333333/claude-code-sessions/$ACCT/$ORG"
+  mkdir -p "$DESK"
+  session "$REPO" ""; HP_CLI="$CLI"; HP_HOST="$HOST"
+  route "$HP_CLI" "$REPO" --build >/dev/null
+  session "$WT" "$HP_HOST"; HC_CLI="$CLI"; HC_HOST="$HOST"
+  HUB_DESK="$DESK"; DESK="$DEFAULT_DESK"
+  HUB_OUT="$(remind "$WT" "$HC_CLI" "$HC_HOST" "add a function to foo.js")"
+  { [ -f "$HUB_DESK/$HC_HOST.json" ] && [ -f "$HUB_DESK/$HP_HOST.json" ] \
+    && [ ! -e "$DESK/$HC_HOST.json" ] && [ ! -e "$DESK/$HP_HOST.json" ] \
+    && [ "$(last_field "$HUB_OUT")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$HC_CLI")" = build ] \
+    && [ "$(linked_state "$WT" "$HC_CLI")" = linked ]; } \
+    && check "L46 a linked session whose own and parent records sit only in a Session Hub profile store, beside a default store that holds the same account and organization folders without them, inherits build" PASS \
+    || check "L46 Session Hub profile store (field='$(last_field "$HUB_OUT")' inherited=$(inherited_state "$WT" "$HC_CLI") linked=$(linked_state "$WT" "$HC_CLI"))" FAIL
+fi
+NAMED_STORE="$T/named-store"
+DESK="$NAMED_STORE/$ACCT/$ORG"
+mkdir -p "$DESK"
+session "$REPO" ""; NP_CLI="$CLI"; NP_HOST="$HOST"
+route "$NP_CLI" "$REPO" --build >/dev/null
+session "$WT" "$NP_HOST"; NC_CLI="$CLI"; NC_HOST="$HOST"
+session "$WT" "$NP_HOST"; NX_CLI="$CLI"; NX_HOST="$HOST"
+NAMED_DESK="$DESK"; DESK="$DEFAULT_DESK"
+NAMED_OUT="$(export ZENSU_CCD_EXTRA_STORES="$T/no-such-store:$NAMED_STORE"; remind "$WT" "$NC_CLI" "$NC_HOST" "add a function to foo.js")"
+UNNAMED_OUT="$(remind "$WT" "$NX_CLI" "$NX_HOST" "add a function to foo.js")"
+{ [ -f "$NAMED_DESK/$NC_HOST.json" ] && [ -f "$NAMED_DESK/$NX_HOST.json" ] \
+  && [ ! -e "$DESK/$NC_HOST.json" ] && [ ! -e "$DESK/$NP_HOST.json" ] \
+  && [ "$(last_field "$NAMED_OUT")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$NC_CLI")" = build ] \
+  && [ "$(linked_state "$WT" "$NC_CLI")" = linked ] \
+  && [ "$(last_field "$UNNAMED_OUT")" != "$INHERITED" ] && [ "$(inherited_state "$WT" "$NX_CLI")" = none ] \
+  && [ "$(linked_state "$WT" "$NX_CLI")" = unresolved ]; } \
+  && check "L47 a linked session whose records sit only in a store ZENSU_CCD_EXTRA_STORES names, after an entry that names no store, inherits build, while the same layout without the variable stays unresolved and inherits nothing" PASS \
+  || check "L47 named store (field='$(last_field "$NAMED_OUT")' inherited=$(inherited_state "$WT" "$NC_CLI") linked=$(linked_state "$WT" "$NC_CLI") unnamed='$(last_field "$UNNAMED_OUT")' unnamed-inherited=$(inherited_state "$WT" "$NX_CLI") unnamed-linked=$(linked_state "$WT" "$NX_CLI"))" FAIL
 
 finish
