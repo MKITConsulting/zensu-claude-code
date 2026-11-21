@@ -426,6 +426,123 @@ test('a saved environment is named from the account presets, and an SSH preset k
   assert.ok(state.sessions.every((entry) => !entry.start || !('preset' in entry.start)));
 });
 
+test('a saved environment the own presets file does not list is named from the other stores, the own description wins, and an id they describe alike counts once', () => {
+  const own = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-own', name: 'Own Name', target: { kind: 'local' } },
+    { id: 'env-both', name: 'Own Version', target: { kind: 'local' } },
+  ] } } }, 'acc1');
+  const defaultFolder = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-both', name: 'Default Version', target: { kind: 'ssh' } },
+    { id: 'env-fallback', name: 'Fallback Env', target: { kind: 'local' } },
+    { id: 'env-alike', name: 'Alike Env', target: { kind: 'local' } },
+  ] }, acc2: { presets: [{ id: 'env-foreign', name: 'Other account', target: { kind: 'local' } }] } } }, 'acc1');
+  const profile = mod.presetMap({ byAccount: { acc1: { presets: [{ id: 'env-alike', name: 'Alike Env', target: { kind: 'local' } }] } } }, 'acc1');
+  const read = (presets, complete = true) => ({ presets, complete });
+  const merged = mod.presetsAcrossStores(read(own), [read(defaultFolder), read(profile)]);
+  assert.deepEqual([...merged.presets.keys()].sort(), ['env-alike', 'env-both', 'env-fallback', 'env-own']);
+  assert.deepEqual(merged.presets.get('env-own'), { name: 'Own Name', kind: 'local' });
+  assert.deepEqual(merged.presets.get('env-both'), { name: 'Own Version', kind: 'local' });
+  assert.deepEqual(merged.presets.get('env-fallback'), { name: 'Fallback Env', kind: 'local' });
+  assert.deepEqual(merged.presets.get('env-alike'), { name: 'Alike Env', kind: 'local' });
+  assert.deepEqual([...merged.settled].sort(), ['env-both', 'env-own']);
+  assert.equal(own.size, 2);
+  assert.deepEqual([...mod.presetsAcrossStores(read(own), [null, undefined, 'x', read('x'), read(defaultFolder), read(profile)]).presets], [...merged.presets]);
+  const ownless = mod.presetsAcrossStores(null, [read(defaultFolder)]);
+  assert.deepEqual([...ownless.presets.keys()].sort(), ['env-alike', 'env-both', 'env-fallback']);
+  assert.equal(ownless.settled.size, 0);
+  assert.equal(mod.presetsAcrossStores(read(own), null).presets.size, 2);
+  const state = decide([
+    child(1, { startedFromEnvironmentId: 'env-fallback' }),
+    child(2, { startedFromEnvironmentId: 'env-both' }),
+  ], { presets: merged.presets, presetsSettled: merged.settled });
+  assert.deepEqual(state.sessions.map((entry) => [entry.preset, entry.decision]), [
+    [{ id: 'env-fallback', name: 'Fallback Env', kind: 'local' }, 'start'],
+    [{ id: 'env-both', name: 'Own Version', kind: 'local' }, 'start'],
+  ]);
+});
+
+test('an id the other stores describe differently is named by none of them, and stays here without a name when one description names SSH', () => {
+  const first = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-split', name: 'Split A', target: { kind: 'local' } },
+    { id: 'env-split-ssh', name: 'Local box', target: { kind: 'local' } },
+  ] } } }, 'acc1');
+  const second = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-split', name: 'Split B', target: { kind: 'local' } },
+    { id: 'env-split-ssh', name: 'Remote box', target: { kind: 'ssh' } },
+  ] } } }, 'acc1');
+  const merged = mod.presetsAcrossStores({ presets: new Map(), complete: true }, [{ presets: first, complete: true }, { presets: second, complete: true }]);
+  assert.equal(merged.presets.has('env-split'), false);
+  assert.deepEqual(merged.presets.get('env-split-ssh'), { name: null, kind: 'ssh' });
+  assert.equal(merged.settled.size, 0);
+  const records = [
+    child(1, { startedFromEnvironmentId: 'env-split' }),
+    child(2, { startedFromEnvironmentId: 'env-split-ssh' }),
+  ];
+  const state = decide(records, { presets: merged.presets });
+  assert.deepEqual(state.sessions.map((entry) => [entry.preset, entry.decision, entry.why]), [
+    [{ id: 'env-split', name: null, kind: null }, 'start', null],
+    [{ id: 'env-split-ssh', name: null, kind: 'ssh' }, 'stays', 'ssh'],
+  ]);
+  const unread = decide(records, { presets: merged.presets, presetsComplete: false });
+  assert.deepEqual(unread.sessions.map((entry) => [entry.decision, entry.why]), [['if-named', 'presets-unread'], ['stays', 'ssh']]);
+});
+
+test('an own presets file that cannot be trusted settles nothing and is one more description, so an SSH description elsewhere keeps its session here, while a trusted own file settles its ids for an incomplete read', () => {
+  const own = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-own', name: 'Own Name', target: { kind: 'local' } },
+    { id: 'env-remote', name: 'Looks Local', target: { kind: 'local' } },
+  ] } } }, 'acc1');
+  const other = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-remote', name: 'Remote box', target: { kind: 'ssh' } },
+    { id: 'env-other', name: 'Other Env', target: { kind: 'local' } },
+  ] } } }, 'acc1');
+  const records = [
+    child(1, { startedFromEnvironmentId: 'env-own' }),
+    child(2, { startedFromEnvironmentId: 'env-remote' }),
+    child(3, { startedFromEnvironmentId: 'env-other' }),
+  ];
+  const outcome = (merged, extra = {}) => decide(records, { presets: merged.presets, presetsComplete: false, presetsSettled: merged.settled, ...extra }).sessions.map((entry) => [entry.decision, entry.why, entry.preset.name]);
+  const untrusted = mod.presetsAcrossStores({ presets: own, complete: false }, [{ presets: other, complete: true }]);
+  assert.equal(untrusted.settled.size, 0);
+  assert.deepEqual(untrusted.presets.get('env-own'), { name: 'Own Name', kind: 'local' });
+  assert.deepEqual(untrusted.presets.get('env-remote'), { name: null, kind: 'ssh' });
+  assert.deepEqual(outcome(untrusted), [['if-named', 'presets-unread', null], ['stays', 'ssh', null], ['if-named', 'presets-unread', null]]);
+  const trusted = mod.presetsAcrossStores({ presets: own, complete: true }, [{ presets: other, complete: false }]);
+  assert.deepEqual([...trusted.settled].sort(), ['env-own', 'env-remote']);
+  assert.deepEqual(trusted.presets.get('env-remote'), { name: 'Looks Local', kind: 'local' });
+  assert.deepEqual(outcome(trusted), [['start', null, 'Own Name'], ['start', null, 'Looks Local'], ['if-named', 'presets-unread', null]]);
+  assert.deepEqual(outcome(trusted, { presetsSettled: ['env-own'] }), [['if-named', 'presets-unread', null], ['if-named', 'presets-unread', null], ['if-named', 'presets-unread', null]], 'a settled list that is no Set settles nothing');
+  assert.deepEqual(outcome(trusted, { presetsComplete: true }), [['start', null, 'Own Name'], ['start', null, 'Looks Local'], ['start', null, 'Other Env']]);
+});
+
+test('the saved environments a takeover looks up are the ids the decision reads, so an empty, over-long, control-character or non-string id is none', () => {
+  const records = [
+    child(1, { startedFromEnvironmentId: 'env-a' }),
+    child(2, { startedFromEnvironmentId: '' }),
+    child(3, { startedFromEnvironmentId: 'x'.repeat(129) }),
+    child(4, { startedFromEnvironmentId: `env${ESC}b` }),
+    child(5, { startedFromEnvironmentId: 7 }),
+    child(6),
+    child(7, { startedFromEnvironmentId: 'y'.repeat(128) }),
+  ];
+  const walk = mod.familyWalk(root(), records);
+  assert.deepEqual(mod.linkedEnvironments(walk), ['env-a', 'y'.repeat(128)]);
+  assert.deepEqual(mod.linkedEnvironments(walk), mod.decideLinked(walk).sessions.filter((entry) => entry.preset).map((entry) => entry.preset.id));
+  assert.deepEqual(mod.linkedEnvironments(null), []);
+  assert.deepEqual(mod.linkedEnvironments({ open: [null, {}, { record: null }] }), []);
+});
+
+test('the presets-file note names the file and why it was not read, and says that a file caught mid-write is read on the next takeover', () => {
+  const shown = (value) => `<${value}>`;
+  assert.equal(mod.presetsFileNote({ file: '/a/ccd-session-presets.json', state: 'refused' }, shown), '_The saved environments file `</a/ccd-session-presets.json>` was refused: another account owns it or can write it, it is not a regular file, it is larger than 8 MiB, or it could not be opened or read. Each linked session whose saved environment it could decide starts only when the user names it._');
+  assert.equal(mod.presetsFileNote({ file: '/b/ccd-session-presets.json', state: 'unreadable' }, shown), '_The saved environments file `</b/ccd-session-presets.json>` could not be read or did not parse. Each linked session whose saved environment it could decide starts only when the user names it; if Claude Desktop was writing it, running the takeover again reads it._');
+});
+
+test('the profiles-folder note names the folder that could not be listed and holds what its profiles could decide until it can be listed', () => {
+  const shown = (value) => `<${value}>`;
+  assert.equal(mod.presetsProfilesNote('/h/Library/Application Support/Zensu Session Hub/Claude-Profile', shown), '_The Zensu Session Hub profiles folder `</h/Library/Application Support/Zensu Session Hub/Claude-Profile>` could not be listed, so the saved environments file of each profile in it was not read. Each linked session whose saved environment one of those files could decide starts only when the user names it; once this account can list the folder, running the takeover again reads them._');
+});
+
 test('the start call is the one the takeover step names, with a bounded title and the rendered brief', () => {
   const long = `A${ESC}[2K very${LS}long${PS} title ${'x'.repeat(80)}`;
   const state = decide([child(1, { title: long }), child(2, { title: '' }), child(3, { title: undefined }, { title: '' })], { checkout: (folder) => folder === REPO, sameRepository: true });
@@ -606,7 +723,7 @@ test('every chip is listed when this session works in another repository, and on
   assert.ok(mod.CHIP_WHY.repository.includes('ran outside the repository of the session taken over'));
 });
 
-test('the store-folder remedy fits its cause and its store: a folder the user owns is fixed in place, a folder another account owns is never changed, and Claude Desktop\'s own store is never moved, also when ZENSU_CCD_STORE names it', () => {
+test('the store-folder remedy fits its cause and its store: a folder the user owns is fixed in place, a folder another account owns is never changed, and Claude Desktop\'s own store is never moved, also when ZENSU_CCD_STORE or ZENSU_CCD_EXTRA_STORES names it', () => {
   assert.equal(mod.storeFolderRemedy(null), null);
   assert.equal(mod.storeFolderRemedy({ cause: null, override: true, desktopOwn: false }), null);
   assert.equal(mod.storeFolderRemedy({ cause: 'shared-write', override: false, desktopOwn: true }), 'chmod');
@@ -624,6 +741,11 @@ test('the store-folder remedy fits its cause and its store: a folder the user ow
   assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'uninspectable', override: true, desktopOwn: false }), 'inspect');
   assert.equal(mod.storeFolderRemedy({ cause: 'not-directory', override: false, desktopOwn: true }), 'inspect');
   assert.equal(mod.storeFolderRemedy({ cause: 'uninspectable', override: true, desktopOwn: false }), 'inspect');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', named: 'ZENSU_CCD_EXTRA_STORES', override: false, desktopOwn: false }), 'move');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', named: 'ZENSU_CCD_EXTRA_STORES', override: false, desktopOwn: true }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'foreign-owner', named: 'ZENSU_CCD_EXTRA_STORES', override: false, desktopOwn: false }), 'move');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', named: null, override: false, desktopOwn: false }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', named: 'ZENSU_CCD_STORE', override: true, desktopOwn: false }), 'move');
 });
 
 test('the store-folder note names the folder, its cause, the reads it decided and the remedy text of every cause and store, with and without a link', () => {
@@ -636,9 +758,9 @@ test('the store-folder note names the folder, its cause, the reads it decided an
   assert.equal(mod.storeFolderNote({ ...plain, cause: 'shared-write', override: false, desktopOwn: true }, shown),
     `${lead('/s', 'grants group or other write', both)} It belongs to the user, so remove its group and other write bits._`);
   assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: null, override: false, desktopOwn: true }, shown),
-    `${linkLead} That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, \`/r/store\`, whose folder is then judged instead._`);
+    `${linkLead} That real folder belongs to the user and grants no group or other write, so add the store's real path, \`/r/store\`, to \`ZENSU_CCD_EXTRA_STORES\`, whose folder is then judged instead._`);
   assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: 'shared-write', override: false, desktopOwn: true }, shown),
-    `${linkLead} That real folder belongs to the user and grants group or other write, so remove those bits from it, then set \`ZENSU_CCD_STORE\` to the store's real path, \`/r/store\`._`);
+    `${linkLead} That real folder belongs to the user and grants group or other write, so remove those bits from it, then add the store's real path, \`/r/store\`, to \`ZENSU_CCD_EXTRA_STORES\`._`);
   assert.equal(mod.storeFolderNote({ ...plain, cause: 'foreign-owner', override: true, desktopOwn: false }, shown),
     `${lead('/s', 'belongs to another account', both)} It belongs to another account, and the store, named through \`ZENSU_CCD_STORE\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and point \`ZENSU_CCD_STORE\` there; never change the permissions of a folder another account owns._`);
   assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: 'foreign-owner', override: true, desktopOwn: false }, shown),
@@ -646,15 +768,28 @@ test('the store-folder note names the folder, its cause, the reads it decided an
   assert.equal(mod.storeFolderNote({ ...plain, cause: 'foreign-owner', override: true, desktopOwn: true }, shown),
     `${lead('/s', 'belongs to another account', both)} It belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write._`);
   assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: 'foreign-owner', override: false, desktopOwn: true }, shown),
-    `${linkLead} That real folder belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write, after which \`ZENSU_CCD_STORE\` set to the store's real path, \`/r/store\`, has it judged._`);
+    `${linkLead} That real folder belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write, after which the store's real path, \`/r/store\`, added to \`ZENSU_CCD_EXTRA_STORES\`, has it judged._`);
   assert.equal(mod.storeFolderNote({ ...plain, cause: 'not-directory', override: false, desktopOwn: true }, shown),
     `${lead('/s', 'is not a directory', both)} Make it a directory of the user's own with no group or other write bit._`);
   assert.equal(mod.storeFolderNote({ ...plain, cause: 'symlink', realDir: null, realCause: 'uninspectable', override: false, desktopOwn: true }, shown),
-    `${lead('/s', 'is a symbolic link', both)} Make it a directory of the user's own with no group or other write bit, then set \`ZENSU_CCD_STORE\` to the store's real path._`);
+    `${lead('/s', 'is a symbolic link', both)} Make it a directory of the user's own with no group or other write bit, then add the store's real path to \`ZENSU_CCD_EXTRA_STORES\`._`);
   assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: null, override: false, desktopOwn: true, reads: ['started'] }, shown),
-    `${lead('/l', 'is a symbolic link to `/r`', 'the continuations this session started')} That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, \`/r/store\`, whose folder is then judged instead._`);
+    `${lead('/l', 'is a symbolic link to `/r`', 'the continuations this session started')} That real folder belongs to the user and grants no group or other write, so add the store's real path, \`/r/store\`, to \`ZENSU_CCD_EXTRA_STORES\`, whose folder is then judged instead._`);
   assert.equal(mod.storeFolderNote({ ...plain, cause: 'uninspectable', override: false, desktopOwn: true, reads: ['presets'] }, (p) => `<${p}>`),
     `${lead('</s>', 'could not be inspected', 'the saved environments')} Make it a directory of the user's own with no group or other write bit._`);
   assert.equal(mod.storeFolderNote({ ...plain, cause: 'unknown-cause', override: false, desktopOwn: true, reads: [] }, shown),
     `${lead('/s', 'could not be inspected', 'what this brief read beside it')} Make it a directory of the user's own with no group or other write bit._`);
+  const extra = { named: 'ZENSU_CCD_EXTRA_STORES', override: false };
+  assert.equal(mod.storeFolderNote({ ...link, ...extra, cause: 'symlink', realCause: null, desktopOwn: true }, shown),
+    `${linkLead} That real folder belongs to the user and grants no group or other write, so name the store's real path, \`/r/store\`, in \`ZENSU_CCD_EXTRA_STORES\` in place of its entry, whose folder is then judged instead._`);
+  assert.equal(mod.storeFolderNote({ ...plain, ...extra, cause: 'foreign-owner', desktopOwn: false }, shown),
+    `${lead('/s', 'belongs to another account', both)} It belongs to another account, and the store, named through \`ZENSU_CCD_EXTRA_STORES\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and name it there in \`ZENSU_CCD_EXTRA_STORES\` in place of its entry; never change the permissions of a folder another account owns._`);
+  assert.equal(mod.storeFolderNote({ ...link, ...extra, cause: 'symlink', realCause: 'foreign-owner', desktopOwn: true }, shown),
+    `${linkLead} That real folder belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write, after which the store's real path, \`/r/store\`, named in \`ZENSU_CCD_EXTRA_STORES\` in place of its entry, has it judged._`);
+  assert.equal(mod.storeFolderNote({ ...plain, ...extra, cause: 'symlink', realDir: null, realCause: 'uninspectable', desktopOwn: true }, shown),
+    `${lead('/s', 'is a symbolic link', both)} Make it a directory of the user's own with no group or other write bit, then name the store's real path in \`ZENSU_CCD_EXTRA_STORES\` in place of its entry._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: null, override: true, named: 'ZENSU_CCD_STORE', desktopOwn: true }, shown),
+    `${linkLead} That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, \`/r/store\`, whose folder is then judged instead._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: 'shared-write', override: true, named: 'ZENSU_CCD_STORE', desktopOwn: true }, shown),
+    `${linkLead} That real folder belongs to the user and grants group or other write, so remove those bits from it, then set \`ZENSU_CCD_STORE\` to the store's real path, \`/r/store\`._`);
 });

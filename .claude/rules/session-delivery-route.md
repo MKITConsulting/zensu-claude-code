@@ -507,7 +507,11 @@ into `hooks/lib/desktop-store-read-v1.js` changes none of its answers.
   observed on macOS only. `ccdStoreCandidates` probes every platform's candidates on every host
   and resolves a relative `ZENSU_CCD_STORE` against its working directory, while `storeCandidates`
   takes only the platform's own and refuses a relative override; both name the same store wherever
-  the desktop app writes one.
+  Claude Desktop writes into its default data folder. `ccdStoreCandidates` also reads every Zensu
+  Session Hub profile store and every store `ZENSU_CCD_EXTRA_STORES` names
+  (`.claude/rules/session-trail-targeted-lookup.md`), and `storeCandidates` does not, so a linked
+  session started in a Claude Desktop that runs on a data folder of its own answers `none`
+  (`no-session-store`) and inherits nothing.
 - A `.zensu/state` that passes the writable test and still refuses the write, on a full disk for
   example, leaves the answer uncached, so the module starts again on the next prompt. The test
   covers the read-only and the foreign-owned directory, the common cases.

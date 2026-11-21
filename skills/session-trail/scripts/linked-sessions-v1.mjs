@@ -302,6 +302,7 @@ export function decideLinked(walk, options = {}) {
   const self = typeof options.self === 'string' && options.self ? options.self : null;
   const presets = options.presets instanceof Map ? options.presets : null;
   const presetsComplete = options.presetsComplete !== false;
+  const presetsSettled = options.presetsSettled instanceof Set ? options.presetsSettled : new Set();
   const cap = Number.isInteger(options.cap) && options.cap >= 0 ? options.cap : LINKED_START_CAP;
   const max = Number.isInteger(options.max) && options.max >= 0 ? options.max : LINKED_LIST_MAX;
   const checkout = typeof options.checkout === 'function' ? options.checkout : null;
@@ -314,7 +315,7 @@ export function decideLinked(walk, options = {}) {
   const factsOf = (node, nodeCheckout) => {
     const entry = entryOf(node, nodeCheckout);
     const ids = [entry.sessionId, ...entry.priorSessionIds].filter(Boolean);
-    const preset = entry.environment ? presetOf(presets, entry.environment, presetsComplete) : null;
+    const preset = entry.environment ? presetOf(presets, entry.environment, presetsComplete || presetsSettled.has(entry.environment)) : null;
     const continued = ids.some((id) => confirmed.has(id)) ? true : (ledgerComplete ? false : null);
     return { entry, ids, preset, continued };
   };
@@ -330,7 +331,7 @@ export function decideLinked(walk, options = {}) {
   const conditionalWhy = ({ entry, continued }) => {
     if (!entry.folder) return 'place';
     if (entry.kind === 'fork') return 'fork';
-    if (entry.environment && !presetsComplete) return 'presets-unread';
+    if (entry.environment && !presetsComplete && !presetsSettled.has(entry.environment)) return 'presets-unread';
     if (continued === null) return 'ledger-unread';
     if (!startedComplete) return 'started-unread';
     return null;
@@ -407,6 +408,11 @@ export function continuationsStartedBy(run, records) {
   return names;
 }
 
+export function linkedEnvironments(walk) {
+  const open = walk && Array.isArray(walk.open) ? walk.open : [];
+  return open.map((node) => (node && node.record ? environmentOf(node.record.startedFromEnvironmentId) : null)).filter(Boolean);
+}
+
 export function presetMap(doc, accountUuid) {
   const presets = new Map();
   const byAccount = doc && typeof doc === 'object' && doc.byAccount && typeof doc.byAccount === 'object' ? doc.byAccount : null;
@@ -421,13 +427,52 @@ export function presetMap(doc, accountUuid) {
   return presets;
 }
 
+export function presetsAcrossStores(own, others) {
+  const trusted = Boolean(own) && own.complete === true && own.presets instanceof Map;
+  const merged = trusted ? new Map(own.presets) : new Map();
+  const reads = [...(trusted ? [] : [own]), ...(Array.isArray(others) ? others : [])];
+  const elsewhere = new Map();
+  for (const read of reads) {
+    if (!read || !(read.presets instanceof Map)) continue;
+    for (const [id, preset] of read.presets) {
+      if (merged.has(id)) continue;
+      if (elsewhere.has(id)) elsewhere.get(id).push(preset);
+      else elsewhere.set(id, [preset]);
+    }
+  }
+  for (const [id, described] of elsewhere) {
+    const [first] = described;
+    if (described.every((preset) => preset.name === first.name && preset.kind === first.kind)) merged.set(id, first);
+    else if (described.some((preset) => preset.kind === 'ssh')) merged.set(id, { name: null, kind: 'ssh' });
+  }
+  return { presets: merged, settled: new Set(trusted ? own.presets.keys() : []) };
+}
+
+function storeNamedBy(folder) {
+  if (folder.named === 'ZENSU_CCD_STORE' || folder.named === 'ZENSU_CCD_EXTRA_STORES') return folder.named;
+  return folder.override ? 'ZENSU_CCD_STORE' : null;
+}
+
 export function storeFolderRemedy(folder) {
   if (!folder || !folder.cause) return null;
   const cause = folder.cause === 'symlink' ? folder.realCause : folder.cause;
   if (cause === null) return 'real-path';
   if (cause === 'shared-write') return 'chmod';
-  if (cause === 'foreign-owner') return folder.override && folder.desktopOwn === false ? 'move' : 'admin';
+  if (cause === 'foreign-owner') return storeNamedBy(folder) && folder.desktopOwn === false ? 'move' : 'admin';
   return 'inspect';
+}
+
+function realPathStep(folder, value) {
+  const named = storeNamedBy(folder);
+  if (named === 'ZENSU_CCD_STORE') return value ? `set \`ZENSU_CCD_STORE\` to the store's real path, ${value}` : 'set `ZENSU_CCD_STORE` to the store\'s real path';
+  const real = value ? `the store's real path, ${value},` : 'the store\'s real path';
+  return named ? `name ${real} in \`ZENSU_CCD_EXTRA_STORES\` in place of its entry` : `add ${real} to \`ZENSU_CCD_EXTRA_STORES\``;
+}
+
+function realPathJudged(folder, value) {
+  const named = storeNamedBy(folder);
+  if (named === 'ZENSU_CCD_STORE') return `\`ZENSU_CCD_STORE\` set to the store's real path, ${value},`;
+  return named ? `the store's real path, ${value}, named in \`ZENSU_CCD_EXTRA_STORES\` in place of its entry,` : `the store's real path, ${value}, added to \`ZENSU_CCD_EXTRA_STORES\`,`;
 }
 
 const STORE_FOLDER_CAUSE = Object.freeze({
@@ -444,16 +489,29 @@ export function storeFolderNote(folder, shown) {
   const realStore = folder.realStore ? `\`${shown(folder.realStore)}\`` : 'the store\'s real path';
   const subject = linked ? 'That real folder' : 'It';
   const lead = `_The folder that holds the Claude Desktop store, \`${shown(folder.dir)}\`, ${STORE_FOLDER_CAUSE[folder.cause] || STORE_FOLDER_CAUSE.uninspectable}${linked ? ` to \`${shown(folder.realDir)}\`` : ''}, so ${reads} cannot be trusted, and each linked session that depends on them starts only when the user names it.`;
+  const named = storeNamedBy(folder);
   const remedy = {
-    'real-path': `That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, ${realStore}, whose folder is then judged instead.`,
+    'real-path': `That real folder belongs to the user and grants no group or other write, so ${realPathStep(folder, realStore)}, whose folder is then judged instead.`,
     chmod: linked
-      ? `That real folder belongs to the user and grants group or other write, so remove those bits from it, then set \`ZENSU_CCD_STORE\` to the store's real path, ${realStore}.`
+      ? `That real folder belongs to the user and grants group or other write, so remove those bits from it, then ${realPathStep(folder, realStore)}.`
       : 'It belongs to the user, so remove its group and other write bits.',
-    move: `${subject} belongs to another account, and the store, named through \`ZENSU_CCD_STORE\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and point \`ZENSU_CCD_STORE\` there; never change the permissions of a folder another account owns.`,
-    admin: `${subject} belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write${linked ? `, after which \`ZENSU_CCD_STORE\` set to the store's real path, ${realStore}, has it judged` : ''}.`,
-    inspect: `Make it a directory of the user's own with no group or other write bit${folder.cause === 'symlink' ? ', then set `ZENSU_CCD_STORE` to the store\'s real path' : ''}.`,
+    move: `${subject} belongs to another account, and the store, named through \`${named}\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and ${named === 'ZENSU_CCD_STORE' ? 'point `ZENSU_CCD_STORE` there' : 'name it there in `ZENSU_CCD_EXTRA_STORES` in place of its entry'}; never change the permissions of a folder another account owns.`,
+    admin: `${subject} belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write${linked ? `, after which ${realPathJudged(folder, realStore)} has it judged` : ''}.`,
+    inspect: `Make it a directory of the user's own with no group or other write bit${folder.cause === 'symlink' ? `, then ${realPathStep(folder, null)}` : ''}.`,
   }[storeFolderRemedy(folder)];
   return `${lead}${remedy ? ` ${remedy}` : ''}_`;
+}
+
+export function presetsFileNote(unread, shown) {
+  const head = `_The saved environments file \`${shown(unread.file)}\``;
+  const held = 'Each linked session whose saved environment it could decide starts only when the user names it';
+  return unread.state === 'refused'
+    ? `${head} was refused: another account owns it or can write it, it is not a regular file, it is larger than 8 MiB, or it could not be opened or read. ${held}._`
+    : `${head} could not be read or did not parse. ${held}; if Claude Desktop was writing it, running the takeover again reads it._`;
+}
+
+export function presetsProfilesNote(folder, shown) {
+  return `_The Zensu Session Hub profiles folder \`${shown(folder)}\` could not be listed, so the saved environments file of each profile in it was not read. Each linked session whose saved environment one of those files could decide starts only when the user names it; once this account can list the folder, running the takeover again reads them._`;
 }
 
 export function unreadReportsOf(record, shown = UNREAD_REPORTS_SHOWN) {
