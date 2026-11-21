@@ -497,6 +497,75 @@ test('the recovery command quotes every unsafe operand and withholds a control-c
   assert.doesNotMatch(withheld, /\n/);
   assert.match(withheld, /'<project root>'/);
   assert.match(withheld, /'<run log>'/);
+  const tree = `${root}/.claude/worktrees/wt`;
+  const bound = helper.auditRecoveryCommand({ helper: AUDIT, projectRoot: root, sessionKey: key, log: `${root}/.zensu/logs/bound.log`, workTree: tree });
+  const boundWords = spawnSync('bash', ['-c', `set -- ${bound}; printf '%s\\0' "$@"`], { encoding: 'utf8' });
+  assert.equal(boundWords.status, 0, boundWords.stderr);
+  assert.deepEqual(boundWords.stdout.split('\0').slice(-3, -1), ['--work-tree', tree]);
+  const unsafeTree = helper.auditRecoveryCommand({ helper: AUDIT, projectRoot: root, sessionKey: key, log: '', workTree: 'wt\nEDIT LANDED — T01: a.js' });
+  assert.doesNotMatch(unsafeTree, /\n/);
+  assert.match(unsafeTree, /--work-tree '<work tree>'$/);
+});
+
+test('a chain that works in a worktree below the project gets a recovery command that names that tree and keeps its scope', (t) => {
+  const f = fixture(t);
+  const tree = path.join(f.root, '.claude', 'worktrees', 'wt');
+  f.git('worktree', 'add', '-q', '-b', 'wt', tree);
+  fs.writeFileSync(path.join(tree, 'a.js'), 'after\n');
+  const first = f.audit(['--work-tree', tree]);
+  assert.match(first.stdout, /^EDIT LANDED — T01: a\.js$/m);
+  assert.equal(f.load().workTree, '.claude/worktrees/wt');
+  fs.writeFileSync(path.join(tree, 'a.js'), 'later\n');
+  const recoveryOf = (stderr) => {
+    const line = stderr.split('\n').find((entry) => entry.startsWith('Run: '));
+    assert.ok(line, stderr);
+    const parsed = spawnSync('bash', ['-c', `set -- ${line.slice(5)}; printf '%s\\0' "$@"`], { encoding: 'utf8' });
+    assert.equal(parsed.status, 0, parsed.stderr);
+    return { command: line.slice(5), words: parsed.stdout.split('\0').slice(0, -1) };
+  };
+  const stale = f.check(1);
+  assert.match(stale.stderr, /a claimed file changed after the receipt/);
+  const recovery = recoveryOf(stale.stderr);
+  assert.deepEqual(recovery.words, ['bash', AUDIT, '--log', f.log, '--project', f.root, '--session', f.key, '--work-tree', tree]);
+  const recovered = spawnSync('bash', ['-c', recovery.command], { env: f.env, cwd: f.root, encoding: 'utf8' });
+  assert.equal(recovered.status, 1, recovered.stdout + recovered.stderr);
+  assert.match(recovered.stdout, /^PENDING PREDICATE — T01: a\.js /m);
+  assert.equal(f.load().workTree, '.claude/worktrees/wt');
+  assert.equal(f.load().auditScope.claims[0].landedOnce, true, 'the scope of the work tree was kept, so the claim keeps its landing evidence');
+  writeWorkflow(f.root, f.session);
+  const gated = f.run(['--log', f.log, '--project', f.root], { status: 2, extraEnv: { CLAUDE_CODE_SESSION_ID: f.session } });
+  assert.match(gated.stderr, /AUDIT SESSION REQUIRED/);
+  assert.deepEqual(recoveryOf(gated.stderr).words.slice(-2), ['--work-tree', tree]);
+});
+
+test('a git fault during an audit of a worktree chain keeps the recorded work tree, so the recovery command still names it', (t) => {
+  const f = fixture(t);
+  const tree = path.join(f.root, '.claude', 'worktrees', 'wt');
+  f.git('worktree', 'add', '-q', '-b', 'wt', tree);
+  fs.writeFileSync(path.join(tree, 'a.js'), 'after\n');
+  f.audit(['--work-tree', tree]);
+  assert.equal(f.load().auditScope.claims[0].certified, true);
+  fs.writeFileSync(path.join(tree, 'a.js'), 'later\n');
+  const bin = path.join(f.base, 'failing-bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'git'), '#!/bin/sh\necho "fatal: synthetic git failure" >&2\nexit 128\n', { mode: 0o755 });
+  const faulted = f.audit(['--work-tree', tree], 2, { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+  assert.match(faulted.stdout, /EDIT LANDING AUDIT FAULT — .*synthetic git failure/);
+  assert.match(f.load().auditFailure, /git failed/);
+  assert.equal(f.load().auditScope.claimRoot, tree, 'the fault keeps the scope on the work tree');
+  assert.equal(f.load().workTree, '.claude/worktrees/wt', 'the fault checkpoint records the work tree its scope is bound to');
+  const refused = f.check(1);
+  assert.match(refused.stderr, /did not complete/);
+  const line = refused.stderr.split('\n').find((entry) => entry.startsWith('Run: '));
+  assert.ok(line, refused.stderr);
+  const words = spawnSync('bash', ['-c', `set -- ${line.slice(5)}; printf '%s\\0' "$@"`], { encoding: 'utf8' });
+  assert.equal(words.status, 0, words.stderr);
+  assert.deepEqual(words.stdout.split('\0').slice(0, -1), ['bash', AUDIT, '--log', f.log, '--project', f.root, '--session', f.key, '--work-tree', tree]);
+  const recovered = spawnSync('bash', ['-c', line.slice(5)], { env: f.env, cwd: f.root, encoding: 'utf8' });
+  assert.equal(recovered.status, 1, recovered.stdout + recovered.stderr);
+  assert.match(recovered.stdout, /^PENDING PREDICATE — T01: a\.js /m);
+  assert.equal(f.load().workTree, '.claude/worktrees/wt');
+  assert.equal(f.load().auditScope.claims[0].landedOnce, true, 'the retry continued the scope of the work tree, so the claim keeps its landing evidence');
 });
 
 test('--check-receipt refuses a missing, pending or interrupted receipt and its own malformed operands', (t) => {
@@ -506,6 +575,8 @@ test('--check-receipt refuses a missing, pending or interrupted receipt and its 
   const pending = f.check(1);
   assert.match(pending.stderr, /EDIT LANDING RECEIPT STALE — the receipt is not clean/);
   assert.match(pending.stderr, /^Run: /m);
+  assert.match(pending.stderr, /whose supersededBy names the replacing step/);
+  assert.doesNotMatch(pending.stderr.split('\n').find((line) => line.startsWith('Run: ')), /--work-tree/);
   f.audit(['--predicates', f.putProof(['T01'], { sha256: '0'.repeat(64) })], 2);
   assert.match(f.check(1).stderr, /did not complete/);
   f.run(['--check-receipt', '--project', f.root], { status: 2 });
@@ -606,7 +677,7 @@ test('every audit bound refuses with its remedy, and the run log is hashed in ch
     schema: helper.PREDICATE_SCHEMA,
     claims: [{ step: 'T01', path: 'a.js', sha256: prepared.snapshots['a.js'].sha256, ...entry }],
   }));
-  const verify = (file) => [...helper.verifyPredicates(s.base, file, prepared.claims, prepared.snapshots, new Set(['a.js']), '')];
+  const verify = (file) => [...helper.verifyPredicates(s.base, file, prepared.claims, prepared.snapshots, new Set(['a.js']), '').proved];
   helper.LIMITS.literals = 1;
   refuses(() => verify(proof({ present: ['af', 'ter'] })), /at most 1 nonblank strings of at most 4096 bytes; prove the claim with fewer, shorter literals$/);
   helper.LIMITS.literals = saved.literals;
@@ -739,4 +810,194 @@ test('receiptFile names the receipt the audit writes, and tree-note speaks only 
   fs.writeFileSync(f.receipt, JSON.stringify(receipt));
   assert.deepEqual(note(f.receipt), { code: 0, out: `${helper.treeUnverifiedLine('more than 20000 untracked files')}\n` });
   assert.equal(note(path.join(f.base, 'absent.json')).code, helper.EXIT.none);
+});
+
+function writeProofs(f, entries, file = 'a.js') {
+  const content = fs.readFileSync(path.join(f.root, file));
+  fs.writeFileSync(f.proof, JSON.stringify({
+    schema: helper.PREDICATE_SCHEMA,
+    claims: entries.map((entry) => ({ path: file, sha256: hash(content), ...entry })),
+  }));
+  return f.proof;
+}
+
+function replacedClaim(t) {
+  const f = fixture(t);
+  f.audit();
+  fs.writeFileSync(path.join(f.root, 'a.js'), 'neutral\n');
+  fs.appendFileSync(f.log, 'R1-F9 IMPL completed — files: a.js\n');
+  return f;
+}
+
+const REPLACING = { step: 'R1-F9', present: ['neutral'] };
+const REPLACED = { step: 'T01', absent: ['after'], supersededBy: 'R1-F9' };
+const landingFlags = (f) => f.load().auditScope.claims.map((claim) => claim.landedOnce === true);
+
+test('a certified claim whose edit a later proven claim removed is graded superseded with a supersede proof', (t) => {
+  const f = replacedClaim(t);
+  const pending = f.audit([], 1);
+  assert.match(pending.stdout, /^PENDING PREDICATE — T01: a\.js /m);
+  assert.match(pending.stdout, /^PENDING PREDICATE — R1-F9: a\.js /m);
+  assert.equal(f.load().pending, 2);
+  assert.deepEqual(landingFlags(f), [true, true]);
+  const result = f.audit(['--predicates', writeProofs(f, [REPLACING, REPLACED])]);
+  assert.match(result.stdout, /^EDIT SUPERSEDED — T01: a\.js, replaced by R1-F9$/m);
+  assert.match(result.stdout, /^EDIT LANDED \(verified predicate or unchanged prior certification\) — R1-F9: a\.js$/m);
+  assert.match(result.stdout,
+    /^EDIT LANDING AUDIT — claims=2 landed=2 not_landed=0 unverified=0 pending=0 exempt_ignored=0 exempt_verified=0 exempt_superseded=1$/m);
+  const receipt = f.load();
+  assert.equal(receipt.clean, true);
+  assert.equal(receipt.claims, 2);
+  assert.equal(receipt.landed, 2);
+  assert.equal(receipt.exemptSuperseded, 1);
+  assert.deepEqual(receipt.auditScope.claims.map(({ step, certified, supersededBy, landedOnce }) => ({ step, certified, supersededBy, landedOnce })), [
+    { step: 'T01', certified: false, supersededBy: 'R1-F9', landedOnce: true },
+    { step: 'R1-F9', certified: true, supersededBy: undefined, landedOnce: undefined },
+  ]);
+  assert.match(f.check(0).stdout, /EDIT LANDING RECEIPT FRESH/);
+});
+
+test('a later audit keeps a claim superseded while the bytes are unchanged and grades it pending again once they change', (t) => {
+  const f = replacedClaim(t);
+  f.audit(['--predicates', writeProofs(f, [REPLACING, REPLACED])]);
+  const kept = f.audit();
+  assert.match(kept.stdout, /^EDIT SUPERSEDED — T01: a\.js, replaced by R1-F9$/m);
+  assert.equal(f.load().exemptSuperseded, 1);
+  assert.equal(f.load().clean, true);
+  f.check(0);
+  fs.writeFileSync(path.join(f.root, 'a.js'), 'neutral again\n');
+  assert.match(f.check(1).stderr, /a claimed file changed after the receipt/);
+  const changed = f.audit([], 1);
+  assert.match(changed.stdout, /^PENDING PREDICATE — T01: a\.js /m);
+  assert.doesNotMatch(changed.stdout, /EDIT SUPERSEDED|exempt_superseded/);
+  assert.equal(f.load().pending, 2);
+  assert.equal('exemptSuperseded' in f.load(), false);
+  assert.equal(f.load().auditScope.claims[0].supersededBy, undefined);
+  assert.deepEqual(landingFlags(f), [true, true]);
+  f.audit(['--predicates', writeProofs(f, [{ step: 'R1-F9', present: ['neutral again'] }, REPLACED])]);
+  assert.equal(f.load().exemptSuperseded, 1);
+  f.check(0);
+});
+
+test('a supersede proof fails the audit with its own sentence for every rule it breaks', (t) => {
+  const refused = (f, entries, pattern) => {
+    const result = f.audit(['--predicates', writeProofs(f, entries)], 2);
+    assert.match(result.stderr, pattern);
+    assert.doesNotMatch(result.stdout, /EDIT SUPERSEDED|EDIT LANDED/);
+    assert.equal(f.load().clean, false);
+  };
+  const f = replacedClaim(t);
+  refused(f, [REPLACING, { ...REPLACED, supersededBy: 'T01' }], /names its own step as the replacing step/);
+  refused(f, [REPLACING, { ...REPLACED, present: ['neutral'] }], /a supersede proof carries no present literal/);
+  refused(f, [REPLACING, { step: 'T01', supersededBy: 'R1-F9' }], /a supersede proof needs at least one absent literal/);
+  refused(f, [REPLACING, { ...REPLACED, supersededBy: '' }], /needs the exact step label of the replacing claim/);
+  refused(f, [REPLACING, { ...REPLACED, supersededBy: 'R9-F9' }], /names a replacing step with no later claim on that file/);
+  refused(f, [REPLACED], /names a replacing claim that is not landed in this audit/);
+  refused(f, [REPLACING, { step: 'T01', absent: ['after'] }, REPLACED], /names a claim that is landed; a landed claim needs no supersede/);
+  refused(f, [REPLACING, { ...REPLACED, absent: ['neutral'] }], /a literal predicate does not hold/);
+  f.audit(['--predicates', writeProofs(f, [REPLACING, REPLACED])]);
+  assert.equal(f.load().exemptSuperseded, 1, 'the refusals left the scope a valid proof still closes');
+
+  const certified = fixture(t);
+  certified.audit();
+  fs.appendFileSync(certified.log, 'R1-F9 IMPL completed — files: a.js\n');
+  refused(certified, [{ step: 'R1-F9', present: ['after'] }, { step: 'T01', absent: ['before'], supersededBy: 'R1-F9' }],
+    /names a claim that is landed; a landed claim needs no supersede/);
+
+  const earlier = fixture(t);
+  fs.writeFileSync(earlier.log, 'R0 IMPL completed — files: a.js\nT01 IMPL completed — files: a.js\n');
+  earlier.audit();
+  fs.writeFileSync(path.join(earlier.root, 'a.js'), 'neutral\n');
+  refused(earlier, [{ step: 'R0', present: ['neutral'] }, { ...REPLACED, supersededBy: 'R0' }],
+    /names a replacing step with no later claim on that file/);
+
+  const unlanded = fixture(t);
+  unlanded.audit(['--dirty-before', unlanded.dirty], 1);
+  fs.writeFileSync(path.join(unlanded.root, 'a.js'), 'neutral\n');
+  fs.appendFileSync(unlanded.log, 'R1-F9 IMPL completed — files: a.js\n');
+  refused(unlanded, [REPLACING, REPLACED], /names a claim for which this audit scope records no landing/);
+});
+
+test('a fix-round claim gains landing evidence in the audit that first sees it only when its file changed and no other step newly claims it', (t) => {
+  const f = fixture(t);
+  f.audit();
+  fs.appendFileSync(f.log, 'R1-F1 IMPL completed — files: a.js\n');
+  f.audit([], 1);
+  assert.deepEqual(landingFlags(f), [false, false], 'an unchanged file is no evidence for the claim that first names it');
+  fs.writeFileSync(path.join(f.root, 'a.js'), 'after\nround two\n');
+  fs.appendFileSync(f.log, 'R2-F1 IMPL completed — files: a.js\n');
+  f.audit([], 1);
+  assert.deepEqual(landingFlags(f), [true, false, true]);
+
+  const shared = fixture(t);
+  shared.audit();
+  fs.writeFileSync(path.join(shared.root, 'a.js'), 'after\nshared\n');
+  fs.appendFileSync(shared.log, 'R1-F1 IMPL completed — files: a.js\nR1-F2 IMPL completed — files: a.js\n');
+  shared.audit([], 1);
+  assert.deepEqual(landingFlags(shared), [true, false, false], 'two steps that newly claim one file share no evidence');
+});
+
+test('a later fix that removes an earlier fix supersedes it through the landing evidence of the round that made it', (t) => {
+  const f = fixture(t);
+  f.audit();
+  fs.writeFileSync(path.join(f.root, 'a.js'), 'after\nround one\n');
+  fs.appendFileSync(f.log, 'R1-F1 IMPL completed — files: a.js\n');
+  f.audit([], 1);
+  fs.writeFileSync(path.join(f.root, 'a.js'), 'after\nround two\n');
+  fs.appendFileSync(f.log, 'R2-F1 IMPL completed — files: a.js\n');
+  f.audit([], 1);
+  assert.equal(f.load().pending, 3);
+  const result = f.audit(['--predicates', writeProofs(f, [
+    { step: 'T01', present: ['after'], absent: ['before'] },
+    { step: 'R2-F1', present: ['round two'] },
+    { step: 'R1-F1', absent: ['round one'], supersededBy: 'R2-F1' },
+  ])]);
+  assert.match(result.stdout, /^EDIT SUPERSEDED — R1-F1: a\.js, replaced by R2-F1$/m);
+  assert.match(result.stdout, /claims=3 landed=3 .* exempt_superseded=1$/m);
+  f.check(0);
+});
+
+test('a file a later step deleted supersedes the claim that created it through the deletion form', (t) => {
+  const f = fixture(t);
+  fs.mkdirSync(path.join(f.root, 'src'));
+  fs.writeFileSync(path.join(f.root, 'src', 'gone.js'), 'created\n');
+  fs.writeFileSync(f.log, 'T01 IMPL completed — files: src/gone.js\n');
+  f.audit();
+  fs.unlinkSync(path.join(f.root, 'src', 'gone.js'));
+  fs.appendFileSync(f.log, 'R1-F2 IMPL completed — files: src/gone.js\n');
+  const deletion = (extra) => {
+    fs.writeFileSync(f.proof, JSON.stringify({ schema: helper.PREDICATE_SCHEMA, claims: [
+      { step: 'R1-F2', path: 'src/gone.js', missing: true },
+      { step: 'T01', path: 'src/gone.js', missing: true, supersededBy: 'R1-F2', ...extra },
+    ] }));
+    return f.proof;
+  };
+  assert.match(f.audit(['--predicates', deletion({ sha256: '0'.repeat(64) })], 2).stderr,
+    /a deletion proof carries only step, path, missing and supersededBy/);
+  const result = f.audit(['--predicates', deletion({})]);
+  assert.match(result.stdout, /^EDIT SUPERSEDED — T01: src\/gone\.js, replaced by R1-F2$/m);
+  assert.equal(f.load().exemptSuperseded, 1);
+  assert.equal(f.load().clean, true);
+  f.check(0);
+});
+
+test('a chain without a supersede proof keeps its tally line, its receipt keys and its claim entries', (t) => {
+  const f = fixture(t);
+  const first = f.audit();
+  assert.match(first.stdout, /^EDIT LANDING AUDIT — claims=1 landed=1 not_landed=0 unverified=0 pending=0 exempt_ignored=0 exempt_verified=0$/m);
+  const receipt = f.load();
+  assert.deepEqual(Object.keys(receipt),
+    ['schema', 'session', 'log', 'claims', 'landed', 'notLanded', 'unverified', 'pending', 'exemptIgnored', 'exemptVerified', 'clean', 'auditScope']);
+  assert.deepEqual(Object.keys(receipt.auditScope.claims[0]), ['step', 'raw', 'path', 'certified']);
+  assert.equal('superseded' in receipt.auditScope, false);
+  assert.equal('landedOnce' in receipt.auditScope, false);
+  fs.writeFileSync(path.join(f.root, 'a.js'), 'after second\n');
+  fs.appendFileSync(f.log, 'SR1 IMPL completed — files: a.js\n');
+  const second = f.audit(['--predicates', f.putProof(['T01', 'SR1'], { present: ['after second'] })]);
+  assert.doesNotMatch(second.stdout, /EDIT SUPERSEDED|exempt_superseded/);
+  assert.equal('exemptSuperseded' in f.load(), false);
+  assert.deepEqual(f.load().auditScope.claims.map((claim) => Object.keys(claim)), [
+    ['step', 'raw', 'path', 'certified'],
+    ['step', 'raw', 'path', 'certified'],
+  ]);
 });

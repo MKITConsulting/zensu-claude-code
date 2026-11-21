@@ -52,14 +52,14 @@
       "summary": "The deferred-review claim case table."
     },
     {
-      "path": "tests/structure/edit-landing-claims-v1.test.js", "registered": 27,
+      "path": "tests/structure/edit-landing-claims-v1.test.js", "registered": 28,
       "runs": [{ "driver": "tests/structure/test-edit-landing-audit.sh" }],
       "summary": "The edit-landing claim grammar: the files split, brace and glob expansion, prose candidates, audited corrections and the append pre-check."
     },
     {
-      "path": "tests/structure/edit-landing-scope-v1.test.js", "registered": 37, "skips": {"win32": 1},
+      "path": "tests/structure/edit-landing-scope-v1.test.js", "registered": 46, "skips": {"win32": 1},
       "runs": [{ "driver": "tests/structure/test-edit-landing-audit.sh" }],
-      "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal."
+      "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, supersede proofs and their landing evidence, git-fault preservation, receipt freshness and the missing-session refusal."
     },
     {
       "path": "tests/structure/evidence-report-v1.test.js", "registered": 84, "skips": {"win32": 4},
@@ -206,7 +206,7 @@
       "summary": "The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts."
     },
     {
-      "path": "tests/structure/review-packet-v1.test.js", "registered": 33,
+      "path": "tests/structure/review-packet-v1.test.js", "registered": 34,
       "runs": [{ "driver": "tests/structure/test-review-packet.sh" }],
       "summary": "The canonical review change set and the immutable per-round review packet."
     },
@@ -216,7 +216,7 @@
       "summary": "Delta-scoped review rounds: which files and findings a fix round reviews."
     },
     {
-      "path": "tests/structure/round-prepare-v1.test.js", "registered": 43,
+      "path": "tests/structure/round-prepare-v1.test.js", "registered": 44,
       "runs": [{ "driver": "tests/structure/test-round-prepare.sh" }],
       "summary": "Fix-round bookkeeping: the claim-label grammar, the round-start content snapshot, landing attribution, the fixed ledger lines and the packet files."
     },

@@ -315,12 +315,11 @@ off-changeset finding is not by itself a defect), 🟡 not run
 (hooks.findingVerification disabled) when the gate was skipped and emitted no
 line at all, and 🟢 only when the gate RAN and neither condition holds —
 never ⚪. Two further rows carry text VERBATIM and
-must never be dropped, paraphrased, or shortened: **Edit landing** takes the step 5b
+must never be dropped, paraphrased or shortened: **Edit landing** takes the step 5b
 close marker plus any `EDIT NOT LANDED` line and the `UNVERIFIED (no claims logged)`
-or unresolved `PENDING PREDICATE` close (those are NOT clean states, and both
-take 🔴, never 🟡) — a claimed edit
-that never produced a change must not vanish between the Phase 6 report and this
-summary; **Full suite** takes the `FULL SUITE — …` lines `--chain-done` printed
+or unresolved `PENDING PREDICATE` close (not clean: both take 🔴, never 🟡)
+and any `EDIT SUPERSEDED` line (🟡: a later claimed step replaced it) — a claimed
+edit that produced no change must never vanish; **Full suite** takes the `FULL SUITE — …` lines `--chain-done` printed
 (Phase 4 finalize step 2): 🟢 only for `pass`; 🟡 for `pass-tree-unverified`,
 `deferred-ci`, `not-applicable`, `not checked` and an advisory `missing`; 🔴 for every other
 state, advisory or not, including `escaped`. Both verbatim cells follow the `## Open` escaping rule
