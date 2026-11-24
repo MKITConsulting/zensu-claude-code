@@ -28,6 +28,8 @@ paths:
   - "tests/structure/test-playwright-cli-drift.sh"
   - "docs/verify-feature.md"
   - "docs/verify-feature-consent-spec.md"
+  - "docs/verify-feature-network-fence-spec.md"
+  - "tests/integration/verify-fence/**"
   - "evals/verify-feature/**"
 ---
 
@@ -612,11 +614,12 @@ announces a prompt rather than a capability the plugin hands itself.
   its recorder `tests/structure/fixtures/record-playwright-cli-argv.js` ↔ the doctor's version
   rows. A playwright-cli upgrade re-records the fixture with the recorder FIRST — it runs the new
   version's own `minimist.js` and refuses when `program.js` no longer carries the boolean set, the
-  minimist call or the `-s`/`-g` folds it asserts — runs the fence probe SECOND
-  (`tests/integration/verify-fence/probe.mjs`: `matrix`, `remote` and `gated`, as its README
-  describes), because no suite drives a real browser and the three launch arguments are judged
-  by Chrome, not by the gate — and bumps the constant last; bumping the
-  number alone asserts a measurement nobody made. The same probe run is owed before a new Chrome
+  minimist call or the `-s`/`-g` folds it asserts — runs the fence probe SECOND with the new
+  release first on `PATH` (`tests/integration/verify-fence/probe.mjs`: `matrix` and `remote`,
+  as its README describes), because no suite drives a real browser and the three launch
+  arguments are judged by Chrome, not by the gate — and bumps the constant last, running the
+  probe's `gated` mode once the constant names the release, because the run-config helper
+  refuses every other version. Bumping the number alone asserts a measurement nobody made. The same probe run is owed before a new Chrome
   channel joins `CHROMIUM_BROWSERS` and before `fenceArgs` changes. The recorder also asserts `registry.js`'s
   `sessionName || process.env.PLAYWRIGHT_CLI_SESSION` precedence and records `pkg.bin`, which the
   unit suite compares with `CLI_BASENAMES`. The version is hand-copied as prose into
@@ -754,10 +757,12 @@ announces a prompt rather than a capability the plugin hands itself.
   `docs/verify-feature-auth-state-spec.md` keep that earlier account as a record: the consent
   spec's dated opening and the auth-state spec's header defer to the operator docs.
 
-**The release signal (`.github/workflows/playwright-cli-drift.yml`).** No live tier runs
-`playwright-cli`, and none is needed: the parser port is pinned by a fixture recorded from the
-real CLI, and the gate denies an argument shape it does not recognize. What goes stale is the
-knowledge that a newer release exists, and a nightly check supplies only that. Its `drift` job
+**The release signal (`.github/workflows/playwright-cli-drift.yml`).** No CI tier runs
+`playwright-cli`. The parser port is pinned by a fixture recorded from the real CLI and the gate
+denies an argument shape it does not recognize, but the three launch arguments are judged by
+Chrome, so only the person-run fence probe measures them. What goes stale is the knowledge that
+a newer release exists, and a nightly check supplies only that; the steps of its report name the
+probe runs a bump owes. Its `drift` job
 keeps the read-only token and runs `.github/scripts/playwright-cli-drift.sh`, which reads the
 abbreviated npm registry metadata of `@playwright/cli` with one `curl`, takes
 `PLAYWRIGHT_CLI_SOURCE_VERSION` and `PACKAGE_NAME` from the two modules, never from a copy, and

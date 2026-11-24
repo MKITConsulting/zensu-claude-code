@@ -4,8 +4,11 @@
 No suite and no CI job starts it, and `tests/run-all.sh` never does: it drives a real browser.
 
 Run it when the pinned `playwright-cli` version moves, when a new Chrome channel is to be
-admitted, and before a change to the fence arguments ships. The measurements it produced are
-recorded, with their versions, in `.claude/rules/browser-consent-gate.md`. The design is in
+admitted, and before a change to the fence arguments ships. For a new release, put it first on
+`PATH`: `matrix` and `remote` measure it as installed, and `gated` runs once
+`PLAYWRIGHT_CLI_SOURCE_VERSION` names it, because the run-config helper refuses every other
+version. The measurements it produced are recorded, with their versions, in
+`.claude/rules/browser-consent-gate.md`. The design is in
 `docs/verify-feature-network-fence-spec.md`.
 
 ## What it does

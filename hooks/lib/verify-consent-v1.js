@@ -1461,9 +1461,13 @@ function globalConfigFault(env) {
   return '';
 }
 
-function ambientOverride(env) {
+function ambientOverride(env, platform = process.platform) {
+  const fold = platform === 'win32' ? (name) => name.toUpperCase() : (name) => name;
   for (const name of Object.keys(env || {})) {
-    if ((/^PLAYWRIGHT_MCP_/.test(name) || name === WORKER_NETWORK_ENV) && env[name] !== undefined && env[name] !== '') return name;
+    const key = fold(name);
+    if ((/^PLAYWRIGHT_MCP_/.test(key) || key === WORKER_NETWORK_ENV) && env[name] !== undefined && env[name] !== '') {
+      return key === WORKER_NETWORK_ENV ? WORKER_NETWORK_ENV : name;
+    }
   }
   return '';
 }
@@ -1545,7 +1549,7 @@ function judgeCall(call, context) {
     if (typeof args.config !== 'string') return { deny: REASONS.CONFIG_REQUIRED };
     const config = readRunConfig(args.config);
     if (!config.ok) return { deny: config.fault };
-    const ambient = ambientOverride(context.env);
+    const ambient = ambientOverride(context.env, context.platform);
     if (ambient) return { deny: ambientDeny(ambient) };
     const globalFault = globalConfigFault(context.env);
     if (globalFault) return { deny: globalFault };
@@ -1614,7 +1618,7 @@ function evaluate({ command, payload, env, records, policy, platform }) {
     return marks.named ? { verdict: 'deny', reason: REASONS.SESSION_UNRESOLVED } : { verdict: 'none' };
   }
   const answerable = ANSWERABLE_MODES.includes((payload || {}).permission_mode);
-  const context = { principal: principalOf(payload || {}), env: env || {}, policy, answerable };
+  const context = { principal: principalOf(payload || {}), env: env || {}, policy, answerable, platform };
   const remembered = Array.isArray(records) ? records : [];
   const known = new Set(remembered.map((entry) => entry.origin));
   const knownRestored = new Set(remembered.filter(restoredRecord).map((entry) => entry.origin));
@@ -1870,6 +1874,9 @@ module.exports = {
   SESSION_PREFIX,
   SESSION_RE,
   STATE_SEGMENTS,
+  WORKER_NETWORK_ENV,
+  ambientDeny,
+  ambientOverride,
   analyzeCommand,
   appendRecord,
   authGuardRegistered,

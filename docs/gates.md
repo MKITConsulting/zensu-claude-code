@@ -901,7 +901,9 @@ session is prose, not a boundary.
   requests out of request interception, when the
   global `~/.playwright/cli.config.json` sets anything beyond a short list of presentation keys
   or selects a browser other than Chromium, and when `--browser` names anything but a Chromium
-  channel, because the fence is made of Chromium switches.
+  channel, because the fence is made of Chromium switches. The run-config helper refuses the same
+  launch variables in the shell it runs in and then writes no run config, so a variable that a
+  shell profile sets for that shell alone stops the run as well.
 - **Navigation targets.** Every origin in the run config, and the URL of `open`, `goto` and
   `tab-new`, pass through the floor below.
 
@@ -931,10 +933,11 @@ approved host and port passes it. Request interception over `network.allowedOrig
 second: it fails an HTTP(S) request of a page, a dedicated worker or a service worker to an
 origin outside the list with `net::ERR_BLOCKED_BY_CLIENT`, and it sees neither a WebSocket nor
 a shared worker's request. Measured on 2026-11-18 with playwright-cli 0.1.24: Google Chrome 157
-on macOS, and the bundled Chrome for Testing 158 with its headless shell on macOS and on Linux;
-Windows and the Edge and prerelease Chrome channels were not measured, and there only the
-second layer is known to hold what it held before. WebRTC over UDP is outside both layers, an
-open gap. The browser still follows a server redirect between two origins of the run config, a
+on macOS, and the bundled Chrome for Testing 158 with its headless shell on macOS and on Linux
+aarch64 in a container; Windows, Linux on x86-64 and the Edge and prerelease Chrome channels
+were not measured, and there only the second layer is known to hold what it held before. WebRTC
+over UDP is outside both layers, an open gap. The browser still follows a server redirect
+between two origins of the run config, a
 network-only one included, so the skill reads the `Page URL`
 line after every navigating call and stops a scenario that landed on a network-only origin. Nothing
 enforces routes: the evidence boundary is the origin, which the launch policy names or the human
@@ -1152,6 +1155,11 @@ through Bash.
   that spawns `playwright-cli` without naming it in the command text, a tool that runs shell
   commands outside the Bash tool included. The **Other sessions** rules judge only what the
   command text shows.
+- **The launch-variable refusals read two environments, each once.** The gate reads the
+  environment Claude Code started with when it judges a call, and the run-config helper reads
+  its own shell's when it writes the run config. A shell environment that changes between the
+  two, and the environment a program gives a `playwright-cli` it starts itself, reach the browser
+  unread. On Windows both fold the letter case of a variable name, as Windows reads names.
 - **Hooks switched off host-side leave `playwright-cli` unconstrained.** The retired broker
   refused to self-approve an origin without a per-session marker the gate wrote, so a disabled
   hook ended in a refusal. Nothing stands in that position now: with the hooks off, the run
@@ -1206,9 +1214,10 @@ through Bash.
   shared worker's request: measured with the routes alone, a page's WebSocket reached an origin
   outside `allowedOrigins` with playwright-cli 0.1.21, 0.1.23 and 0.1.24, and so did a shared
   worker's fetch with playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins,
-  where a dedicated worker's fetch was blocked. So on Windows, on the Edge and prerelease Chrome
-  channels and wherever a later Chrome changes one of the three switches, both reach any target,
-  as they did before the network fence.
+  where a dedicated worker's fetch was blocked. So wherever the three switches do not hold, both
+  reach any target, as they did before the network fence: nobody measured them on Windows, on
+  Linux on x86-64 or with the Edge and prerelease Chrome channels, and a later Chrome can change
+  any of them.
 - **The recorder cannot tell whether the prompt was shown**, only that the call then succeeded.
 - **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
   `playwright-cli`, an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix,

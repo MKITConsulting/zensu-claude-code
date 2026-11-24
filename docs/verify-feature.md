@@ -152,6 +152,9 @@ the first layer alone refuses. So a run
 declares every host and port its pages connect to, not only the origins they request over
 HTTP(S): a WebSocket endpoint on another host or port, and the target of a redirect. WebRTC
 over UDP is outside both layers.
+The first layer was measured with Google Chrome on macOS and with Chrome for Testing on macOS
+and on Linux aarch64. On Windows, on Linux x86-64 and with the Edge and prerelease Chrome
+channels nobody has measured it, so there only the second layer is known to hold.
 
 Service workers run in this browser, as they do in a user's. Every run starts with an empty
 profile, so the first load of a page comes from the network; after that a worker can answer the
@@ -610,6 +613,7 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | the page loads, but a WebSocket, a shared worker's request or a redirected request fails with `net::ERR_PROXY_CONNECTION_FAILED` | the endpoint, or the target of the redirect, is on a host and port the run config does not name, and the network fence refused the connection | declare it the same way: a WebSocket endpoint by the `http` or `https` origin of its host and port, a redirect target by its own origin |
 | `open` is denied with a reason that ends `write the run config again with the run-config helper of this installation` | the run config has another shape than this installation's gate accepts: another installation of the plugin wrote it, for example before an update, or it was written by hand | start `/zensu:verify-feature` again in a session started, or reloaded with `/reload-plugins`, after the update, so the helper and the gate come from one installation |
 | `open` is denied with `the launch environment sets PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK, …` | that variable takes a service worker's requests out of the request interception the run config relies on, and it is set in the environment Claude Code started with | unset it and relaunch Claude Code |
+| the run-config helper stops with `the launch environment sets <variable>, …, so no run config is written` | the shell the helper runs in sets `PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK` or a `PLAYWRIGHT_MCP_*` variable, from the environment Claude Code started with or from a shell profile | unset it where it is set and start the run again |
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
 | PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.24` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |

@@ -431,6 +431,25 @@ test('the helper writes no run config for a playwright-cli version other than th
   }
 });
 
+test('the helper writes no run config while its own environment sets a variable the gate refuses at open', async (t) => {
+  const origin = ['--mode', 'local', '--origin', 'http://127.0.0.1:5173'];
+  const local = ['local', 'http://127.0.0.1:5173', 'declared-safe'];
+  const cases = [
+    [consent.WORKER_NETWORK_ENV, `the launch environment sets ${consent.WORKER_NETWORK_ENV}, which takes the requests of a service worker out of the request interception the run config relies on, so no run config is written`],
+    ['PLAYWRIGHT_MCP_CONFIG', 'the launch environment sets PLAYWRIGHT_MCP_CONFIG, which overrides the run config, so no run config is written'],
+  ];
+  for (const [name, cause] of cases) {
+    const dir = runDir(t);
+    const env = { ...NO_POLICY, [name]: '1' };
+    await assert.rejects(helper.run(['--run-dir', dir, ...origin], undefined, env, READY),
+      (error) => error.message.startsWith(cause) && error.message.includes('in a shell profile'), name);
+    assert.deepEqual(fs.readdirSync(dir), []);
+    await assert.rejects(helper.checkPolicy(local, env, undefined, READY), (error) => error.message.startsWith(cause), `${name} policy check`);
+  }
+  const written = await helper.run(['--run-dir', runDir(t), ...origin], undefined, { ...NO_POLICY, [consent.WORKER_NETWORK_ENV]: '' }, READY);
+  assert.equal(written.mode, 'consent');
+});
+
 test('the helper names the remedy each version answer needs, and adds the PATH advice only for a PATH entry read against the working directory or a playwright-cli outside its package', async (t) => {
   const origin = ['--mode', 'local', '--origin', 'http://127.0.0.1:5173'];
   const moved = 'remove that entry from PATH, or move it behind the directory that holds playwright-cli';

@@ -114,7 +114,8 @@ runs no suite. Its `drift` job keeps the read-only token and runs
 stable version there is newer than `PLAYWRIGHT_CLI_SOURCE_VERSION`, the version the browser
 consent gate's parser port was measured against, the `drift-issue` job, which holds
 `issues: write` and nothing else, opens or rewrites the issue labelled `playwright-cli-drift`
-with the steps to re-record `tests/structure/fixtures/playwright-cli-argv.v1.json` locally,
+with the steps to re-record `tests/structure/fixtures/playwright-cli-argv.v1.json` and to run
+the fence probe `tests/integration/verify-fence/probe.mjs` locally,
 and it closes that issue once the measured version is the newest again. A red scheduled run
 comments on or opens the issue labelled `playwright-cli-drift-check`.
 `test-playwright-cli-drift.sh` guards the workflow graph, runs the script against fixture

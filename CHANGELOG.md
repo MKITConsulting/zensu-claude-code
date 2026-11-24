@@ -16,7 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   origin, in the recipe's `validate.networkOnly.origins` and, under a policy, in its
   `networkOnlyOrigins`, a WebSocket endpoint by the `http` or `https` origin of its host and
   port. A plain `ws://` endpoint outside loopback has no such origin and is no longer reached.
-  WebRTC over UDP is still not fenced.
+  WebRTC over UDP is still not fenced. The fence was measured with Google Chrome on macOS and with
+  Chrome for Testing on macOS and on Linux aarch64; on Windows, on Linux x86-64 and with the Edge
+  and prerelease Chrome channels it is unmeasured, and only the request interception of earlier
+  releases is known to hold there.
 - **Service workers run in the verify browser**: an application that registers one now behaves
   there as it does for a user, with a cache its worker fills on the first load and a page a new
   worker can take over. An update prompt, a filled cache and a page under a worker's control can

@@ -928,6 +928,25 @@ test('open refuses a launch environment that takes service-worker requests out o
     'the global playwright-cli config selects a browser other than chromium, which ignores the Chromium switches the run config fences the browser with');
 });
 
+test('the launch environment check folds the letter case of a variable name on Windows only, as Windows reads environment names', (t) => {
+  const name = consent.WORKER_NETWORK_ENV;
+  const folded = 'Playwright_Disable_Service_Worker_Network';
+  const text = `the launch environment sets ${name}, which takes the requests of a service worker out of the request interception the run config relies on`;
+  assert.equal(consent.ambientOverride({ [folded]: '1' }, 'win32'), name);
+  assert.equal(consent.ambientOverride({ [folded]: '1' }, 'darwin'), '');
+  assert.equal(consent.ambientOverride({ [folded]: '1' }, 'linux'), '');
+  assert.equal(consent.ambientOverride({ [folded]: '' }, 'win32'), '');
+  assert.equal(consent.ambientOverride({ [name]: '1' }, 'linux'), name);
+  assert.equal(consent.ambientOverride({ playwright_mcp_config: 'x' }, 'win32'), 'playwright_mcp_config');
+  assert.equal(consent.ambientOverride({ playwright_mcp_config: 'x' }, 'linux'), '');
+  assert.equal(consent.ambientDeny(name), text);
+  assert.equal(consent.ambientDeny('playwright_mcp_config'), 'the launch environment sets playwright_mcp_config, which overrides the run config');
+  const { file } = runConfig(t, ['http://127.0.0.1:4200']);
+  const env = isolatedEnv(t);
+  assert.equal(denied(openCommand(file, 'http://127.0.0.1:4200/'), { env: { ...env, [folded]: '1' }, platform: 'win32' }), text);
+  assert.equal(decide(openCommand(file, 'http://127.0.0.1:4200/'), { env: { ...env, [folded]: '1' }, platform: 'darwin' }).verdict, 'ask');
+});
+
 test('a first loopback navigation asks with a prompt naming the session and the origin, never a route', () => {
   const decision = decide(cli('goto http://127.0.0.1:4200/teams/t-81/sprints/s-7'));
   assert.equal(decision.verdict, 'ask');
