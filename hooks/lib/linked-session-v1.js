@@ -376,6 +376,7 @@ module.exports = {
   DESKTOP_RECORD_MAX_BYTES,
   CONTEXT_RECORD_MAX_BYTES,
   storeCandidates,
+  isUserFork,
   resolveLinkedSession,
   renderVerdict,
 };

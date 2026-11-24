@@ -33,6 +33,33 @@ test('the kind comes from spawnedFrom, and a btw outranks the user fork it also 
   assert.equal(mod.linkedKind(null), 'task');
 });
 
+test('a fork in which the user continues another linked session is a user fork, while a fork source that names the parent or the session itself, is malformed or is no string keeps the kind', () => {
+  const from = { sessionId: ROOT_RUN, sideSession: true, userFork: false };
+  const own = run(7);
+  const record = (source) => ({ sessionId: own, forkedFromSessionId: source });
+  assert.equal(mod.linkedKind(from, record(run(3))), 'fork');
+  assert.equal(mod.linkedKind({ ...from, btw: true }, record(run(3))), 'btw');
+  assert.equal(mod.linkedKind({ ...from, userFork: true }, record(ROOT_RUN)), 'fork');
+  for (const source of [ROOT_RUN, own, 'local_x', run(3).toUpperCase(), 3, null, [run(3)], undefined]) {
+    assert.equal(mod.linkedKind(from, record(source)), 'side', `fork source ${JSON.stringify(source)}`);
+  }
+  assert.equal(mod.linkedKind({ sessionId: ROOT_RUN, taskId: 'task_1' }, record(ROOT_RUN)), 'task');
+  assert.equal(mod.linkedKind(from), 'side');
+  assert.equal(mod.linkedKind(from, null), 'side');
+  const family = [
+    child(1),
+    child(2, { forkedFromSessionId: run(1) }, { userFork: false }),
+    child(3, {}, { userFork: true }),
+    child(4, { forkedFromSessionId: ROOT_RUN }, { userFork: false }),
+  ];
+  assert.deepEqual(decide(family).sessions.map((entry) => [entry.kind, entry.decision, entry.why]), [
+    ['side', 'start', null], ['fork', 'if-named', 'fork'], ['fork', 'if-named', 'fork'], ['side', 'start', null],
+  ]);
+  const carried = decide(family.slice(0, 2), { planned: [mod.continuationName(run(2))] });
+  assert.deepEqual(carried.sessions.map((entry) => [entry.kind, entry.decision, entry.why]), [['side', 'later', 'unplanned'], ['fork', 'start', null]]);
+  assert.ok(carried.sessions[1].start, 'a named continued fork carries its start call');
+});
+
 test('the continuation handle is cont- and the first eight hex digits of the old run', () => {
   assert.equal(mod.continuationName('local_AB12CD34-1111-4111-8111-000000000001'), 'cont-ab12cd34');
   assert.equal(mod.continuationName(run(7)), 'cont-00000007');

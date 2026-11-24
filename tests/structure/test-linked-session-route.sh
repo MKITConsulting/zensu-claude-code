@@ -297,6 +297,55 @@ L3O_OUT="$(node -e '
 [ "$L3O_OUT" = same ] \
   && check "L3o the resolver's macOS store candidates equal the probes of session-trail's lineage --diagnose in the same order once the other platforms' defaults are left out, in four layouts: named stores with a trailing separator and a named copy of the default store beside lower-case, upper-case and non-UUID profile folders; a padded ZENSU_CCD_STORE with a trailing separator that stays alone beside a named store; a blank ZENSU_CCD_STORE that names no store beside blank, padded and repeated named entries; and a home without a Session Hub profiles folder" PASS \
   || check "L3o store parity with session-trail ($L3O_OUT)" FAIL
+L3P_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { pathToFileURL } = require("url");
+  const m = require(process.argv[1]);
+  const [hub, plm] = process.argv.slice(2);
+  const parent = "local_aaaaaaaa-1111-4111-8111-111111111111";
+  const self = "local_bbbbbbbb-2222-4222-8222-222222222222";
+  const sibling = "local_cccccccc-3333-4333-8333-333333333333";
+  const marks = [true, false, "true", 1, null, undefined];
+  const sources = [sibling, parent, self, "local_x", sibling.toUpperCase(), 3, null, [sibling], undefined];
+  const compare = (copy) => {
+    const differ = [];
+    let forks = 0;
+    for (const mark of marks) {
+      for (const source of sources) {
+        const spawnedFrom = { sessionId: parent, sideSession: true };
+        if (mark !== undefined) spawnedFrom.userFork = mark;
+        const record = { sessionId: self, spawnedFrom };
+        if (source !== undefined) record.forkedFromSessionId = source;
+        const expected = m.isUserFork(record, spawnedFrom, parent);
+        if (expected) forks += 1;
+        if ((copy.linkedKind(spawnedFrom, record) === "fork") !== expected) differ.push(JSON.stringify(mark) + "/" + JSON.stringify(source));
+      }
+    }
+    return { differ, forks };
+  };
+  (async () => {
+    const results = [];
+    for (const file of [hub, plm]) results.push(compare(await import(pathToFileURL(file).href)));
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "fork-parity-"));
+    try {
+      const planted = path.join(scratch, "linked-sessions-v1.mjs");
+      const source = fs.readFileSync(hub, "utf8");
+      const needle = " && source !== runIdOf(from.sessionId)";
+      fs.writeFileSync(planted, source.split(needle).join(""));
+      const control = source.includes(needle) ? compare(await import(pathToFileURL(planted).href)) : null;
+      const same = results.every((result) => result.differ.length === 0 && result.forks === 14);
+      const bites = control !== null && control.differ.length > 0;
+      process.stdout.write(same && bites ? "same" : "differ " + JSON.stringify({ results, control: control && control.differ.length }));
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  })().catch((error) => process.stdout.write("failed " + error.message));
+' "$RESOLVER" "$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/linked-sessions-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" 2>/dev/null)"
+[ "$L3P_OUT" = same ] \
+  && check "L3p the resolver's isUserFork and both copies of session-trail's linkedKind classify the same 54 desktop records alike, userFork true, false, the string true, 1, null and absent crossed with a sibling, the parent, the session itself, a malformed, an upper-case, a numeric, a null, a one-element-array and an absent fork source, 14 of them as forks, and a planted copy without the parent exclusion disagrees" PASS \
+  || check "L3p fork parity with session-trail ($L3P_OUT)" FAIL
 L3F_INNER='
   const cp = require("child_process");
   const fs = require("fs");

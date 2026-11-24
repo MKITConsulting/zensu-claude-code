@@ -55,18 +55,25 @@ with a reason, and both briefs print it.
 | `started` | stays | the running session has an open child with the handle `cont-<8 hex>` of this run |
 | `unplanned` | later | only on a run that carries `--linked-start`: its names leave the session out; a session they carry skips the next five rows |
 | `place` | if named | its `originCwd` is missing, relative or carries a control character, so no start can be placed in its repository |
-| `fork` | if named | a user fork, started only when the user names it in the plan answer |
+| `fork` | if named | a user fork, one the user started or one in which the user continues another linked session, started only when the user names it in the plan answer |
 | `presets-unread` | if named | it names a saved environment and carries no `sshConfig`, and `ccd-session-presets.json` was refused, could not be read or did not parse, or the folder that holds it failed the owner and mode rule |
 | `ledger-unread` | if named | the ledger read had a directory error, hit its record cap or refused a record, or a ledger directory of a newer schema beside it holds records or could not be inspected |
 | `started-unread` | if named | the running session's own record, or a record in its folder, was refused or could not be read, no own record was found while a store entry was or while a Claude Desktop host id names the running session, or a folder that holds a store it judged failed the owner and mode rule |
 | none | start | a side or task-chip session, the first `LINKED_START_CAP` (8) in creation order |
 | `cap` | later | the rest, started only on a later message the user types |
 
-`linkedKind` decides the `btw`, `fork` and side kinds from `spawnedFrom`. The fork test
-`isUserFork` of `hooks/lib/linked-session-v1.js` reads the same `userFork` marker, so a change to
-that marker moves both (`.claude/rules/session-delivery-route.md` §"Coupled sites"). The resolver
-also counts a `forkedFromSessionId` that names a session other than the parent, which `linkedKind`
-does not read, so a fork in which the user continues another linked session is a side session here.
+`linkedKind` decides the `btw`, `fork` and side kinds from `spawnedFrom` and the record. A record is
+a user fork when `spawnedFrom.userFork` is `true`, or when its `forkedFromSessionId` matches the
+`local_` session pattern and names neither the parent (`spawnedFrom.sessionId`) nor the record's
+own `sessionId`: Claude Desktop writes that source, with `userFork` `false`, into a fork in which
+the user continues another linked session, and such a fork's first prompt is the user's own.
+Measured on 2026-11-24 over the ten Session Hub profile stores: 31 such records beside 43 with
+`userFork: true`. A source that names the parent counts only with `userFork: true`, because the
+record of a fork another session starts is unmeasured. This is the rule of `isUserFork` in
+`hooks/lib/linked-session-v1.js`, and `L3p` in `tests/structure/test-linked-session-route.sh` holds
+both copies of `linkedKind` to it over one table of desktop records, so a change to either marker
+moves both (`.claude/rules/session-delivery-route.md` §"Coupled sites"). A `btw` still answers
+first.
 
 Cloud and Remote Control sessions have no `local_` record in the store, so they never appear.
 The list is bounded at `LINKED_LIST_MAX` (64) and says how many it leaves out.
@@ -289,6 +296,14 @@ well-formed edge that is not `confirmed` stays no continuation. `scan` reads no 
 a newer schema either, so the mirror also reports the read incomplete while such a directory holds
 records or could not be inspected.
 
+**The Hub needs a follow-up for a fork the user continues.** `kind_of` in the Hub's
+`src-tauri/src/resources/desktop_sessions/catalog.rs` answers `FamilyKind::Fork` from `user_fork`
+alone, and the `side_session` flag it records for a family member excludes only a `user_fork`, so
+the Hub answers `FamilyKind::Side` or `FamilyKind::Task` for a fork in which the user continues
+another linked session, where the plan pass marks it **if named** as `fork`. The mirror is a Hub
+change of its own: the Hub reads `forkedFromSessionId` from the record, and `kind_of` applies the
+rule above.
+
 **Every session marked start belongs to every yes.** The plan confirmation names each one by its
 title, and the model never leaves one out on its own judgment: not because its own work looks
 finished, since the sessions below it follow only through it, not because the new session could
@@ -505,7 +520,11 @@ all stay: its plan pass carries no `--linked-start` lead, value line or step-3 c
 `--force` run needs no flag and records its edge. LS21 drives a family whose only session that
 could start is a user fork: its plan pass spells `--linked-start none` and the step-3 clause, its
 `--force` run without the flag is refused naming `none` with an unchanged ledger, and
-`--linked-start none` marks the fork `later` as `unplanned`. The unit case `each open linked session counts the open
+`--linked-start none` marks the fork `later` as `unplanned`. The unit case `a fork in which the user
+continues another linked session is a user fork, …` drives `linkedKind` with a continued fork and
+with every fork source that keeps the kind (the parent, the session itself, a malformed or
+upper-case id, a number, `null`, a one-element array and none), and `decideLinked` over a family
+with one, without and with a carried plan that names it. The unit case `each open linked session counts the open
 sessions below it that would follow through it: every level, through archived ones, never into a
 detached one or one its continuation keeps, and once each` drives the count, and the four cases
 `the plan names are none or a comma-separated list of cont- handles, …`, `a carried plan starts
@@ -628,6 +647,18 @@ store-folder unit cases failed while `L13g-control` passed; every subject case o
   a release ships the step.
 - **Whether the first message of a started session runs as a slash command is unmeasured.** The
   prompt therefore names the Skill tool too.
+- **The fork source is one more private desktop field.** A record whose `forkedFromSessionId` names
+  another session waits for its name instead of starting, so a wrong value turns that record's
+  start into an **if named** decision. The `LINKED_START_CAP` slot it leaves free goes to the next
+  qualifying session in creation order, so the number of starts never grows past the cap. The
+  record of a fork another session starts is unmeasured; if it names a session other than its
+  parent, that fork waits for its name too.
+- **The report mark reads the desktop note's own flag.** `unreadReportsOf` copies `userFork` from
+  the queued note, the field the Session Hub's `lenient_queued_notes` in `src-tauri/src/claude_runs.rs`
+  reads as well, so a fork in which the user continues another linked session can be listed with
+  kind `fork` while its unread report carries no fork mark in either brief or in `takeover --json`.
+  What Claude Desktop writes into that flag for such a fork is unmeasured, and the mark keeps the
+  desktop's own value rather than a classification the note does not carry.
 - **The `cont-` handle joins on eight hex digits.** Two old runs that share them would both read as
   started once one of them is.
 - **The edge read covers the `v1` ledger directory only.** A directory of a newer schema that holds
@@ -681,4 +712,7 @@ changes a value it persists, never the record's shape. `session-lineage-v1.mjs` 
 read-only `schemaLedgerCensus`, behind which `otherSchemaLedgers` returns what it returned before,
 and its `LEDGER_SCHEMA_VERSION`, `makeEndpoint`, `ENDPOINT_KEYS` and `buildEdge` are unchanged, so
 the edge record's shape is byte for byte the same; `desktop-store-read-v1.js` gains
-`ownedDirectoryRefusal`, which decides nothing.
+`ownedDirectoryRefusal`, which decides nothing. Counting a fork the user continues as a user fork
+is `patch` on the same walk: `fork` is an existing kind and an existing `why`, `linkedKind` gains
+an optional argument its one-argument callers do not pass, and such a session only turns a `start`
+into an **if named** decision an older brief reader already handles; nothing is persisted.

@@ -382,11 +382,13 @@ route: a route change moves only the field, and every shape of the reminder carr
   `writableOnlyByCaller` or `anyOwnerOrMode` or is spelled in a form the pin cannot read, and `L3l` when the
   reader stops reusing the scratch buffer session-trail passes or the resolver starts passing one;
   `isUserFork` in the resolver and `linkedKind` in `skills/session-trail/scripts/linked-sessions-v1.mjs`
-  and its `plugins/session-hub/` copy, which read the desktop's `spawnedFrom.userFork` marker the
-  same way, so a change to that marker moves all three (PLM's frozen copy takes it as a fix,
-  `.claude/rules/session-hub-companion.md`), and `.claude/rules/session-trail-linked-sessions.md`
-  names session-trail's side; `linkedKind` does not read `forkedFromSessionId`, so a fork in which
-  the user continues another linked session is a `side` session there;
+  and its `plugins/session-hub/` copy, which apply one rule to the desktop's fork markers, a
+  `spawnedFrom.userFork` of `true` or a `forkedFromSessionId` of the session pattern that names
+  neither the parent nor the session itself, which `L3p` in `test-linked-session-route.sh` holds
+  equal over one table of desktop records, so a change to either marker moves all three (PLM's
+  frozen copy takes it as a fix, `.claude/rules/session-hub-companion.md`), and
+  `.claude/rules/session-trail-linked-sessions.md` names session-trail's side and the Session Hub's
+  `kind_of`, which still reads `user_fork` alone;
   `ZENSU_LINKED_BRIEF_LEAD` and the `ZENSU_DIRECTIVE_LEAD` name in `zensu-directive.sh`; the
   closed spelling list in the doctor probe of `zensu-doctor.sh` and the two source regexes in
   `zensu-doctor-report.js`, which accept `inherited from parent session`.
