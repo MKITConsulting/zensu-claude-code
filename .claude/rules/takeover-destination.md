@@ -73,18 +73,16 @@ with the release step, whichever form renders it` holds both legs, both forms an
 position; `references/takeover.md` step 4's closing paragraph carries the same instruction in its own
 words, kept in step by hand.
 
-**The history is worth keeping because the claim was FALSE TWICE, in opposite directions.**
-A first round moved one precondition up and left two below. A second round wrote "Three
-PRECONDITIONS sit ABOVE the fenced line … Both carriers now agree" — and that was false for
-the doc carrier, where the same-repository bound still sat below the fence, and false in a
-second way for both carriers, where the cost and the measured pid sat below it while every
-sentence arguing FOR the route sat above. Three independent reviewers found the first half and
-a fourth found the second. Do not restate agreement between the carriers as a fact; state what
-is graded. `T35e` grades the doc carrier by OFFSET rather than by a needle, because the
-property is an ORDER and no substring can express one — it resolves the `**Before you run it:**`
-bar, the `core.fsmonitor` non-carry and the same-repository bound against the command, so a
-member added to the bar needs an anchor added there too or it is graded by nothing. The emitted
-carrier is graded positionally by `worktree-advice-v1.test.js`, on the stop condition alone.
+**Do not restate agreement between the carriers as a fact; state what is graded.** The checks
+grade only part of the ORDER the rule above asks for, so a sentence of agreement can be false
+while every suite is green, in the shape that rule exists to prevent: every sentence arguing FOR
+the route above the fence, and a precondition, the cost or the measured pid below it, where the
+reader meets it after the command has run. `T35e` grades the doc carrier by OFFSET rather than
+by a needle, because the property is an ORDER and no substring can express one — it resolves the
+`**Before you run it:**` bar, the `core.fsmonitor` non-carry and the same-repository bound
+against the command, so a member added to the bar needs an anchor added there too or it is graded
+by nothing. The emitted carrier is graded positionally by `worktree-advice-v1.test.js`, on the
+stop condition alone.
 
 The move is offered WHATEVER the other session is doing: that session's activity is the
 user's responsibility, and the user chooses the route inside the one plan confirmation of
@@ -119,34 +117,34 @@ that dependency is stated in the emitted text rather than left implicit. The acc
 paragraph below, which frames the cross-repository hazard as answered by a SENTENCE where
 `continuationPlan` answers it with a REFUSAL, is superseded for this route: git refuses it.
 
-**THREE claims about the gate ship BOUNDED, and all three shipped UNBOUNDED first and were
-then measured false.** Record them that way rather than as a list of wordings, because the
-unbounded form of each is the one a later editor will reach for again. **This is a deliberate
+**THREE claims about the gate ship BOUNDED, and the unbounded form of each is false.** Keep
+each unbounded form recorded beside its bound rather than reducing this to a list of wordings,
+because the unbounded form is the one a later editor reaches for. **This is a deliberate
 EXCEPTION to the rule this section states below for the sibling `CARRY_OVER` recipe**,
 which says this section restates neither that recipe's safety properties nor their count and
 points at the two reader-facing carriers instead. The exception is narrow and it is about
 FALSIFICATION rather than about content: what is recorded here is not the correct wording —
 that lives in the emitted array and in `references/takeover.md` step 4, as the sibling rule requires —
-but WHICH unbounded form was measured false and against WHICH owner. A carrier cannot hold
+but WHICH unbounded form is false and WHICH owner shows it. A carrier cannot hold
 that; it would read as a caution about a claim it does not make. Do not extend the exception
 to the correct wordings themselves, or this becomes the fourth hand-maintained copy the
 sibling rule exists to prevent. (a) Rule (C) judges
 BOTH operands: `bash-source-write-parse.js` keeps every pathish operand after
 `worktree remove|move` and its own comment says "`move` names source and destination; both
 are candidates", so taking the escape drops the containment check on the DESTINATION too —
-which is why the emitted text now tells the reader to place `<path>` inside their own anchor
-by hand. An earlier wording said the gate "judges it against the tree it relocates rather
-than the one it lands in", which is the opposite of what the parser does. (b) The deny is
+which is why the emitted text tells the reader to place `<path>` inside their own anchor
+by hand. The unbounded form, that the gate "judges it against the tree it relocates rather
+than the one it lands in", is the opposite of what the parser does. (b) The deny is
 CONTAINMENT, never a construction-time property: `escapes` is
 `!isTemp(p) && !within(projectRoot, p)`, and THIS repository's own mandated layout nests
 every worktree under the main checkout, so a source worktree inside the taker's anchor is the
 ORDINARY case and is not refused at all — `trail.mjs` even renders a named `already-contained`
-state for it. "Outside the taker's anchor by construction" was false and sat in this very
-section. (c) The bypass-ledger entry is CONDITIONAL: `tdd_record_bypass` writes only while
+state for it. The unbounded form, "outside the taker's anchor by construction", is false for
+that case. (c) The bypass-ledger entry is CONDITIONAL: `tdd_record_bypass` writes only while
 `tdd_session_active` is true and `tdd_add_bypass` returns early with no state file, so a
-session-trail takeover — which normally arms no chain — records NOTHING. An unconditional
-"taking it is RECORDED" told a reader that a destructive escape leaves a trail it will not
-leave, which is worse than saying nothing.
+session-trail takeover — which normally arms no chain — records NOTHING. The unbounded form,
+an unconditional "taking it is RECORDED", tells a reader that a destructive escape leaves a
+trail it will not leave, which is worse than saying nothing.
 
 **The ESCAPE is never SPELLED and never PRESCRIBED, and the deny does not name it
 either.** Rendering the prefix would be the shipped hatch §"Git Mutation Tables"
