@@ -293,7 +293,7 @@ characters.
 | Every later prompt | 1,751 to 5,253 | the reminder (354), the short zen-mode line (1,397), the short delivery-route line (2,532) when the reminder answers that prompt, and the hooks that speak only on a condition |
 
 Automatic work capture landed after 0.29.0, so the census does not contain it: driving
-`hooks/session-start-ai-work.sh` directly, its primer adds about 760 characters, depending on
+`hooks/session-start-ai-work.sh` directly, its primer adds about 3,500 characters, depending on
 the plugin path, to every main-thread `SessionStart`. The skill listing carries Zensu's skill
 descriptions on top: between about 4,100 and 15,000 characters in the same sessions. These are field figures from one machine and nothing
 re-derives them; `tests/structure/test-user-prompt-budget.sh` is what holds each prompt hook

@@ -74,14 +74,17 @@ restart an active conversation merely to fix a PATH mismatch.
 
 At the start of an authorized implementation goal, the plugin's native capture
 helper runs `preflight`: bounded local CLI help/version checks, followed by a
-read-only `ai-work context` query if compatible. Startup by itself creates no work.
+read-only `ai-work context` query if compatible and, when the goal still needs a
+feature, a search of the bound product's features on this machine
+([Automatic work capture](ai-work-capture.md#check-scope-before-implementation)).
+Startup by itself creates no work.
 The helper checks capabilities rather than assuming that a version number is enough.
 
 | Result | Next step |
 | --- | --- |
 | `cli_unavailable` / `cli_incompatible` | Install/update the CLI using this guide; repeat preflight. No fallback to an older capture protocol. |
-| `product_confirmation_required` | Confirm the exact product once, then use `zensu ai-work bind --product <uuid> --confirm`. Never guess from a repository name. |
-| `feature_confirmation_required` | Confirm this goal's exact feature, or explicitly choose product maintenance with a reason. A valid product binding is reused. |
+| `product_confirmation_required` | Confirm the exact product once, then use `zensu ai-work bind --product <uuid> --confirm`. Never guess from a repository name. Run preflight again with `--query` to search the bound product's features. |
+| `feature_confirmation_required` | Pick this goal's feature from the returned `featureCandidates`, create a new feature for it through `/zensu:change`, or explicitly choose product maintenance with a reason. A valid product binding is reused. |
 | `scope_unavailable` | Check the selected account, organization, API host and product/feature access; no automatic login or reassignment. |
 | `ready` | The confirmed scope can be used by `begin`; preflight itself has not created a report. |
 | `capture_disabled` | Reporting was declined. Continue coding without scope questions or upload attempts. |
