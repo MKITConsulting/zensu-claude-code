@@ -43,13 +43,14 @@ assert:
         .join('\n').trim() || raw;
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      const opener = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:started\b|(?:session\s+)?(?:goal|purpose|aim|focus)\b|you\s+started\s+(?:this|the)\s+session\b|(?:this|the)\s+session\s+(?:began|started|is\s+for)\b)/i.test(l);
       let end = -1;
       lines.forEach((l, i) => { if (bullet(l)) end = i; });
       let start = end;
       while (start > 0 && bullet(lines[start - 1])) start -= 1;
       const stop = end < 0 ? lines.length : start;
       let goal = -1;
-      lines.forEach((l, i) => { if (i > 0 && i < stop && !bullet(l) && /search/i.test(l) && /(?:slow|speed|fast|quick|latency|performance)/i.test(l)) goal = i; });
+      lines.forEach((l, i) => { if (i > 0 && (i < stop ? !bullet(l) : (i === start && opener(l))) && /search/i.test(l) && /(?:slow|speed|fast|quick|latency|performance)/i.test(l)) goal = i; });
       const ok = goal > 0;
       return {
         pass: ok,
@@ -67,11 +68,15 @@ assert:
         .join('\n').trim() || raw;
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      const opener = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:started\b|(?:session\s+)?(?:goal|purpose|aim|focus)\b|you\s+started\s+(?:this|the)\s+session\b|(?:this|the)\s+session\s+(?:began|started|is\s+for)\b)/i.test(l);
+      const recapper = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:(?:in\s+)?this\s+turn\b|last\s*:)/i.test(l);
       let end = -1;
       lines.forEach((l, i) => { if (bullet(l)) end = i; });
       let start = end;
       while (start > 0 && bullet(lines[start - 1])) start -= 1;
-      const bullets = end < 0 ? [] : lines.slice(start, end + 1);
+      const head = end >= 0 && opener(lines[start]) ? start + 1 : start;
+      const tail = end >= head && recapper(lines[end]) ? end - 1 : end;
+      const bullets = end < 0 ? [] : lines.slice(head, tail + 1);
       const ok = bullets.length >= 1 && bullets.length <= 5
         && bullets.some((l) => /index/i.test(l))
         && bullets.some((l) => /image|lazy/i.test(l));
@@ -92,11 +97,15 @@ assert:
         .join('\n').trim() || raw;
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      const opener = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:started\b|(?:session\s+)?(?:goal|purpose|aim|focus)\b|you\s+started\s+(?:this|the)\s+session\b|(?:this|the)\s+session\s+(?:began|started|is\s+for)\b)/i.test(l);
+      const recapper = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:(?:in\s+)?this\s+turn\b|last\s*:)/i.test(l);
       let end = -1;
       lines.forEach((l, i) => { if (bullet(l)) end = i; });
       let start = end;
       while (start > 0 && bullet(lines[start - 1])) start -= 1;
-      const item = (end < 0 ? [] : lines.slice(start, end + 1)).find((l) => /image|lazy/i.test(l));
+      const head = end >= 0 && opener(lines[start]) ? start + 1 : start;
+      const tail = end >= head && recapper(lines[end]) ? end - 1 : end;
+      const item = (end < 0 ? [] : lines.slice(head, tail + 1)).find((l) => /image|lazy/i.test(l));
       const ok = !!item && /(?:open|not yet|pending|unverified|unchecked|unconfirmed|untested|unreviewed|(?:haven|hasn|isn|wasn|weren|hadn)['’]t|not (?:been )?(?:checked|reviewed|looked at|seen|verified|confirmed|tested)|still (?:to|needs?)|yet to|awaiting|outstanding|to be (?:checked|verified|confirmed|reviewed|tested)|needs? (?:a )?(?:visual )?check)/i.test(item);
       return {
         pass: ok,
@@ -114,10 +123,16 @@ assert:
         .join('\n').trim() || raw;
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
-      let last = -1;
-      lines.forEach((l, i) => { if (bullet(l)) last = i; });
-      const recap = last < 0 ? -1 : lines.findIndex((l, i) => i > last && /cache/i.test(l));
-      const ok = last >= 0 && recap > last && recap < lines.length - 1;
+      const opener = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:started\b|(?:session\s+)?(?:goal|purpose|aim|focus)\b|you\s+started\s+(?:this|the)\s+session\b|(?:this|the)\s+session\s+(?:began|started|is\s+for)\b)/i.test(l);
+      const recapper = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:(?:in\s+)?this\s+turn\b|last\s*:)/i.test(l);
+      let end = -1;
+      lines.forEach((l, i) => { if (bullet(l)) end = i; });
+      let start = end;
+      while (start > 0 && bullet(lines[start - 1])) start -= 1;
+      const head = end >= 0 && opener(lines[start]) ? start + 1 : start;
+      const tail = end >= head && recapper(lines[end]) ? end - 1 : end;
+      const recap = end < 0 || tail < head ? -1 : lines.findIndex((l, i) => i > tail && /cache/i.test(l));
+      const ok = recap > tail && recap < lines.length - 1;
       return {
         pass: ok,
         score: ok ? 1 : 0,
@@ -134,11 +149,15 @@ assert:
         .join('\n').trim() || raw;
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      const opener = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:started\b|(?:session\s+)?(?:goal|purpose|aim|focus)\b|you\s+started\s+(?:this|the)\s+session\b|(?:this|the)\s+session\s+(?:began|started|is\s+for)\b)/i.test(l);
+      const recapper = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:(?:in\s+)?this\s+turn\b|last\s*:)/i.test(l);
       let end = -1;
       lines.forEach((l, i) => { if (bullet(l)) end = i; });
       let start = end;
       while (start > 0 && bullet(lines[start - 1])) start -= 1;
-      const repeated = (end < 0 ? [] : lines.slice(start, end + 1)).filter((l) => /cache/i.test(l));
+      const head = end >= 0 && opener(lines[start]) ? start + 1 : start;
+      const tail = end >= head && recapper(lines[end]) ? end - 1 : end;
+      const repeated = (end < 0 ? [] : lines.slice(head, tail + 1)).filter((l) => /cache/i.test(l));
       const ok = repeated.length === 0;
       return {
         pass: ok,
@@ -156,9 +175,15 @@ assert:
         .join('\n').trim() || raw;
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
-      let last = -1;
-      lines.forEach((l, i) => { if (bullet(l)) last = i; });
-      const recap = last < 0 ? -1 : lines.findIndex((l, i) => i > last && /cache/i.test(l));
+      const opener = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:started\b|(?:session\s+)?(?:goal|purpose|aim|focus)\b|you\s+started\s+(?:this|the)\s+session\b|(?:this|the)\s+session\s+(?:began|started|is\s+for)\b)/i.test(l);
+      const recapper = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:(?:in\s+)?this\s+turn\b|last\s*:)/i.test(l);
+      let end = -1;
+      lines.forEach((l, i) => { if (bullet(l)) end = i; });
+      let start = end;
+      while (start > 0 && bullet(lines[start - 1])) start -= 1;
+      const head = end >= 0 && opener(lines[start]) ? start + 1 : start;
+      const tail = end >= head && recapper(lines[end]) ? end - 1 : end;
+      const recap = end < 0 || tail < head ? -1 : lines.findIndex((l, i) => i > tail && /cache/i.test(l));
       const after = recap < 0 ? -1 : lines.length - 1 - recap;
       const ok = after === 1;
       return {

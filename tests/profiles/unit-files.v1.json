@@ -47,6 +47,11 @@
       "summary": "The shifted-clock preload and runner that the scheduled clock-shift pass uses."
     },
     {
+      "path": "tests/structure/context-nudge-assertions.test.js", "registered": 3,
+      "runs": [{ "driver": "tests/structure/test-context-nudge-hook.sh" }],
+      "summary": "The context-nudge eval graders: every assertion body compiled and a pinned pass and fail vector over the wrapper envelope."
+    },
+    {
       "path": "tests/structure/deferred-review-claim-cases.test.js", "registered": 11,
       "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
       "summary": "The deferred-review claim case table."
