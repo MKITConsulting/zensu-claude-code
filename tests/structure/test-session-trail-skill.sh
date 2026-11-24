@@ -2482,23 +2482,23 @@ t36_cite "$PLM_REF_LIMITS" 'scopes by transcript-directory' "$T36_SPEC" 'skills/
 # on the line to key on. It has already earned its keep — a bulk citation rewrite collapsed
 # both onto one number and this pair reported `no-citation-in` plus `2-matches` rather than
 # passing over a clobbered citation. The two classes are NOT alike and the difference is
-# stated at each one: the `gitState` row below is a fixed band, the whole 2000s, that needs
-# a hand edit only when its target crosses 3000, while the `claude --resume` row is an
+# stated at each one: the `gitState` row below is a fixed band, the 2000s and 3000s, that needs
+# a hand edit only when its target leaves them, while the `claude --resume` row is an
 # open-topped lower bound that needs none. The band was a hundred wide until its target
 # crossed a hundred boundary inside one change, which is the hand edit it no longer costs.
 # An earlier wording of this paragraph claimed both moved with
 # the target, which contradicted the row comment directly beneath it from the round that
 # widened that second class.
-t36_cite "$PLM_TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:2[0-9][0-9][0-9]'
+t36_cite "$PLM_TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:[23][0-9][0-9][0-9]'
 # The HTML cites `trail.mjs` TWICE, so this row cannot use the generic `trail\.mjs:[0-9]+` its
-# spec-side siblings use — it would match the other citation. The class is the whole 3000-and-up
-# range rather than a fixed band: it still separates this citation from the `gitState` one in the
-# 2000s, and it does NOT need a hand edit when the file grows. The previous spelling was
+# spec-side siblings use — it would match the other citation. The class is the whole 4000-and-up
+# range rather than a fixed band: it still separates this citation from the `gitState` one below
+# 4000, and it does NOT need a hand edit when the file grows. The previous spelling was
 # `3[0-9][0-9][0-9]`, which was written to stop exactly that hand edit and then required one the
 # first time the citation crossed 4000 — a band is a hand-maintained numeral wearing a class's
 # clothes. A LOWER BOUND with an open top is what survives growth; it costs the ability to tell
-# this citation from a future third one above 3000, which is a trade to re-take if one lands.
-t36_cite "$PLM_TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:[3-9][0-9][0-9][0-9]'
+# this citation from a future third one above 4000, which is a trade to re-take if one lands.
+t36_cite "$PLM_TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:[4-9][0-9][0-9][0-9]'
 t36_cite "$PLM_REF_LIMITS" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/references/limits\.md:[0-9]+'
 # The POPULATION, scanned out of the documents rather than counted off the row table
 # above. `T36_ROWS` counts rows this test declares; it can never notice a citation the

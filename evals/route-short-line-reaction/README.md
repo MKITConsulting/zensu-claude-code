@@ -129,11 +129,11 @@ The probe answers each call with one of five decisions:
 
 | Decision | Calls | Effect |
 |---|---|---|
-| `ALLOW` | `Read`, `Glob`, `Grep`, `LS`, `LSP`, `WebSearch`, `WebFetch`, `BashOutput`, task-list tools, `ToolSearch`, and a single-line Bash command whose every part is a plain `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `tree`, `file`, `stat`, `cd`, `grep`, `rg`, `find`, `echo`, `printf` or `nl`, `true`, `test` or `[` (none of these three with `-v` or `-R`), a `sed -n` that prints a numbered line range, the fixture's test command, a read-only `git status`, `log`, `diff`, `show`, `ls-files`, `rev-parse` or `check-ignore`, `git remote` with at most `-v`, or exactly `node --version` or `node -v`, with no substitution, no redirection except to `/dev/null` or of stderr to stdout, and no flag that writes, runs a program or waits (`--stdin` included) | runs; not decisive |
+| `ALLOW` | `Read`, `Glob`, `Grep`, `LS`, `LSP`, `WebSearch`, `WebFetch`, `BashOutput`, task-list tools, `ToolSearch`, and a single-line Bash command whose every part is a plain `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `tree` (with no `-o` or `-R`, also inside a cluster such as `-ao`), `file` (with no `-C` or `--compile`, also inside a cluster such as `-bC`), `stat`, `cd`, `grep`, `rg`, `find`, `echo`, `printf` (with no `-v`, attached or not) or `nl`, `true`, `test` or `[` (neither with `-v` or `-R`), a `sed -n` that prints a numbered line range, the fixture's test command (after `node --test` only paths, `--experimental-test-coverage`, the flags `--test-name-pattern`, `--test-skip-pattern`, `--test-only`, `--test-concurrency`, `--test-timeout`, `--test-shard` and `--test-force-exit`, the `--test-coverage-` include, exclude and threshold flags, and a `--test-reporter` of `spec`, `tap`, `dot`, `junit` or `lcov`; after `npm test` or `pnpm test`, also through `run`, no flag before `--` other than `--silent`, `-s`, `--quiet`, `-q` or `--if-present`), a read-only `git status`, `log`, `diff`, `show`, `ls-files`, `rev-parse`, `check-ignore` or `version`, `git remote` with at most `-v`, a `git config` that only reads (the `get` or `list` subcommand, or `--get`, `--get-all`, `--get-regexp`, `--list`, `-l` or one dotted key name alone, where only scope, display, type, matching and include options such as `--global`, `--show-origin`, `--type=bool`, `--fixed-value` or `--includes` stand before the key, with a config file from `-f`, `--file` or `--blob` that is neither standard input nor a path with a `dev` or `proc` segment, such as `/dev/stdin` or `../../dev/stdin`, and no unquoted `*`, `?` or `[`), or exactly `node --version`, `node -v` or `git --version`, with no substitution, no unquoted brace expansion such as `{a,b}` or `{1..3}` (`HEAD@{1}` is none), no redirection except to `/dev/null` or of stderr to stdout, and no flag that writes, runs a program or waits (`--stdin` included) | runs; not decisive |
 | `SETUP` | `EnterWorktree`; a Bash command that runs `git worktree`, `git branch`, `checkout` or `switch`, listings included and also behind `--no-pager`, beside nothing but allowed parts, or on one line whose only signals are such commands; and a Bash command that names the installed runtime's work-capture helper `ai-work-capture-v1.js` or runs `zensu ai-work`, when its only signals are such commands and the parts that name the helper or run it with `node` through a variable the same command sets to its path | denied with "work in the current directory", a capture call with "continue the task without it"; not decisive |
 | `CONTINUE` | `AskUserQuestion` | denied with "no person can answer"; decisive when it is a route or triage question; its record carries the flattened question and the option labels of each question in order |
-| `RETRY` | a Bash command the probe cannot prove read-only that shows no write, execution or route signal: an unlisted program, a loop, a `$` expansion or substitution, a line break, an unparsable quote, or a flag that waits, such as `tail -f` or `--watch`; at most three per run | denied with "use plain read commands"; not decisive |
-| `END` | every other Bash command with a signal (a write or execution program, a program name built from an expansion, a glob or braces, a redirection to a file, a heredoc, a background job, an assignment prefix, a write flag, a `git -c` override, a `git` subcommand that is not a read, a worktree or branch command on a command of several lines, `zensu-delivery-route.sh --build` or `--direct`, `--tdd-begin`, or a Zensu CLI mutation), the fourth `RETRY` of a run, and every other tool, the Skill tool and every edit included | denied with "end your turn now"; decisive |
+| `RETRY` | a Bash command the probe cannot prove read-only that shows no write, execution or route signal: an unlisted program, a version query the probe does not prove (a program named without a path whose only argument is `--version`, or `npx -v`), a loop, a `$` expansion or substitution, an unquoted brace expansion, a `git config` read with an unquoted `*`, `?` or `[`, a line break, an unparsable quote, or a flag that waits, such as `tail -f` or `--watch`; at most three per run | denied with "use plain read commands"; not decisive |
+| `END` | every other Bash command with a signal (a write or execution program that does more than report its version, a program name built from an expansion, a glob or braces, a redirection to a file, `>&` followed by a file name included, a `tree` with `-o` or `-R`, a `node --test` with any other flag, a `printf -v`, a `file` with `-C` or `--compile`, an `npm test` or `pnpm test` with any other flag before `--`, a heredoc, a background job, an assignment prefix, a write flag, a `git -c` override, a `git` subcommand that is not a read, a `git config` that sets, unsets or edits included, every word after the key being its value even when it starts with `-`, and one that reads its config file from standard input or from a path with a `dev` or `proc` segment, a worktree or branch command on a command of several lines, `zensu-delivery-route.sh --build` or `--direct`, `--tdd-begin`, or a Zensu CLI mutation), the fourth `RETRY` of a run, and every other tool, the Skill tool and every edit included | denied with "end your turn now"; decisive |
 
 The probe reads a Bash command twice. The first reading proves it read-only or setup: it splits
 the command at `&&`, `||`, `|`, `;` and parentheses, outside quotes only. A quoted string counts
@@ -144,7 +144,24 @@ reading without a proof. A command the first reading cannot prove gets the secon
 looks for signals: it splits at line breaks too, follows `$(…)`, backticks and process
 substitutions into the commands they run, input redirections included, skips loop headers and shell keywords, and reads each
 command's program and flags, quoted text included. A command with a signal gets `END`, and one
-without gets `RETRY`. The record of every Bash call carries the decision's code, such as
+without gets `RETRY`. Neither a `git config` read nor a version query the second reading accepts
+carries a signal, so neither decides an `END`, while a write, a run or a route record beside one
+still does. The first reading cannot see where a quoted value starts or ends, so the second
+reading, which reads a command's words as the shell does (quotes, backslashes, a `#` comment and a
+descriptor number before a redirection included), overrides a first-reading proof whenever it finds
+a `git` subcommand or a redirection to a file the proof missed: such a signal voids an `ALLOW`
+proof, and one that is not a worktree, branch, checkout or switch command voids a `SETUP` proof. So
+`git config user.name ""` sets an empty name and gets `END`, `git -C "" init status` runs `git init`
+and gets `END`, `git -C "" branch status` creates a branch and gets `SETUP`, and `ls "2">&"1 y"`,
+which the first reading takes for `ls 2>&1 y`, writes the file `1 y` and gets `END`. Any other
+signal leaves a proof standing, so a `grep` for the text `zensu create` still runs as a read. The
+second reading reads a redirection's target, blanks after the operator skipped, as one shell word:
+quotes, backslashes, `$(…)` and backticks included, and only a space, a tab, a line break or an
+operator ends it. After quote removal `/dev/null` writes nothing, after `>&` digits, optionally
+followed by `-`, or a lone `-` copy or close a descriptor, and any other word names a file, so
+`>&out.txt` and `>& "1 x"` are redirections to a file. Neither reading expands braces or globs, so the first reading proves no part with an unquoted brace expansion and no
+`git config` with an unquoted `*`, `?` or `[`; such a command gets `RETRY` at best. The record of
+every Bash call carries the decision's code, such as
 `program:mkdir`, `redirect`, `expansion` or `unlisted`, and for a denied call the part that
 decided it. A worktree, branch or work-capture part never decides an `END`: the record names the
 first other signal, or the code `multi-line` and the first line when worktree or branch commands
@@ -174,11 +191,31 @@ labels too. The session-memory disclosure is judged per sentence: a Yes, choice 
 remembered, saved, stored or kept, or that holds for, to or through the rest of this session,
 counts in either word order, and so does such a phrase, or a memory verb scoped to this session,
 in the Yes option's own description, the segment right after its label. A negation such as not,
-never, nothing or a contraction, a scope of this request, a last pick before the subject that
-names No, or a `/zensu:delivery-route` mention before the phrase refuses the match, while
-"won't be asked again" still counts. After a memory verb only the words up to the session it
-names are judged, and a phrase before its subject also needs the rest of the subject's clause to
-be affirmative. Its
+never, nothing or a contraction, a single-request scope (this, that, the or one request, while
+each or every request spans the session), a last pick before the subject that names No, or a
+`/zensu:delivery-route` mention before the phrase refuses the match, while "won't be asked
+again" still counts. After a memory verb only the words up to the session it names are judged,
+and a phrase before its subject also needs the rest of the subject's clause to be affirmative. A
+rest-of-the-session phrase that opens its clause, or that only punctuation and connectives separate
+from its subject (and, but, or, so, yet, then, however, although, though, even, because, since, as,
+if, when, once, unless, until, while, whilst, whereas, that, also, now, still, thus, therefore,
+hence, too, meanwhile, otherwise, instead, nevertheless, nonetheless, moreover, furthermore,
+besides, indeed or likewise), also needs its host clause, the first clause after it that holds
+more than such connectives, not to negate a verb that keeps the choice, such as remembered, kept,
+recorded, applies, holds, stays or carries over. An unlisted word before the phrase leaves it
+unchecked. A negation reaches such a verb only within its own clause: but, though, although,
+while, whilst, whereas and because open a new clause, and so do and, so, then, yet, since, as,
+once, when, if, unless and until before a new subject (it, its, this, that, you, your, the, a, an,
+there, Zensu, I, we, they, my, our, their or No), while or and nor never do, and a later clause
+whose subject is the No answer (No, a No, the No or your No) is not judged. The boundary holds only
+after the phrase, so a negation earlier in its sentence still blocks it: "If you pick Yes, I will
+not ask again and it applies for the rest of this session." fails. So do "Your answer, for the
+rest of this session, is not remembered.", "Your answer, for the rest of this session, however, is
+not remembered." and "Pick Yes, yet for the rest of this session it is not remembered.", while "If
+you pick Yes, for the rest of this session I will not ask again.", "If you pick Yes, for the rest of
+this session you won't be prompted again and it applies.", "If you pick Yes, for the rest of this
+session it applies but a No is not remembered." and "Your choice holds, for the rest of this
+session, unless /zensu:delivery-route changes it." count. Its
 `autopilot_option` var says whether the injected line offers Autopilot: `offered` also requires the
 Autopilot label, the branch push and pull request and the gh or glab CLI, and `absent` fails a
 question that offers Autopilot anyway. The ask scenario sets `absent`, because the capture runs with
@@ -241,7 +278,13 @@ silent under `eval-config.json`, and runs the provider dry.
   task without it" when nothing beside the capture call carries a signal: the call never runs and is
   not graded, while a write bundled with it still ends the run. Two of the other three bundled a host
   rule's worktree setup with reads on one line, which the probe now answers as `SETUP` as well; the
-  third added a `git config` call, which the probe does not list as a read, so it still ends the run.
+  third added a `git config --get` call, which the probe now proves as a read, so that line gets
+  `SETUP` too. Two of twelve later attended runs ended on a read-only inspection, a version query
+  or a `git config` read, before any route question, so neither decides a run any more: `git config`
+  reads, `git --version` and `node --version` run as proven reads, and a version query of another
+  program named without a path, whose only argument is `--version` or, for npm, npx, pnpm and yarn,
+  `-v`, is denied with `RETRY` and never runs. A path-named program, and a write or run program
+  with `-v` or with a version flag beside other arguments, still end the run.
 - **The other enabled plugins are switched off through `--settings`.** That `enabledPlugins` in a
   `--settings` file overrides the user's settings is an assumption until a live run shows no other
   plugin's skills or hooks in the transcript.

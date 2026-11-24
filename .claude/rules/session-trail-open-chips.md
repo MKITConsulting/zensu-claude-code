@@ -29,7 +29,8 @@ receiving model re-created any chips (14) on its own, from a stale `Currently pe
 snapshot it grepped out of the old transcript.
 
 **The record is the source, never the transcript.** `ccdIndex` and `ccdApp` both remember a
-record's path in `CCD_RECORD_PATHS`, the last match in walk order winning in both, and
+record's path in `CCD_RECORD_PATHS`, the last match in walk order inside one store winning in both
+and an id that two stores hold remembering none, and
 `openTaskChips` reads that file again when a brief is built, through `desktopRecordOf`, whose one
 read also serves `repositoryVerdicts` and the linked sessions
 (`.claude/rules/session-trail-linked-sessions.md`), so the list is the queue at takeover time. It keeps every entry except an `offer`, which is a
