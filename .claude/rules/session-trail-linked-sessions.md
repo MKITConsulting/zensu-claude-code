@@ -58,7 +58,7 @@ with a reason, and both briefs print it.
 | `fork` | if named | a user fork, started only when the user names it in the plan answer |
 | `presets-unread` | if named | it names a saved environment and carries no `sshConfig`, and `ccd-session-presets.json` was refused, could not be read or did not parse, or the folder that holds it failed the owner and mode rule |
 | `ledger-unread` | if named | the ledger read had a directory error, hit its record cap or refused a record, or a ledger directory of a newer schema beside it holds records or could not be inspected |
-| `started-unread` | if named | the running session's own record, or a record in its folder, was refused or could not be read, no own record was found while a store entry was, or the folder that holds the store failed the owner and mode rule |
+| `started-unread` | if named | the running session's own record, or a record in its folder, was refused or could not be read, no own record was found while a store entry was or while a Claude Desktop host id names the running session, or a folder that holds a store it judged failed the owner and mode rule |
 | none | start | a side or task-chip session, the first `LINKED_START_CAP` (8) in creation order |
 | `cap` | later | the rest, started only on a later message the user types |
 
@@ -112,8 +112,8 @@ unknown answer is an **if named** row of its own:
   real folder its link names, belongs to another account.
 - **A Claude application-data folder that is a symbolic link fails the rule too**, such as one moved
   to another drive and linked back, because `realDirectory` refuses a symbolic link where a folder
-  is expected. `ZENSU_CCD_STORE` set to the store's real path makes the rule judge the real folder
-  instead.
+  is expected. The store's real path added to `ZENSU_CCD_EXTRA_STORES`, or for a store that
+  `ZENSU_CCD_STORE` names that variable set to it, makes the rule judge the real folder instead.
 - **While the folder is refused, both briefs print one note that names it, its cause and the remedy
   that cause and the store's source call for**, because a remedy that fits one cause does harm under
   another. `ownedDirectoryRefusal` in `hooks/lib/desktop-store-read-v1.js` names the cause:
@@ -121,36 +121,53 @@ unknown answer is an **if named** row of its own:
   `storeFolderVerdict` also judges the real folder of a symbolic link, and `storeFolderRemedy` in
   the module picks the remedy from the real folder's cause for a link and from the folder's own
   otherwise:
-  - `real-path`, a link whose real folder passes: set `ZENSU_CCD_STORE` to the store's real path.
+  - `real-path`, a link whose real folder passes: name the store's real path (the real-path step
+    below).
   - `chmod`, a folder the user owns that grants group or other write: remove those bits, and for a
-    link then set `ZENSU_CCD_STORE` to the store's real path.
-  - `move`, a folder another account owns while `ZENSU_CCD_STORE` named a store that is not Claude
-    Desktop's own: move the store into a private folder of the user's own, such as one `mktemp -d`
-    makes, and point the variable there. A permission change on a folder another account owns is
-    never the remedy, because on a shared folder such as `/tmp` it would take every other account's
-    write access away.
+    link then take the real-path step.
+  - `move`, a folder another account owns while `ZENSU_CCD_STORE` or `ZENSU_CCD_EXTRA_STORES`
+    named a store that is not Claude Desktop's own: move the store into a private folder of the
+    user's own, such as one `mktemp -d` makes, and point the variable that named it there. A
+    permission change on a folder another account owns is never the remedy, because on a shared
+    folder such as `/tmp` it would take every other account's write access away.
   - `admin`, a folder another account owns while the store is Claude Desktop's own, whether the
-    probe found it or `ZENSU_CCD_STORE` names it: never move the store, because Claude Desktop keeps
+    probe found it or a variable names it: never move the store, because Claude Desktop keeps
     writing there; only an administrator can give the folder back to the user's account.
   - `inspect`, a folder that is not a directory or could not be inspected: make it a directory of
     the user's own without group or other write.
 
-  **Claude Desktop's own store is decided by where it is, never by how it was named.** The
-  `real-path` remedy, the linked `chmod` remedy and the linked `admin` remedy all tell the user to
-  set `ZENSU_CCD_STORE` to the store's real path, which is Claude Desktop's live store, so a source
-  test would advise moving the very store those remedies named. `storeFolderVerdict` sets
-  `desktopOwn` true for a store the probe found, and for an override `desktopOwnStore` compares the
-  store with every existing candidate of `ccdStoreCandidates(true)`, the candidate list with the
-  override ignored, through `canonicalPair`, whose `realpathSync.native` also settles letter case
-  on a case-insensitive volume (measured on macOS: `/USERS` reads as `/Users`).
-  `storeFolderRemedy` answers `move` only for an override whose `desktopOwn` is `false`, and
-  `admin` for every other folder another account owns, an unknown `desktopOwn` included.
+  **The real-path step keeps every other store read.** `realPathStep` and `realPathJudged` in the
+  module word it by how the store was named, which `storeFolderVerdict` records as `named`: a store
+  `ZENSU_CCD_STORE` names takes that variable set to the store's real path, because the override is
+  already the only store; a store `ZENSU_CCD_EXTRA_STORES` names takes the real path in place of its
+  entry; and a discovered store takes the real path added to `ZENSU_CCD_EXTRA_STORES`, whose entries
+  are probed ahead of the discovered ones, so the real path wins the `SAME AS` pairing and its folder
+  is the one judged (`DF9`). Setting `ZENSU_CCD_STORE` for a discovered store would instead turn
+  off every other store, the other account's profile in a Session Hub takeover included.
 
-  `takeover --json` reports `linkedSessions.storeFolderRefused` and `linkedSessions.storeFolder`,
-  which carries `dir`, `cause`, `realDir`, `realStore`, `realCause`, `override`, `desktopOwn`,
-  `remedy` and `reads`, the reads that judged the folder (`presets`, `started` or both). Both keys are `null`
-  while no read judged it, because the state comes from the folder verdict that `savedPresets` and
-  `startedContinuations` return beside their answers, never from the memo.
+  **Claude Desktop's own store is decided by where it is, never by how it was named.** The
+  real-path step names Claude Desktop's live store, so a source test would advise moving the very
+  store those remedies named. `storeFolderVerdict` sets `desktopOwn` true for a discovered store,
+  and for a named one `desktopOwnStore` compares the store with every existing candidate of
+  `ccdStoreCandidates(true)`, the discovered list with both variables ignored, through
+  `canonicalPair`, whose `realpathSync.native` also settles letter case on a case-insensitive
+  volume (measured on macOS: `/USERS` reads as `/Users`). `storeFolderRemedy` answers `move`
+  only for a named store whose `desktopOwn` is `false`, and `admin` for every other folder another
+  account owns, an unknown `desktopOwn` included.
+
+  **Each read reports the folder it judged.** The presets read judges the folder of the store that
+  holds the old session's record, and the started set the folder of the store that holds the running
+  session's record, or every store's folder when it finds none, and in a Session Hub move those are
+  different profiles. `storeFolderStates` merges what the two reads returned into one entry per
+  folder, each with the reads that judged it, and both briefs print one note per refused entry, so a
+  note never distrusts a read that was trusted and never misses one that was not (`DF10`).
+  `takeover --json` reports `linkedSessions.storeFolders`, those entries in the order the reads
+  judged them, each carrying `dir`, `refused`, `cause`, `realDir`, `realStore`, `realCause`,
+  `override`, `named`, `desktopOwn`, `remedy` and `reads` (`presets`, `started` or both);
+  `linkedSessions.storeFolderRefused`, true while any entry is refused; and
+  `linkedSessions.storeFolder`, the first refused entry or else the first one. All three are `null`
+  while no read judged a folder, because the state comes from the folder verdicts that `savedPresets`
+  and `startedContinuations` return beside their answers, never from the memo.
 - `ledger-unread` applies to every session that no confirmed edge the read found keeps and that
   would otherwise start, while `ledgerRead()` reports a directory error, its record cap or a refused
   record. A record `readEdges` refused, whatever its reason (unreadable, not a regular file, over
@@ -200,7 +217,10 @@ unknown answer is an **if named** row of its own:
   store holds every start. `savedPresets` runs after `startedContinuations`, so a refused presets
   file never counts, and `OM9` pins that order; the folder that holds it is the store's own parent
   and counts for both reads, which `OM12` pins. A session that runs outside Claude Desktop over a
-  whole store keeps the answer of before, nothing started. Measured on the same Mac on 2026-11-08:
+  whole store keeps the answer of before, nothing started. A session that `CLAUDE_CODE_HOST_SESSION_ID`
+  marks as a Claude Desktop session, through `isSafeHostSessionId`, does not: its own record exists in
+  a store this run did not read, such as a data folder of its own that no variable names or a store
+  `ZENSU_CCD_STORE` leaves out, so its set is unknown (`DF10`). Measured on the same Mac on 2026-11-08:
   none of the 4,357 records and 67 folders was refused, failed to parse or failed to list, so
   neither rule decided anything there.
 - The **if named** rows match in the order `place`, `fork`, `presets-unread`, `ledger-unread`,
@@ -390,11 +410,18 @@ fences each body and clips it at `REPORT_TEXT_MAX` (4000); `takeover --json` car
 **Coupled sites.**
 
 - `skills/session-trail/handover-contract.json` declares the capability as
-  `"linkedSessions":{"contract":1,"lineage":{"directory":"zensu/session-lineage/v1/edges","schemaVersion":1}}`
+  `"linkedSessions":{"contract":1,"lineage":{"directory":"zensu/session-lineage/v1/edges","schemaVersion":1},"ownDataFolders":true}`
   and leaves `takeover.contract` at 1, because a larger value makes every current Hub refuse the
-  plugin. `R3` in `test-session-hub-receipt.sh` pins the line byte for byte, and the receipt unit
-  file checks the directory and schema against `ledgerPaths` and `LEDGER_SCHEMA_VERSION`. The Hub
-  keeps a byte copy in its own `tests/fixtures/handover-contract.json`, updated in Hub step H1.
+  plugin. `ownDataFolders` declares that a takeover finds the old session's record in a Claude
+  Desktop data folder of its own, a Session Hub profile or a store `ZENSU_CCD_EXTRA_STORES` names
+  (`.claude/rules/session-trail-targeted-lookup.md`), so a Hub can promise the linked sessions of
+  such a source only for a plugin that declares it. It is a field and not a larger
+  `linkedSessions.contract`, because `linked_sessions_of` in the Hub's `src-tauri/src/plugin.rs`
+  requires that number to be exactly 1 and reads no other field: every current Hub ignores the
+  field and would drop the capability for a 2. `R3` and `R12` in `test-session-hub-receipt.sh` pin
+  both lines byte for byte, and the receipt unit file checks the directory and schema against
+  `ledgerPaths` and `LEDGER_SCHEMA_VERSION` and the field's value. The Hub keeps a byte copy of
+  PLM's line in its own `tests/fixtures/handover-contract.json`, which owes the new field.
 - Both briefs render `linkedSessionLines` and `unreadReportLines` after `openChipLines`.
   `takeover --json` carries `linkedSessions`, each entry with its `openBelow` and `planned` and the
   state with its `plan`, and `unreadReports`; the first reports the ledger read
@@ -414,16 +441,18 @@ fences each body and clips it at `REPORT_TEXT_MAX` (4000); `takeover --json` car
   could not read, beside `CCD_REFUSED`, and `startedContinuations` reads both when it finds no own
   record, so a new store read that can fail adds its entry to one of them. `hostNamedRecord` reads
   `CLAUDE_CODE_HOST_SESSION_ID` through `isSafeHostSessionId`, as `accountForHostSession` does.
-- `storeFolderVerdict` in `trail.mjs` is the one judge of the folder that holds the store and
-  memoizes its answer in `STORE_FOLDER`: `savedPresets` and `startedContinuations` both call it and
-  return its verdict beside their answers, `linkedSessions` reports what they returned through
-  `storeFolderState` as `storeFolderRefused` and `storeFolder`, and `linkedSessionLines` renders
-  `storeFolderNote` from it, so a new reader of that folder calls it rather than `realDirectory`
-  again and returns its verdict too. `storeFolderNote`, its cause words in `STORE_FOLDER_CAUSE` and
+- `storeFolderVerdict` in `trail.mjs` is the one judge of the folder that holds a store and
+  memoizes its answer per store in `STORE_FOLDERS`: `savedPresets` judges the folder of the store
+  that holds the old session's record and reads that folder's presets file, and
+  `startedContinuations` the folder of the store that holds the running session's record, or every
+  store's folder when it finds none; both return their verdicts beside their answers, `linkedSessions`
+  merges what they returned through `storeFolderStates` into `storeFolders`, `storeFolderRefused`
+  and `storeFolder`, and `linkedSessionLines` renders `storeFolderNote` for each refused entry, so
+  a new reader of that folder calls it rather than `realDirectory` again and returns its verdict too. `storeFolderNote`, its cause words in `STORE_FOLDER_CAUSE` and
   `storeFolderRemedy` live in the module, where the unit file drives the remedy and every note text;
   `linkedSessionLines` passes `briefPath` to show each path. `ccdStoreCandidates(true)` is the one
-  candidate list `desktopOwnStore` reads, so a candidate added for the probe also counts as Claude
-  Desktop's own store.
+  candidate list `desktopOwnStore` reads, so a discovered candidate added for the probe also counts
+  as Claude Desktop's own store, and a named one never does.
 - `ownedDirectoryRefusal` names why `realDirectory(dir, writableOnlyByCaller)` refused a folder and
   decides nothing, so the store keeps one rule. It lives in `hooks/lib/desktop-store-read-v1.js`
   beside that rule, the companion's byte copy carries it, and `storeRead()` requires it of every
@@ -581,8 +610,8 @@ store-folder unit cases failed while `L13g-control` passed; every subject case o
   it is an older copy, which can lack the continuations the running session already started; the
   measurement in the fail-safe paragraph found the folder that holds the store `0700`.
 - **A Claude application-data folder that is a symbolic link holds every start that the saved
-  environments or the started set decide** until `ZENSU_CCD_STORE` names the store's real path,
-  which the brief's note says. Before the started set judged that folder, it held only the sessions
+  environments or the started set decide** until the store's real path is named, which the brief's
+  note says. Before the started set judged that folder, it held only the sessions
   started from a saved environment.
 - **With no own record found, one unread store entry holds every start.** A session that runs
   outside Claude Desktop, over a store with a refused or unreadable entry anywhere, waits for names
@@ -646,8 +675,8 @@ same walk: no new `why` value, config key or persisted field, both decide only t
 shapes no strict validator reads. Its follow-ups are `patch` on the same walk: a ledger directory of
 a newer schema, one the census could not inspect and the folder that holds the store decide only
 through the existing `ledger-unread` and `started-unread` rows, `linkedSessions.newerSchemaLedgers`,
-`linkedSessions.storeFolderRefused` and `linkedSessions.storeFolder` are new keys of an exchanged
-shape, the `started-unread` why text changes its words and not its value, and the backfill's clamp
+`linkedSessions.storeFolderRefused`, `linkedSessions.storeFolder`, `linkedSessions.storeFolders`
+and each entry's `refused` and `named` are new keys of an exchanged shape, the `started-unread` why text changes its words and not its value, and the backfill's clamp
 changes a value it persists, never the record's shape. `session-lineage-v1.mjs` gains the
 read-only `schemaLedgerCensus`, behind which `otherSchemaLedgers` returns what it returned before,
 and its `LEDGER_SCHEMA_VERSION`, `makeEndpoint`, `ENDPOINT_KEYS` and `buildEdge` are unchanged, so

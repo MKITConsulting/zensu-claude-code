@@ -19,6 +19,7 @@ const CONTEXT_RECORD_MAX_BYTES = 1024 * 1024;
 const CONTEXT_HOST = 'claude';
 const GIT_TIMEOUT_MS = 3000;
 const STORE_SEGMENTS = Object.freeze(['Claude', 'claude-code-sessions']);
+const HUB_PROFILE_SEGMENTS = Object.freeze(['Library', 'Application Support', 'Zensu Session Hub', 'Claude-Profile']);
 const EMPTY_FIELD = '-';
 
 const KINDS = Object.freeze({
@@ -47,6 +48,7 @@ const REASONS = Object.freeze({
   NO_SESSION_ID: 'no-session-id',
   NO_SESSION_STORE: 'no-session-store',
   OWN_RECORD_MISSING: 'own-record-missing',
+  OWN_RECORD_AMBIGUOUS: 'own-record-ambiguous',
   OWN_RECORD_UNREADABLE: 'own-record-unreadable',
   OWN_RECORD_REFUSED: 'own-record-refused',
   OWN_RECORD_MISMATCH: 'own-record-mismatch',
@@ -84,11 +86,39 @@ function isUserFork(record, spawnedFrom, parentSession) {
     && source !== parentSession && source !== record.sessionId;
 }
 
+function absoluteStore(value, platform) {
+  const store = msysDrivePrefix(value, platform);
+  const flavor = platform === 'win32' ? path.win32 : path;
+  return flavor.isAbsolute(store) ? flavor.resolve(store) : null;
+}
+
+function namedStores(platform, env) {
+  if (typeof env.ZENSU_CCD_EXTRA_STORES !== 'string') return [];
+  return env.ZENSU_CCD_EXTRA_STORES.split(platform === 'win32' ? ';' : ':')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '')
+    .map((entry) => absoluteStore(entry, platform))
+    .filter(Boolean);
+}
+
+function hubProfileStores(platform, home) {
+  if (platform !== 'darwin' || !home || !path.isAbsolute(home)) return [];
+  const profiles = path.join(home, ...HUB_PROFILE_SEGMENTS);
+  let names;
+  try {
+    names = fs.readdirSync(profiles);
+  } catch (_) {
+    return [];
+  }
+  return names.filter((name) => UUID_RE.test(name)).sort()
+    .map((name) => path.join(profiles, name, STORE_SEGMENTS[STORE_SEGMENTS.length - 1]));
+}
+
 function storeCandidates(platform, env) {
   const override = typeof env.ZENSU_CCD_STORE === 'string' ? env.ZENSU_CCD_STORE.trim() : '';
   if (override !== '') {
-    const store = msysDrivePrefix(override, platform);
-    return (platform === 'win32' ? path.win32 : path).isAbsolute(store) ? [store] : [];
+    const store = absoluteStore(override, platform);
+    return store ? [store] : [];
   }
   const home = typeof env.HOME === 'string' && env.HOME !== '' ? env.HOME : '';
   const bases = [];
@@ -104,18 +134,40 @@ function storeCandidates(platform, env) {
     }
     if (home) bases.push(path.join(home, '.config'));
   }
-  return bases.filter((base) => path.isAbsolute(base)).map((base) => path.join(base, ...STORE_SEGMENTS));
+  const defaults = bases.filter((base) => path.isAbsolute(base)).map((base) => path.join(base, ...STORE_SEGMENTS));
+  return [...new Set([...namedStores(platform, env), ...defaults, ...hubProfileStores(platform, home)])];
 }
 
-function sessionDirectory(platform, env, account, organization) {
+function realFolder(directory) {
+  try {
+    return fs.realpathSync.native(directory);
+  } catch (_) {
+    return path.resolve(directory);
+  }
+}
+
+function sessionDirectories(platform, env, account, organization) {
+  const seen = new Set();
+  const directories = [];
   for (const store of storeCandidates(platform, env)) {
     const accountDir = path.join(store, account);
     const organizationDir = path.join(accountDir, organization);
-    if ([store, accountDir, organizationDir].every((directory) => realDirectory(directory, writableOnlyByCaller))) {
-      return organizationDir;
-    }
+    if (![store, accountDir, organizationDir].every((directory) => realDirectory(directory, writableOnlyByCaller))) continue;
+    const real = realFolder(organizationDir);
+    if (seen.has(real)) continue;
+    seen.add(real);
+    directories.push(organizationDir);
   }
-  return null;
+  return directories;
+}
+
+function holdsRecord(directory, hostSession) {
+  try {
+    fs.lstatSync(path.join(directory, `${hostSession}.json`));
+    return true;
+  } catch (error) {
+    return !(error && (error.code === 'ENOENT' || error.code === 'ENOTDIR'));
+  }
 }
 
 function parseObject(text) {
@@ -231,8 +283,12 @@ function resolveLinkedSession(input = {}) {
   }
   const sessionId = input.sessionId;
   if (typeof sessionId !== 'string' || sessionId === '') return verdict(KINDS.NONE, REASONS.NO_SESSION_ID);
-  const directory = sessionDirectory(platform, env, account, organization);
-  if (!directory) return verdict(KINDS.NONE, REASONS.NO_SESSION_STORE);
+  const directories = sessionDirectories(platform, env, account, organization);
+  if (!directories.length) return verdict(KINDS.NONE, REASONS.NO_SESSION_STORE);
+  const holding = directories.filter((candidate) => holdsRecord(candidate, hostSession));
+  if (holding.length > 1) return verdict(KINDS.NONE, REASONS.OWN_RECORD_AMBIGUOUS);
+  if (!holding.length) return verdict(KINDS.UNRESOLVED, REASONS.OWN_RECORD_MISSING);
+  const directory = holding[0];
 
   const own = readDesktopRecord(directory, hostSession);
   if (own.state === 'missing') return verdict(KINDS.UNRESOLVED, REASONS.OWN_RECORD_MISSING);

@@ -102,12 +102,13 @@ test('the module speaks the command and directory its handover contract declares
   assert.equal(`${contract.takeover.prefix}${SID}${contract.takeover.suffix}${contract.takeover.receipt}${TOKEN}`, RAW);
 });
 
-test('the linked-sessions capability names the lineage ledger a takeover writes, beside takeover contract 2', () => {
+test('the linked-sessions capability names the lineage ledger a takeover writes and declares the own-data-folder store lookup, beside takeover contract 2', () => {
   assert.deepEqual(Object.keys(contract), ['schemaVersion', 'takeover', 'receipts', 'linkedSessions']);
   assert.equal(contract.takeover.contract, 2);
   assert.deepEqual(contract.linkedSessions, {
     contract: 1,
     lineage: { directory: 'zensu/session-lineage/v1/edges', schemaVersion: 1 },
+    ownDataFolders: true,
   });
   const root = path.join(os.tmpdir(), 'zensu-receipt-unit-root');
   assert.equal(path.relative(root, lineage.ledgerPaths(root).edges).split(path.sep).join('/'), contract.linkedSessions.lineage.directory);

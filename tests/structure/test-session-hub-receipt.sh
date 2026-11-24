@@ -37,7 +37,7 @@ bash -n "$HOOK" 2>/dev/null && check "R1 the hook passes bash -n" PASS || check 
 . "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 unit_check "R2 the session-hub-receipt unit file passes" "$UNIT"
 
-WANT_CONTRACT='{"schemaVersion":1,"takeover":{"contract":1,"prefix":"/zensu:session-trail takeover ","suffix":" --all","receipt":" --receipt "},"receipts":{"directory":"zensu/session-hub/v1/receipts","schemaVersion":1},"linkedSessions":{"contract":1,"lineage":{"directory":"zensu/session-lineage/v1/edges","schemaVersion":1}}}'
+WANT_CONTRACT='{"schemaVersion":1,"takeover":{"contract":1,"prefix":"/zensu:session-trail takeover ","suffix":" --all","receipt":" --receipt "},"receipts":{"directory":"zensu/session-hub/v1/receipts","schemaVersion":1},"linkedSessions":{"contract":1,"lineage":{"directory":"zensu/session-lineage/v1/edges","schemaVersion":1},"ownDataFolders":true}}'
 GOT_CONTRACT="$(cat "$CONTRACT" 2>/dev/null)"
 GOT_BYTES="$(wc -c < "$CONTRACT" 2>/dev/null | tr -d ' ')"
 if [ "$GOT_CONTRACT" = "$WANT_CONTRACT" ] && [ "$GOT_BYTES" = "$(( ${#WANT_CONTRACT} + 1 ))" ]; then
@@ -191,7 +191,7 @@ FLAG_BAD="$(receipt_flag_bad "$TRAIL")"
   && check "R11 trail.mjs accepts --receipt on show, handoff and takeover, refuses it elsewhere and refuses a malformed token" PASS \
   || check "R11 trail.mjs --receipt handling:$FLAG_BAD" FAIL
 
-WANT_HUB_CONTRACT='{"schemaVersion":1,"takeover":{"contract":2,"prefix":"/session-hub:session-trail takeover ","suffix":" --all","receipt":" --receipt "},"receipts":{"directory":"zensu/session-hub/v1/receipts","schemaVersion":1},"linkedSessions":{"contract":1,"lineage":{"directory":"zensu/session-lineage/v1/edges","schemaVersion":1}}}'
+WANT_HUB_CONTRACT='{"schemaVersion":1,"takeover":{"contract":2,"prefix":"/session-hub:session-trail takeover ","suffix":" --all","receipt":" --receipt "},"receipts":{"directory":"zensu/session-hub/v1/receipts","schemaVersion":1},"linkedSessions":{"contract":1,"lineage":{"directory":"zensu/session-lineage/v1/edges","schemaVersion":1},"ownDataFolders":true}}'
 GOT_HUB_CONTRACT="$(cat "$HUB_CONTRACT" 2>/dev/null)"
 GOT_HUB_BYTES="$(wc -c < "$HUB_CONTRACT" 2>/dev/null | tr -d ' ')"
 if [ "$GOT_HUB_CONTRACT" = "$WANT_HUB_CONTRACT" ] && [ "$GOT_HUB_BYTES" = "$(( ${#WANT_HUB_CONTRACT} + 1 ))" ]; then
