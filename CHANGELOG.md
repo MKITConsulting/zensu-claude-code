@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **`/zensu:verify-feature` fences its browser at the network level**: the browser now connects
+  only to the hosts and ports of the run's origins. A WebSocket endpoint on another host or port,
+  a shared worker's request to one, and the target of a redirect used to pass and now fail with
+  `net::ERR_PROXY_CONNECTION_FAILED` unless the run declares them: list each one like an API
+  origin, in the recipe's `validate.networkOnly.origins` and, under a policy, in its
+  `networkOnlyOrigins`, a WebSocket endpoint by the `http` or `https` origin of its host and
+  port. A plain `ws://` endpoint outside loopback has no such origin and is no longer reached.
+  WebRTC over UDP is still not fenced. The fence was measured with Google Chrome on macOS and with
+  Chrome for Testing on macOS and on Linux aarch64; on Windows, on Linux x86-64 and with the Edge
+  and prerelease Chrome channels it is unmeasured, and only the request interception of earlier
+  releases is known to hold there.
+- **Service workers run in the verify browser**: an application that registers one now behaves
+  there as it does for a user, with a cache its worker fills on the first load and a page a new
+  worker can take over. An update prompt, a filled cache and a page under a worker's control can
+  be verified; offline behaviour, background sync and push cannot.
+- **A session that was open across the update keeps its old fence**: it keeps the installation it
+  loaded, helper and gate together, until it ends or `/reload-plugins` runs in it. After that the
+  gate refuses a run config an earlier helper wrote, with a reason that says to write it again
+  with the run-config helper of this installation, and an earlier gate refuses a run config this
+  release writes. One remedy covers every such case: start `/zensu:verify-feature` again in a
+  session started or reloaded after the update, so that helper and gate come from one
+  installation.
+
 ## [0.42.0] - 2026-11-20
 
 ### Added

@@ -6,6 +6,7 @@ unset ZENSU_WRAPPER_TEST_MODE ZENSU_WRAPPER_TEST_KILL_WATCHER
 for ambient in $(compgen -e); do
   case "$ambient" in
     PLAYWRIGHT_MCP_*|PWTEST_*) unset "$ambient" ;;
+    PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK) unset "$ambient" ;;
   esac
 done
 

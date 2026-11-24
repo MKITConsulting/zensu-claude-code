@@ -215,7 +215,8 @@ registry "$PACKAGE" "$MEASURED" "$NEXT"
 expect "PD13 a newer stable release reports the release under the marker that names it" "$(drift_run "$DRIFT")" "$(reported "$NEXT")"
 NEXT_REPORT="$(cat "$WORK/out"; printf x)"
 NEXT_REPORT="${NEXT_REPORT%x}"
-pd14="$(node -e '
+pd14_faults() {
+  node -e '
   const fs = require("fs");
   const path = require("path");
   const [file, root, version] = process.argv.slice(1);
@@ -224,14 +225,22 @@ pd14="$(node -e '
   const install = "`npm install --prefix <dir> --ignore-scripts @playwright/cli@" + version + "`";
   if (!text.includes(install)) faults.push("install");
   const words = [...text.matchAll(/`([^`]+)`/g)].flatMap((match) => match[1].split(/\s+/));
-  const files = words.filter((word) => word.includes("/") && /^[a-z][a-z0-9._/-]*\.(js|json|sh)$/.test(word));
+  const files = words.filter((word) => word.includes("/") && /^[a-z][a-z0-9._/-]*\.(m?js|json|sh)$/.test(word));
   if (files.length < 4) faults.push(`paths:${files.length}`);
   for (const name of files) if (!fs.existsSync(path.join(root, name))) faults.push(`missing:${name}`);
   const prose = text.replace(/<!--[\s\S]*?-->/g, "").replace(/`[^`]*`/g, "");
   if (prose.includes("@")) faults.push("bare-at");
   process.stdout.write(faults.join(",") || "ok");
-' "$WORK/out" "$ROOT" "$NEXT" 2>/dev/null)"
+' "$1" "$ROOT" "$NEXT" 2>/dev/null
+}
+pd14="$(pd14_faults "$WORK/out")"
 expect "PD14 the report installs that release, names only repository paths that exist and no bare @name" "$pd14" ok
+sed 's#tests/integration/verify-fence/probe\.mjs#tests/integration/verify-fence/probe-moved.mjs#g' "$WORK/out" > "$WORK/moved-probe"
+pd14b="$(pd14_faults "$WORK/moved-probe")"
+case "$pd14b" in
+  (*missing:tests/integration/verify-fence/probe-moved.mjs*) check "PD14b a report that names a moved fence probe fails the path check" PASS ;;
+  (*) check "PD14b a report that names a moved fence probe fails the path check (got '$pd14b')" FAIL ;;
+esac
 registry "$PACKAGE" "$WIDE" "$MEASURED" "$NARROW"
 expect "PD15 the newest release is the highest version by number, not the last one listed nor the highest by text" \
   "$(drift_run "$DRIFT")" "$(reported "$WIDE")"

@@ -44,7 +44,7 @@ needs a run that exited 0, a `fail` one that did not. `partial` means what
 `$ROOT/skills/verify-feature/rules/acceptance-consent.md` §"What `partial` means" defines: this
 environment cannot observe the criterion, because it needs credentials, an account, a non-loopback
 host or a signed build, or because its driver cannot run here, or because a driver fence rules
-the state out (the `browser` driver blocks service workers). Name that cause in the evidence. A
+the state out (no driver has one today). Name that cause in the evidence. A
 criterion you could observe but did not prove is not `partial`: drive it again. An observation that
 contradicts the criterion is `fail`. What the evidence may contain, and what it must never
 contain, is `$ROOT/skills/verify-feature/rules/acceptance-evidence.md` §1.

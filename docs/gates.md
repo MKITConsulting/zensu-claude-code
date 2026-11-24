@@ -885,14 +885,27 @@ session is prose, not a boundary.
   `skills/verify-feature/rules/browser-verification.md` carries the list the model works from;
   `ALLOWED_COMMANDS` in `hooks/lib/verify-consent-v1.js` is the one that decides.
 - **`open`.** It must carry `--config=<absolute path>`, and the gate reads that file itself and
-  requires exactly the shape the helper writes: an isolated browser, `--no-proxy-server` plus,
-  for remote hosts, one `--host-resolver-rules` pin per hostname to a public address, service
-  workers blocked, one to eight canonical origins as `network.allowedOrigins`, and `outputDir`
-  set to the run directory's own `browser/` folder. It also denies when the launch environment
-  sets a `PLAYWRIGHT_MCP_*` variable, which the CLI would merge over the run config, when the
+  requires exactly the shape the helper writes: an isolated browser; exactly three launch
+  arguments, which the helper and the gate derive from the origin list with one function
+  (`fenceArgs`); service workers allowed; one to eight canonical origins as
+  `network.allowedOrigins`; and `outputDir` set to the run directory's own `browser/` folder.
+  The three arguments are `--proxy-server=http://zensu-fence.invalid:9`, a proxy that does not
+  exist; `--proxy-bypass-list=<-loopback>;…`, which keeps loopback behind that proxy and then
+  re-admits one `host:port` entry per origin, the port always written; and
+  `--host-resolver-rules=…`, with one pin per remote hostname to a public address, the catch-all
+  `MAP * ^NOTFOUND` and one `EXCLUDE` per `localhost` or address-literal host. The gate compares
+  each argument byte for byte with what the function returns, so a second proxy, a fallback, an
+  entry without a port and a rule for a host no origin names are all refused. A run config of
+  any other shape, the one an earlier release wrote included, is refused with a reason that says
+  to write it again with the run-config helper of this installation. It also denies when the
+  launch environment sets a `PLAYWRIGHT_MCP_*` variable, which the CLI would merge over the run
+  config, or `PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK`, which takes a service worker's
+  requests out of request interception, when the
   global `~/.playwright/cli.config.json` sets anything beyond a short list of presentation keys
   or selects a browser other than Chromium, and when `--browser` names anything but a Chromium
-  channel, because the resolver pins and the proxy switch are Chromium switches.
+  channel, because the fence is made of Chromium switches. The run-config helper refuses the same
+  launch variables in the shell it runs in and then writes no run config, so a variable that a
+  shell profile sets for that shell alone stops the run as well.
 - **Navigation targets.** Every origin in the run config, and the URL of `open`, `goto` and
   `tab-new`, pass through the floor below.
 
@@ -911,15 +924,25 @@ and the gate refuses a run config that pins `localhost` to an address. A remote 
 policy target or one the human approves at the prompt, is HTTPS with its host named exactly: the
 run-config helper resolves each hostname once, refuses a non-public or mixed answer, and writes
 the pin the gate then requires at `open` for every `https` or `wss` origin whose host is neither
-an IP literal nor local, so a run config without that pin, or with a pattern host, never opens. The browser
-itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`, with three
-exceptions. It does NOT fence a WebSocket connection — measured with playwright-cli 0.1.21, 0.1.23 and 0.1.24, an open gap. Nor does it refuse a
-server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
-line after every navigating call and stops a scenario that left the approved set. Nor does it
-fence a shared worker's fetch, an open gap too — measured with playwright-cli 0.1.24 driving
-Google Chrome 157 on loopback `http` origins: a dedicated worker's fetch is fenced, a shared
-worker's fetch is not. An `https` target, a remote host, Windows and Linux were not measured.
-Nothing enforces routes: the evidence boundary is the origin, which the launch policy names or the human
+an IP literal nor local, so a run config without that pin, or with a pattern host or a host that
+starts with a dot, never opens. The browser
+itself is fenced in two layers. The three launch arguments of the run config are the first: a
+connection whose host and port are not those of an origin in the run config goes to a proxy
+that does not exist, and a name the run does not list is answered as not found, so a request, a
+WebSocket, a shared worker's request and a server redirect to any other target fail with
+`net::ERR_PROXY_CONNECTION_FAILED`. This layer fences by host and port, so any scheme on an
+approved host and port passes it. Request interception over `network.allowedOrigins` is the
+second: it fails an HTTP(S) request of a page, a dedicated worker or a service worker to an
+origin outside the list with `net::ERR_BLOCKED_BY_CLIENT`, and it sees neither a WebSocket nor
+a shared worker's request. Measured on 2026-11-18 with playwright-cli 0.1.24: Google Chrome 157
+on macOS, and the bundled Chrome for Testing 158 with its headless shell on macOS and on Linux
+aarch64 in a container; Windows, Linux on x86-64 and the Edge and prerelease Chrome channels
+were not measured, and there only the second layer is known to hold what it held before. WebRTC
+over UDP is outside both layers, an open gap. The browser still follows a server redirect
+between two origins of the run config, a
+network-only one included, so the skill reads the `Page URL`
+line after every navigating call and stops a scenario that landed on a network-only origin. Nothing
+enforces routes: the evidence boundary is the origin, which the launch policy names or the human
 approves at the prompt, and an approved origin covers every page on it, at any path.
 
 **Consent and memory.** For an origin no policy names, the PreToolUse hook returns
@@ -963,10 +986,14 @@ that fails its contract denies every `zensu-verify` navigation in every
 mode, with the broken rule named. Every origin in the policy, and every remote origin of a run
 config or a navigation, names its host exactly — an IP literal, or a hostname of `a-z`, `0-9`,
 `.`, `-` and `_` — because the browser turns an allowed origin into a URL glob and would read `*`
-or `{a,b}` as a pattern, so one Yes can never approve a wildcard.
+or `{a,b}` as a pattern, so one Yes can never approve a wildcard. Such a hostname never starts
+with a dot either, which the proxy bypass list would read as every subdomain. In a run config
+the rule binds every hostname but `localhost`, whatever the scheme, because `;` and `,`
+separate the entries of the bypass list and the resolver rules.
 
 **Network-only origins.** A policy may also list, in `networkOnlyOrigins`, up to 8 origins the
-pages request but no navigation command may open: a REST API, an OIDC issuer, a token endpoint.
+pages request but no navigation command may open: a REST API, an OIDC issuer, a token endpoint,
+a WebSocket endpoint, the target of a redirected request.
 The run config allows them beside the targets, so the gate derives from the policy which entries
 are navigable. At `open` it admits a network-only run-config origin, with its pin for a remote
 host, and plans no consent record for it; `open <url>`, `goto` and `tab-new` aimed at one deny
@@ -998,8 +1025,8 @@ file, no symlink, one link, owner-only on POSIX, at most 1 MiB, valid storage st
 a leading dot, a parent domain of one, and every origin entry one of those origins — because
 the browser's JSON parser echoes the start of a malformed file into its error and
 `playwright-cli` prints that error. Cookies are scoped by host, not by port, so every approved
-port of that host receives them, and a parent-domain cookie also reaches a sibling host a
-redirect lands on. Every deny names a fixed reason and never a byte of the file
+port of that host receives them, and a parent-domain cookie also reaches an approved sibling
+host a redirect lands on. Every deny names a fixed reason and never a byte of the file
 (`hooks/lib/verify-auth-state-v1.js` holds the shape, scope and file checks for the helper and
 the gate alike). The prompt says the browser opens signed in. A signed-in `open` of a loopback
 origin is asked once per session even when the origin was approved without state, because its
@@ -1130,6 +1157,11 @@ through Bash.
   that spawns `playwright-cli` without naming it in the command text, a tool that runs shell
   commands outside the Bash tool included. The **Other sessions** rules judge only what the
   command text shows.
+- **The launch-variable refusals read two environments, each once.** The gate reads the
+  environment Claude Code started with when it judges a call, and the run-config helper reads
+  its own shell's when it writes the run config. A shell environment that changes between the
+  two, and the environment a program gives a `playwright-cli` it starts itself, reach the browser
+  unread. On Windows both fold the letter case of a variable name, as Windows reads names.
 - **Hooks switched off host-side leave `playwright-cli` unconstrained.** The retired broker
   refused to self-approve an origin without a per-session marker the gate wrote, so a disabled
   hook ended in a refusal. Nothing stands in that position now: with the hooks off, the run
@@ -1170,19 +1202,24 @@ through Bash.
   sits under the project, where the session can write.
 - **The gate judges a URL only where a command names one.** It reads the URL of `open`, `goto`
   and `tab-new`; `go-back`, `go-forward`, `reload` and `tab-select` name none, so where they land
-  is never judged. The browser also follows a server redirect to another origin, a network-only
-  one included, and a page-initiated navigation onto a network-only origin, and a click can open a
+  is never judged. The browser also follows a server redirect to another origin of the run
+  config, a network-only one included, though to no target outside it, and a page-initiated
+  navigation onto a network-only origin, and a click can open a
   popup tab on such an origin. The skill's `Page URL` check, its `tab-list` before every
   `tab-select` and its rule to close such a tab with `tab-close` answer these, and they are prose,
   not a boundary. A frame a target page embeds from a network-only origin renders inside that
   page, so its content reaches that page's snapshot and screenshot, where the skill reads it as
   that page's content, like data the page fetched.
-- **Three kinds of request leave the run-config fence.** A WebSocket connection and a shared
-  worker's fetch reach an origin outside the run config, and the browser follows a server
-  redirect to one. No check of any kind answers the first two; the third has only the skill's
-  `Page URL` check, which is prose. Measurements: the WebSocket with playwright-cli 0.1.21,
-  0.1.23 and 0.1.24, the shared worker with playwright-cli 0.1.24 driving Google Chrome 157 on
-  loopback `http` origins.
+- **WebRTC over UDP leaves the run-config fence, and where the launch arguments do not hold, more
+  does.** UDP passes no proxy, so a page's WebRTC traffic over UDP reaches a target outside the
+  run config, and no check answers it. Request interception alone holds neither a WebSocket nor a
+  shared worker's request: measured with the routes alone, a page's WebSocket reached an origin
+  outside `allowedOrigins` with playwright-cli 0.1.21, 0.1.23 and 0.1.24, and so did a shared
+  worker's fetch with playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins,
+  where a dedicated worker's fetch was blocked. So wherever the three switches do not hold, both
+  reach any target, as they did before the network fence: nobody measured them on Windows, on
+  Linux on x86-64 or with the Edge and prerelease Chrome channels, and a later Chrome can change
+  any of them.
 - **The recorder cannot tell whether the prompt was shown**, only that the call then succeeded.
 - **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
   `playwright-cli`, an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix,
@@ -1227,10 +1264,14 @@ through Bash.
   whose empty or relative entry comes before or holds `playwright-cli` is refused too, because the
   shell reads that entry against the working directory of each call. A later CLI can change the
   meaning of an existing flag, or rename or ignore a fence the run config relies on —
-  `network.allowedOrigins`, `browser.isolated`, the `--host-resolver-rules` pins,
-  `browser.contextOptions.serviceWorkers` — and every gate check still passes while that
-  browser-side fence is gone. The configuration channels are judged only as far as the gate
-  knows them — the `PLAYWRIGHT_MCP_*` launch variables, `PLAYWRIGHT_MCP_` and `PWTEST_` text in
+  `network.allowedOrigins`, `browser.isolated`, the three launch arguments
+  (`--proxy-server`, `--proxy-bypass-list` with `<-loopback>`, `--host-resolver-rules` with
+  `^NOTFOUND`) — and every gate check still passes while that
+  browser-side fence is gone. A later Chrome can do the same to the three switches the network
+  fence is made of, and request interception is then what is left for the requests it sees.
+  The configuration channels are judged only as far as the gate
+  knows them — the `PLAYWRIGHT_MCP_*` launch variables,
+  `PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK`, `PLAYWRIGHT_MCP_` and `PWTEST_` text in
   a command, and the global `cli.config.json` — so a new environment or config channel of a
   later CLI is unjudged.
 - **The permission mode is the host's report, and the gate cannot tell a person from a
@@ -2065,8 +2106,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
 - **Consent to a partial criterion.** `partial` means this environment cannot observe a
   criterion: it needs credentials, an account, a non-loopback host or a signed build, or its
   driver cannot run here, so no code change turns it. A driver fence is one more such cause: a
-  state the driver can never show, whoever drives it, which today means a service worker under
-  the `browser` driver. A criterion the run could observe but did not
+  state the driver can never show, whoever drives it. No driver has one today: the `browser`
+  driver's run config allows service workers. A criterion the run could observe but did not
   prove is verified again, or recorded `fail` when what was observed contradicts it. `zensu-log.sh --chain-done
   --claimed-review-ticket <ticket> --accept-partial AC-004,AC-005` closes a chain whose open
   criteria (active and not `pass`) are exactly the listed ids, are all `partial` on the
