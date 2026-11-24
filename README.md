@@ -80,7 +80,7 @@ already rely on:
   and the banner), about 9,100 characters on the first prompt of a session and
   on the first prompt after `/compact` or `/clear` (about 11,200 when the prompt
   carries a planning keyword), and about 1,800 to 5,300 characters on every
-  later prompt. Automatic work capture, added after 0.29.0, adds about 3,500
+  later prompt. Automatic work capture, added after 0.29.0, adds about 4,100
   characters to every session start. The skill listing carries Zensu's skill
   descriptions on top.
   [Architecture](docs/architecture.md#context-added-to-every-session) says how

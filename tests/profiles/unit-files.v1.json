@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "files": [
     {
-      "path": "tests/structure/ai-work-capture.test.js", "registered": 47,
+      "path": "tests/structure/ai-work-capture.test.js", "registered": 50,
       "runs": [{ "driver": "tests/structure/test-ai-work-capture.sh" }],
       "summary": "AI work capture: durable retries, account and host binding, explicit goals, the local feature search and its ranking before the scope question, commit submission and refusal of automatic decisions."
     },

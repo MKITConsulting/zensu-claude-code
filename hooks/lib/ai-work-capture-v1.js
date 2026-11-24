@@ -102,15 +102,15 @@ function checkCLI(root) { return compatibility.check(root); }
 function searchFeatures(productId, query, root) {
   let found;
   try {
-    found = featureSearch.search(JSON.parse(execute('zensu', ['features', 'list', '--product', productId, '--json'], root, FEATURE_LIST_BUFFER)), productId, query ?? '');
+    found = featureSearch.search(JSON.parse(execute('zensu', ['features', 'list', '--product', productId, '--json'], root, FEATURE_LIST_BUFFER)), productId, query);
   } catch {
     return { featureSearch: 'unavailable' };
   }
-  return { featureSearch: query === undefined ? 'no_query' : found.featureCandidates.length ? 'matched' : 'no_match', ...found };
+  return { featureSearch: featureSearch.status(query, found), ...found };
 }
 
 function preflight(options) {
-  if (Object.hasOwn(options, 'query') && !(text(options.query, 500) && featureSearch.usable(options.query))) throw new UsageError('Zensu AI work capture refused: give --query a few words that name the capability, such as invoice export, without control characters. Words under three letters and words such as the or for do not count.');
+  if (Object.hasOwn(options, 'query') && !featureSearch.usable(options.query)) throw new UsageError(featureSearch.QUERY_REFUSAL);
   const { root, file } = location(options.workspace, options.session);
   if (compatibility.paused(file)) return { status: 'capture_disabled' };
   const support = checkCLI(root);
@@ -120,7 +120,7 @@ function preflight(options) {
     const context = cli(goalScope.contextArgs(goal), root);
     if (context.ready === false && context.workScope === 'unassigned') return { ...support, status: 'product_confirmation_required', reason: 'Ask once for the exact product to bind before implementation. Bind only after explicit human confirmation; otherwise continue without capture. After binding, run preflight again with --query; it searches the bound product\'s features for the feature question.' };
     const scope = confirmedScope(context, options['cross-product-reason'] ?? '');
-    if (!goal) return { ...support, status: 'feature_confirmation_required', productId: scope.productId, ...searchFeatures(scope.productId, options.query, root), reason: `Reuse the confirmed product and ${featureSearch.QUESTION} With featureSearch no_query, run preflight again with --query before asking. After /zensu:change creates the chosen feature, run preflight with its --feature before begin. Without an answer, continue without capture.` };
+    if (!goal) return { ...support, status: 'feature_confirmation_required', productId: scope.productId, ...searchFeatures(scope.productId, options.query, root), reason: `Reuse the confirmed product and ${featureSearch.QUESTION} Without an answer, continue without capture.` };
     goalScope.confirm(context, goal);
     return { ...support, status: 'ready', ...scope, ...goal };
   } catch {
@@ -287,6 +287,7 @@ function main(argv) {
   }
   const options = {};
   for (let i = 0; i < args.length; i += 2) {
+    if (!args[i].startsWith('--')) throw new UsageError('Zensu AI work capture refused: pass each value as one quoted argument, such as --query "invoice export".');
     if (!['--workspace', '--session', '--task', '--title', '--criteria', '--run-kind', '--cross-product-reason', '--feature', '--feature-revision', '--maintenance-reason', '--review-file', '--query'].includes(args[i]) || args[i + 1] === undefined || Object.hasOwn(options, args[i].slice(2))) throw new Error('Invalid capture arguments');
     options[args[i].slice(2)] = args[i + 1];
   }

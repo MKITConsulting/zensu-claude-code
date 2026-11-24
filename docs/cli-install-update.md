@@ -84,7 +84,7 @@ The helper checks capabilities rather than assuming that a version number is eno
 | --- | --- |
 | `cli_unavailable` / `cli_incompatible` | Install/update the CLI using this guide; repeat preflight. No fallback to an older capture protocol. |
 | `product_confirmation_required` | Confirm the exact product once, then use `zensu ai-work bind --product <uuid> --confirm`. Never guess from a repository name. Run preflight again with `--query` to search the bound product's features. |
-| `feature_confirmation_required` | Pick this goal's feature from the returned `featureCandidates`, create a new feature for it through `/zensu:change`, or explicitly choose product maintenance with a reason. A valid product binding is reused. |
+| `feature_confirmation_required` | Pick this goal's feature from the returned `featureCandidates`, create a new feature for it through `/zensu:change` under the title the question named, or explicitly choose product maintenance with a reason. With `featureSearch: unavailable`, offer no new feature. A valid product binding is reused. |
 | `scope_unavailable` | Check the selected account, organization, API host and product/feature access; no automatic login or reassignment. |
 | `ready` | The confirmed scope can be used by `begin`; preflight itself has not created a report. |
 | `capture_disabled` | Reporting was declined. Continue coding without scope questions or upload attempts. |
