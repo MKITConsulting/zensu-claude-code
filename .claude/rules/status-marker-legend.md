@@ -10,7 +10,7 @@ paths:
 
 # Status-Marker Legend (CHAIN-END SUMMARY + PR bodies)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 Every status and verdict cell of the chain-end report and of the plugin-opened PR body
 carries a leading marker — 🟢 good, 🟡 attention, 🔴 bad, ⚪ not applicable. **The marker

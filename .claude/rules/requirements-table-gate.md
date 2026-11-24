@@ -8,7 +8,7 @@ paths:
 
 # Requirements-Table Gate (`hooks/lib/zensu-plan-requirements.sh`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 `--tdd-complete` refuses a chain whose plan carries no usable `## Requirements` table.
 It exists because `/zensu:converge` anchors its whole flow-back audit on that table and

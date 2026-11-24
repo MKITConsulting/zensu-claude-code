@@ -11,7 +11,7 @@ paths:
 
 # Marker-Block Carriers (`session-start-evidence-discipline.sh` + `user-prompt-best-solution-first.sh`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 Two hooks inject a rule read at run time from a one-line marker block under `docs/`. They share
 ONE hardened reader, ONE `MAX_FILE` and ONE `MAX_BLOCK`, and they are NOT interchangeable:

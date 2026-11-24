@@ -8,7 +8,7 @@ paths:
 
 # Implementing-Phase Turn Counter (`hooks/stop-chain-enforcer.sh` + `zensu-tdd-phase.sh`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 `zensu_impl_stop_nudge` counts a TURN whenever a Stop ends with the chain still at
 `implementing` and the worktree reporting changed source, and at or past

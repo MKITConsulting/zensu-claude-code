@@ -15,7 +15,7 @@ paths:
 
 # Restoring a Vanished Recorded Project Root (`restoreRootVerdict` / `restoreWorkflowProjectRoot`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 **A THIRD wedge in this family, and the one most easily confused with the other two.**
 §"Adopting a Record Across a Lineage Break" answers "this runtime may not SERVE the record".

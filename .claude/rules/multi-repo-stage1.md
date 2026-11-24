@@ -9,19 +9,19 @@ paths:
 
 # Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 Stage 1 of `docs/multi-repo-chains-spec.md` §5. It ships NO multi-root capability; it
 removes the SILENT GREEN a chain produced when its work landed in a repository the
 anchor cannot see. Four behaviours, three files, one shared claim grammar.
 
-**Stages 2 and 3 were redesigned on 2026-10-21 and are not built** (spec §6 to §9). The
-sealed carrier of §6.1.1 is superseded: code roots are declared at arming with
+**Stages 2 and 3 (spec §6 to §9) land behind `CODE_ROOTS_ENABLED` in
+`hooks/lib/code-roots-v1.js`, which is `false`.** Code roots are declared at arming with
 `--tdd-begin --code-root <label>=<path>`, kept as `codeRoots` in the workflow document as a
 declaration that bounds accidents, not intent, and claimed as `@<label>/<path>`; the
-cross-repository check is a `crossrepo` perspective inside the review fan-out. The design
-ships in five pull requests behind `CODE_ROOTS_ENABLED` in a new `code-roots-v1` module, and
-until the last one flips it, everything below is all of multi-repo that runs. A stage-2 change
+cross-repository check is a `crossrepo` perspective inside the review fan-out.
+`.claude/rules/multi-repo-code-roots.md` records what is built. While the switch is off,
+everything below is all of multi-repo that runs. A stage-2 change
 to the audit, the terminus or the doctor row must keep every rule here for the anchor and for
 an undeclared foreign root.
 
@@ -87,7 +87,7 @@ that name holding a DIFFERENT quantity** — this one counts named FILES, the re
 which is the conflation the rename removed.
 **The grammar is ANCHORED.** A claim is `<label> <marker>` at the start of the message,
 after an optional bracketed timestamp prefix. The label runs to the first marker, holds at
-most `CLAIM_LABEL_TOKEN_BUDGET` (5) tokens and no `'`, `"` or `|`, and an empty label
+most `LABEL_TOKEN_BUDGET` (5, `hooks/lib/edit-landing-claims-v1.js`) tokens and no `'`, `"` or `|`, and an empty label
 grades as step `(none)`. The two `files:` markers take an em dash, an en dash or a plain
 hyphen — the `[—–-]` class `review-round-scope-v1.js` admits — written as three LITERALS,
 never as a bracket class: a multibyte bracket expression matches single bytes under
@@ -155,26 +155,22 @@ such a path must revisit that `case` too. The product of the two budgets is NOT 
 the watchdog above the child has no deadline on a host without `timeout`, so a shared
 total-probe counter is the standing fix and is not taken.
 
-**`claimRootSafeNames` consumes the OWNER's display rules, and there are THREE render
-bounds rather than one.** The row echoes a filesystem path a model is asked to relay, which is
+**`claimRootSafeNames` consumes the OWNER's display rules, and the doctor and the shell keep
+separate render bounds.** The row echoes a filesystem path a model is asked to relay, which is
 the same question the autopilot rows answer for a run id, so it applies `forgesReportRow`
 beside the control-byte and backtick tests — a `label : value` pair, a double space, a
 separator-adjacent modifier letter, a Default_Ignorable code point and an orphan combining
 mark are none of them control bytes — and the ANCHOR passes through the same predicate, not
-a weaker inline one. `AUTOPILOT_RENDER_MAX` is the doctor's; `CLAIM_ROOT_RENDER_MAX` in
-`zensu-edit-landing.sh` and `_TC_STEM_RENDER_MAX` in `zensu-log.sh` are the two shell ones,
-and BOTH were bare `200` literals until the round that named them — which is strictly worse
-than the `CLAIM_`-prefixed twin this paragraph used to record removing, because the
-`grep -nE 'AUTOPILOT_|autopilot[A-Z]|createHash'` recipe §"Autopilot Run Scope" prescribes
-cannot see either spelling. **The three screens are a SUBSET of the doctor's, never parity**,
-and saying "the same set" was wrong in both directions: `forgesReportRow` consults SEVEN
-rules, `render_claim_root` and `_tc_render_stem` carry FOUR each, and the three named Unicode
-row-forgery classes need a JS regex that a POSIX shell `case` cannot express. **Both shell
-screens are LOCALE-PINNED** (`local LC_ALL=C`) and repair a UTF-8 sequence the byte cut
-splits: `${#v}` and `${v:0:N}` count and cut characters under a UTF-8 locale and BYTES under
-C, and `[[:cntrl:]]` matches the C1 range under an ISO8859 one, so unpinned they did
-different things on the same input and a non-interactive shell with no `LANG` took the byte
-branch. §"Marker-Block Carriers" records the same class for the two marker hooks and resolves
+a weaker inline one. `AUTOPILOT_RENDER_MAX` is the doctor's bound. Both shell paths,
+`zensu-edit-landing.sh` and `zensu-log.sh`, source one screen, `zensu_safe_render` in
+`hooks/lib/zensu-safe-render.sh`, bounded by `ZENSU_RENDER_MAX`. **The shell screen is a
+SUBSET of the doctor's, never parity:** `forgesReportRow` consults SEVEN rules, and the three
+named Unicode row-forgery classes need a JS regex that a POSIX shell `case` cannot express.
+**The shell screen is LOCALE-PINNED** (`local LC_ALL=C`) and repairs a UTF-8 sequence the byte
+cut splits: `${#v}` and `${v:0:N}` count and cut characters under a UTF-8 locale and BYTES
+under C, and `[[:cntrl:]]` matches the C1 range under an ISO8859 one, so an unpinned screen
+does different things on the same input and a non-interactive shell with no `LANG` takes the
+byte branch. §"Marker-Block Carriers" records the same class for the two marker hooks and resolves
 it by measuring through `node`, which is not available on a path that runs per emitted line.
 **Every claim-derived value at every emit is screened, not only the three UNVERIFIED arms** —
 step 5b b) tells the model to copy every non-`EDIT LANDED` line VERBATIM into the run log, the

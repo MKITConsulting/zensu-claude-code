@@ -8,7 +8,7 @@ paths:
 
 # Plugin-Data Guard (`runDataGuard` in `hook-dispatch-v1.js` + `plugin-data-guard-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 A PreToolUse check of the hook dispatcher, in-process and with two registry entries
 (`plugin-data-guard` on `Edit|Write|MultiEdit`, `plugin-data-guard-notebook` on `NotebookEdit`), that denies a file-mutating

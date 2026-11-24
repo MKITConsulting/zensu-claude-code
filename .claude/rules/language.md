@@ -9,7 +9,7 @@ paths:
 
 # Language
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 **English only.** All code, comments, docs, commit messages, plan files,
 prompts, fixture content, and pattern alternations must be in English.

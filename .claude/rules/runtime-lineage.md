@@ -10,7 +10,7 @@ paths:
 
 # Runtime Lineage (`version_type` is load-bearing)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 A plugin update that lands while a session is running leaves the Session Control
 record naming the installation that minted it. The running installation may

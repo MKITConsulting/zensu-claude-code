@@ -8,7 +8,7 @@ paths:
 
 # Plan-Gate Payload Sources (`hooks/lib/plan-payload-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The Autopilot plan-approval gate reads the approved plan from FOUR payload sources, in
 precedence order, and `plan-payload-v1.js` is the single source of truth for which:
@@ -119,17 +119,13 @@ both fails only in `plan-payload-v1.test.js`. `test-windows-portability-guards.s
 reader in its secure-open inventory — every other pin there is per-file and therefore blind to a
 NEW file carrying a hardened open.
 
-**The Windows timeout for this suite is a coverage boundary, not a formality.** At
-`timeoutMs: 600000` in `tests/profiles/windows-ci.v1.json` the `plan-payload-path-transport`
-step reported `TIMED_OUT` at check ~61 of 70, so F45c, F49/F49a, F48, F12 and F47/F47a never
-executed on Windows while the shard still reported its earlier checks as passing. It is 900000
-now, and the full 70-check suite measures **714 s** there — 79% of the new ceiling, so roughly a
-quarter of the budget is left. Every check costs Windows wall clock (the old run reached F45 at
-540 s of 600 s) and the tail is the expensive part: four extra armed runs plus one full
-plugin-tree copy. Budget against the 714 s, not against the ceiling. If the shard starts
-reporting `TIMED_OUT` again, the tail of the file has gone unverified regardless of how many
-checks passed before it. Same failure mode, same remedy, as the source-write gate's own note
-above.
+**The Windows timeout for this suite is a coverage boundary, not a formality.** A
+`TIMED_OUT` step leaves the tail of the file unverified while the shard still reports its
+earlier checks as passing, and the tail is the expensive part: four extra armed runs plus one
+full plugin-tree copy. The cap and the measured wall clock live in
+`.claude/rules/windows-budget-best-solution-first.md`; budget against the measured figure, not
+against the ceiling. Same failure mode, same remedy, as the source-write gate's note in
+`.claude/rules/git-mutation-tables.md`.
 
 **The digest binds the bytes that TRAVELLED.** When source 3 wins, `approvedPlanSha256` is over
 the response string, not the file at source 4's path. The two agreed byte-for-byte in the

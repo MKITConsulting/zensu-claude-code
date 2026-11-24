@@ -8,7 +8,7 @@ paths:
 
 # Foreign-Chain Row (`zensu-doctor.sh` + `zensu-doctor-report.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 A session FORK is silent: the host mints a new session id mid-conversation, carries the
 whole history over and re-fires `SessionStart`, so the workflow document armed under the
@@ -175,10 +175,9 @@ owner-activity accessor instead: at the documented `0`,
   `windows-native-structure.v1.json`, so no PR shard runs it — but the weekly Windows Safety
   structure shards do, and the foreign-chain block roughly doubled the suite's process count.
   A LOCAL run took 28 s on a loaded machine, but a loaded-local second is not an ubuntu-latest
-  second; that entry now reads 12 — the previous 6 s CI figure doubled — and is labelled an
-  estimate in the file's own note. Take
-  the figure from the next green weekly Windows run and replace both. Say "unmeasured", never
-  "cheap".
+  second, and the suite's `tests/profiles/ci-shard-weights.v1.json` entry is an ubuntu figure,
+  not a Windows one. Take the Windows figure from the next green weekly Windows run. Say
+  "unmeasured", never "cheap".
 - **"No full session key is printed" scopes to THIS row, not to the block.** The
   invalid-CAS-document row prints whole `tdd-phase-scv1_<64 hex>.json` filenames, and
   deliberately: a reader told to inspect a broken document needs its name. The foreign-chain
@@ -284,6 +283,6 @@ re-decided per host before any of the four halves is worth porting.
 interaction, the withholding guard, the record anchor and its fallback, the TTL semantics in both directions and at `0`, the
 read-only contract, the wrapper source shape, and the three-way wording drift.
 
-**The `patch` verdict above is about the foreign-chain row ALONE.** The turn counter in the
-next section is a separate feature with its own verdict; do not read that paragraph as
-covering it.
+**The `patch` verdict above is about the foreign-chain row ALONE.** The turn counter
+(`.claude/rules/implementing-phase-turn-counter.md`) is a separate feature with its own verdict;
+do not read that paragraph as covering it.

@@ -7,7 +7,7 @@ paths:
 
 # Review-Spawn Scope Sentence (`ZENSU_REVIEW_SPAWN_IN_SCOPE`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 Some hosts inject a session rule telling the model not to spawn a subagent the user
 did not ask for. On Claude Code 2.1.248 it arrives as the `heron_brook` prompt
@@ -99,15 +99,14 @@ entry — and not every `ZENSU_*=off`
 spelling is among them, `ZENSU_AUTOPILOT` and `ZENSU_SESSION_LINEAGE` being the two this
 file already records as escapes that are deliberately not ledgered. Disabling THIS key likewise escapes no gate and records nothing.
 
-**KNOWN BOUND 0, and it is the one the first roster missed entirely.** This sentence
+**KNOWN BOUND 0.** This sentence
 only ever reaches a model that got as far as a BLOCKED Stop. A session that reads a host
 rule as a prohibition normally withholds `--tdd-complete` too, and `stop-chain-enforcer.sh`
 releases Stop UNCONDITIONALLY while `SESSION_IMPL_COMPLETE` is not true — so neither
-render site is reached, and the chain parks at `implementing`. §"Foreign-Chain Row"
-records that shape as an observed session outcome and names the only instrument that
-could see it: counting turns ended while `implementing` with a changed worktree, never
-wall time. Not addressed here — a turn counter is a workflow-state field and therefore
-a MINOR release under §"Runtime Lineage".
+render site is reached, and the chain parks at `implementing`. The turn counter
+(`.claude/rules/implementing-phase-turn-counter.md`) is the instrument for that shape: it
+counts turns ended while `implementing` with a changed worktree, never wall time. This
+sentence never reaches it.
 
 **Residual carriers, stated rather than closed.** KNOWN BOUND 1: `skills/build/references/review-chain.md`
 (Phase 6 step 10) orders the FIRST spawn of every chain before any hook directive exists, so a

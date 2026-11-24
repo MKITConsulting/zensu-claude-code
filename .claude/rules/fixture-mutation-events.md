@@ -9,7 +9,7 @@ paths:
 
 # Fixture Mutation Events (`scripts/fixture-mutation-watch.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The promptfoo wrapper attests `tracked_clean` for the immutable eval fixture from TWO
 independent signals: a manifest comparison (`scripts/fixture-manifest.js`, also polled every

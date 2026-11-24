@@ -8,14 +8,15 @@ paths:
 
 # Incremental Review Rounds (`review-round-scope-v1.js` + `aspect-activation-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 Two reductions to what the `/zensu:build` review fan-out READS, both gated on a permissively
 read config key and both defaulting ON. They exist because the fan-out, not the round
 counter, is what the chain actually costs: **measured** on this repository's own subagent
 transcripts, one `zensu:review-aspect` agent ingests ~513k context tokens over ~40 internal
 turns, `review-judge` ~540k and the consume `code-reviewer` ~345k, so a single full fan-out
-moves roughly **3.4M** tokens and `autoFixMaxRounds: 5` multiplied that by up to five. Take
+moves roughly **3.4M** tokens, and every further full-panel round adds that again
+(`hooks.autoFixMaxRounds` defaults to 2). Take
 those figures as ONE measurement over six recent sessions, not a bound.
 
 **`hooks.incrementalReviewRounds` narrows rounds 2..N to that round's OWN delta.** Round 1 is

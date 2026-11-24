@@ -10,7 +10,7 @@ paths:
 
 # Relaxable Bind Failures (`hooks/lib/claude-hook-session-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 A failed bind to the immutable Session Control record denies, with exactly **two**
 documented exceptions. Both mean no workflow document is reachable, so relaxing waives

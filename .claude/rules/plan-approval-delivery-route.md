@@ -11,7 +11,7 @@ paths:
 
 # Plan-Approval Delivery Route (`hooks/plan-approved-delegate.sh`, standalone branch)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The STANDALONE branch of the plan gate asks ONE `AskUserQuestion` naming four mutually
 exclusive delivery routes — `/zensu:autopilot`, `/zensu:build`, `/zensu:pilot`, and implementing

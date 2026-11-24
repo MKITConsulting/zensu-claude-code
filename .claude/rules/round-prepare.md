@@ -218,9 +218,6 @@ entry, the `ciStructureTests` member and the regenerated overview; `docs/review-
 - `claimOf` strips `<project>/` without rebuilding the path against the project root, as the
   audit's `unredact_claim` does, so in a session whose project root sits below the work-tree top
   the reset split compares another spelling than the audit's verdict lines carry.
-- A non-ASCII path reaches the module in git's quoted form (`core.quotePath`), so the packet
-  lists and the snapshot carry that spelling, and a claim naming the file unquoted matches no
-  snapshot entry.
 - The round diff is written check-then-write: the symlink test and the redirect are two steps, so
   a link planted between them is followed. `.zensu/state/` is session-writable, as for every
   artifact there.

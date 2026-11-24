@@ -6,7 +6,7 @@ paths:
 
 # Bypass Ledger Read Contract (`tdd_bypasses`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 `tdd_bypasses` is the ONE member of the `_tdd_read_validated_state` reader family
 that signals an unreadable document through its EXIT STATUS rather than an echoed

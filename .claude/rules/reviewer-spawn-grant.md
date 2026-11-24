@@ -11,9 +11,9 @@ paths:
 
 # Reviewer-Spawn Grant (`runSpawnGrant` in `hook-dispatch-v1.js` + `reviewer-spawn-allow-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
-The preventive half of the section above. That one DIAGNOSES a classifier refusal after the
+The preventive half of `.claude/rules/host-refused-reviewer-spawn.md`. That one DIAGNOSES a classifier refusal after the
 spawn is already lost; this one keeps the refusal from happening, by returning
 `permissionDecision: "allow"` on the `Agent|Task` matcher for Zensu's own confined reviewers.
 

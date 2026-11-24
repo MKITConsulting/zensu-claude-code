@@ -12,7 +12,7 @@ paths:
 
 # Git Mutation Tables (`hooks/lib/bash-source-write-parse.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 **The gate is OPT-IN.** `hooks/pre-bash-source-write-gate.sh` runs rules (A), (B) and (C) only
 when `zensu_hook_opted_in bashWriteGate` holds, which is an explicit boolean `true` in the

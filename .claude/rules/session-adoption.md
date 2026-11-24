@@ -13,7 +13,7 @@ paths:
 
 # Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The lineage rule above judges DECLARED versions and cannot see whether the
 persisted shapes actually moved. When they did not, its refusal wedges a session
@@ -643,7 +643,7 @@ so a port that takes only the core delta (the condition gone) while its own entr
 script still requires and host-path-renders a project-dir variable still exits
 before printing any report, which is the same wedge in a different place. The two
 halves move together. The host
-half is NINE separate obligations, and a port that takes only the core delta gets
+half is TEN separate obligations, and a port that takes only the core delta gets
 `adoptContext` with no reachable caller and keeps the wedge: the entry script, the
 recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
 deny scope at every gate that denies in this state, the skill, — easy to miss

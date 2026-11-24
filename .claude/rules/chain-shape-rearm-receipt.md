@@ -8,7 +8,7 @@ paths:
 
 # Chain Shape & Rearm Receipt (`hooks/lib/chain-recovery-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 `chain-recovery-v1.js` is the single source of truth for two things, and it is **not**
 cosmetic diagnostics code:

@@ -6,7 +6,7 @@ paths:
 
 # bash 3.2 Command-Substitution Truncation (`test-bash32-portability.sh`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 macOS ships GNU bash **3.2.57** as `/bin/bash`, so it is the DEFAULT shell for every
 hook and helper this plugin runs there — not an edge case, and not something a

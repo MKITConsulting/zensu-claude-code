@@ -8,7 +8,7 @@ paths:
 
 # Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The Stop chain-enforcer demands a `zensu:code-reviewer` spawn. When the HOST
 permission layer refuses that spawn, the call never executes — so no PreToolUse
@@ -142,8 +142,8 @@ Ten things are coupled and must move together:
   `skills/doctor/SKILL.md` carries two further paraphrases beside the one place it
   pins the constant verbatim. Nothing pins any bash copy against anything. Never
   describe this sentence as having one source.
-- **The deny-first caveat sentence is a SEVEN-member hand-copy class, pinned nowhere
-  across its copies.** The seventh is `REVIEWER_SPAWN_DENY_FIRST` in
+- **The deny-first caveat sentence is a SEVEN-member hand-copy class; six members are
+  pinned, `unjudgeableRow` is not.** The seventh is `REVIEWER_SPAWN_DENY_FIRST` in
   `hooks/stop-chain-enforcer.sh`, interpolated into the implementing-turns refused-spawn
   notice — a remedy string EMITTED to a user, which is this paragraph's own membership
   test. It PARAPHRASES rather than sharing the trailing clause, so it cannot be caught by
@@ -314,10 +314,7 @@ measurement — the error the shard-8 note in `windows-ci-contract.test.js` ends
 so `main` itself was a coin flip on every run rather than a suite under test being at
 fault. Two things changed together: `review-worker-evidence-lease` MOVED to
 `windows-shard-8`, leaving this suite ALONE on shard 7 with the shard's whole envelope, and
-the cap rose. **The NUMBERS live in that contract-test note and are deliberately not copied
-here**, for the reason this file gives about `MAX_BLOCK` and about the architecture doc's
-KB totals: a prose copy of a measurement goes stale silently, and the note carries the run
-ids, the measured wall clocks and the arithmetic together.
+the cap rose. The figures and their run ids are recorded below.
 
 **KNOWN RESIDUAL, and it is the reason this is a mitigation rather than a fix:** the raise
 does not absorb the 29% spread recorded above, and at this suite's current size no cap
@@ -388,7 +385,7 @@ a runner 29% slower than the green one was enough. Two changes landed together:
 - T24 and T30 configure `autoFixMaxRounds: 1`, the floor `zensu-config.sh` accepts, so each
   reaches a cap of 4 in five Stops instead of a cap of 8 in nine. That is the idiom
   `test-deferred-review-claim.sh` and `test-autopilot-stop-enforcer.sh` already use for
-  their cap cases, and the DEFAULT cap of 8 stays pinned by E3 in
+  their cap cases, and the cap of 8 that `autoFixMaxRounds: 5` yields stays pinned by E3 in
   `test-stop-enforcer-escapes.sh`. Together with the dropped session, the two files run 39
   Stops and 18 sessions where the one file ran 47 and 19.
 

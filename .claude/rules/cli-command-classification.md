@@ -35,7 +35,7 @@ offline `recover`; no worker/shared-key identity is inferred. The gate does not
 compare the `--session` key of `recover` with the session's own capture key; only
 the rule in `docs/ai-work-capture.md` keeps a call to the key the plugin supplied.
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The plugin drives Zensu through the typed `zensu` CLI (the MCP server still exists for the Zensu web app, but is no longer wired into the plugin). The write-gate now intercepts `zensu <noun> <verb>` Bash invocations rather than MCP tool calls.
 

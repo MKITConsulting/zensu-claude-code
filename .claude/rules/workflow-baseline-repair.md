@@ -6,7 +6,7 @@ paths:
 
 # Workflow-Baseline Repair (`workflowBaselineVerdict` / `repairWorkflowBaseline`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 **A DIFFERENT wedge from the one adoption exits, and confusing the two is the mistake
 this section exists to prevent.** Adoption answers "this runtime may not SERVE the
@@ -239,13 +239,10 @@ new one — the shape it refuses is byte-identical.
 - **Windows is unverified for the in-session half — and scope that claim to the
   RECOGNIZER, not to the suite.** `zensu-doctor-invocation.js` refuses on win32 by
   design, so the repair COMMAND is unreachable there exactly as `/zensu:doctor` is; only
-  the SessionStart self-heal and the doctor row apply on that host. Do NOT write "Part D
-  has no Windows profile entry": that was false when it was written.
+  the SessionStart self-heal and the doctor row apply on that host.
   `test-versioned-plugin-upgrade.sh` is registered in `windows-ci.v1.json`,
-  `windows-native-structure.v1.json` and `windows-ci-command-catalog.v1.json`. What IS
-  open there is the BUDGET: neither the `timeoutMs` nor the shard weight was re-measured
-  after Part D, Part D is the file's TAIL, and a `TIMED_OUT` therefore takes exactly
-  these rows. Take the figure from the next green Windows shard.
+  `windows-native-structure.v1.json` and `windows-ci-command-catalog.v1.json`; its Windows
+  wall clock, Part D included, is measured in `.claude/rules/session-adoption.md`.
 - **The doctor's directory-absent arm is NARROWED, deliberately.** When
   `<project>/.zensu/state` is absent AND no bound session key is available, the
   own-document row is WITHHELD rather than disclosed. The judge pass asked for the

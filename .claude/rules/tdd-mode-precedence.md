@@ -12,7 +12,7 @@ paths:
 
 # TDD Mode Precedence (`hooks/lib/zensu-config.sh` + `zensu-log.sh --tdd-begin`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The strict/vanilla implementation mode is decided by a FOUR-RANK ladder, and
 `hooks/lib/zensu-log.sh`'s `--tdd-begin` branch is the only place that orders all four

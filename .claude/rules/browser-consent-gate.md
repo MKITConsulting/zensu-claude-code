@@ -33,7 +33,7 @@ paths:
 
 # Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 `/zensu:verify-feature` drives the browser through `playwright-cli` (`@playwright/cli`), which the
 user installs once, with plain Bash calls. The plugin ships NO MCP server any more: `.mcp.json`,

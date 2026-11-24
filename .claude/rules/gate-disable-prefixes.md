@@ -12,7 +12,7 @@ paths:
 
 # Gate-Disable Prefixes (`ZENSU_*=off`), `test-gauntlet-loop-skill.sh` G12 and `test-escape-wording.sh`
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 **Introducing a new `ZENSU_<NAME>=off` escape means editing a skill test in the same
 commit.** `tests/structure/test-gauntlet-loop-skill.sh` G12 scans `skills/gauntlet-loop/`

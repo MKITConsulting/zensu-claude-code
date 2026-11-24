@@ -9,7 +9,7 @@ paths:
 
 # Windows Budget for `best-solution-first`
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The suite cap was raised 300000 -> 600000, matching its siblings, but **the cap is
 not the ceiling that binds** and the measurement says which one is. When that cap was

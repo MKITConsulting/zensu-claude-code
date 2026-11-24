@@ -14,7 +14,7 @@ paths:
 
 # zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 Rule 6 of the zen-mode contract carries a one-line progress anchor above the closing next
 step. **The hook SUPPLIES that line; the model no longer derives it.** The directive ends
@@ -668,14 +668,14 @@ RETIRED again by the outcome read below: it now accepts a shape OR the classifie
 report input is deliberately MONOTONE (it can only refine a position the shape alone leaves
 unmapped, never override one), which is the bound that replaced the old contract.
 
-**KNOWN RESIDUAL of the same class, one shape over, and it is NOT fixed here.**
+**KNOWN RESIDUAL of the same class, one shape over: fixed for a bound chain, open for a standalone one.**
 `awaiting-self-review` and `self-review-unbindable` are both reached from
 `codeReviewDone === true`, and the bound max-round handoff states its own postcondition as
 outcome `max-rounds` WITH `codeReviewDone` true. So a review that exhausted its budget
 without converging still renders a ticked `review` step. Every in-vocabulary answer is worse
 or larger: the pending mark would claim a review still ahead of one that is over, and the
 honest mark is the failed one, which this module renders only for shapes the owner's own
-stuck sets name. **This is now IMPLEMENTED for a BOUND chain and only for one**:
+stuck sets name. **For a bound chain it is fixed**:
 `outcomePosition` reads `report.autopilot.outcome` and renders the blocked mark for
 `max-rounds`, taking the value off the classifier's own `autopilotLinkage` rather than adding a
 field to its report. What is still open is the STANDALONE case, which carries no

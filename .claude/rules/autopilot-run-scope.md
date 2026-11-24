@@ -10,7 +10,7 @@ paths:
 
 # Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 A durable Autopilot run is scoped by TWO independent axes, and confusing them is the
 mistake this section exists to prevent.
@@ -901,7 +901,7 @@ removed or renamed and no matcher changed; both new config keys are read permiss
 run-scope `patch` paragraph above covers the workspace-hold relaxation, the folder-anchor `patch`
 paragraph covers the folder rule and the own-binding refusal, and the `minor` one covers the
 original pointer/schema change; each verdict covers its own delta and none covers another.
-The P2 review round's changes stay inside THIS verdict rather than opening a fifth: the second
+These changes stay inside THIS verdict rather than opening another one: the second
 window key (read permissively), the read-only report (a call convention that writes no record, pointer or provenance entry), the
 pointer rollback, the beacon refresh (an mtime on the adopter's own existing document, never a
 field), the stale-pointer retire on the owner exits and the repair's pending-stage refusal.

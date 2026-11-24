@@ -9,7 +9,7 @@ paths:
 
 # Artifact Path Redaction (`hooks/lib/zensu-artifact-redact-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 Consuming repos commit `.zensu/plans/{ts}_build-{slug}.md` and
 `.zensu/logs/{ts}_build-{slug}.log` as an audit trail and may later open-source the
