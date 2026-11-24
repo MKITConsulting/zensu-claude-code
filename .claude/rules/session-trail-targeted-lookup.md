@@ -6,6 +6,9 @@ paths:
   - "plugins/session-hub/hooks/lib/desktop-store-read-v1.js"
   - "skills/session-trail/references/commands.md"
   - "plugins/session-hub/skills/session-trail/references/commands.md"
+  - "skills/session-trail/scripts/linked-sessions-v1.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/linked-sessions-v1.mjs"
+  - "tests/structure/linked-sessions-v1.test.js"
   - "tests/structure/test-session-trail-verdict.sh"
 ---
 
@@ -50,11 +53,14 @@ other admitted transcript to find its siblings.
 - `keepOwners()` takes the keep keys of the live anchors it must attribute and builds a row only
   for an inventory entry whose session id hashes to one of them. The caller reads the map only
   at those keys.
-- `ccdApp(id)` answers one session's desktop record. One pass reads every `local_*.json` into one
-  reusable buffer, `RECORD_SCRATCH`, and records the files in which a `"cliSessionId"` key carries each id; only
-  those files are parsed, last match in walk order wins, and `CCD_RECORD_PATHS` gets the same
-  entry the full walk writes. `ccdIndex()` stays the full map for the surveys and reuses the same
-  memoized file listing, so a directory that cannot be read is counted once.
+- `ccdApp(id)` answers one session's desktop record. One pass reads every `local_*.json` of every
+  store into one reusable buffer, `RECORD_SCRATCH`, and records the files in which a
+  `"cliSessionId"` key carries each id; only those files are parsed, and `settledRecord` decides
+  what they answer: matches in two stores settle the id as ambiguous (`CCD_AMBIGUOUS`, no
+  `CCD_RECORD_PATHS` entry), and inside one store the last match in walk order wins.
+  `ccdIndex()` stays the full map for the surveys, settles every id through the same
+  `settledRecord`, and reuses the same memoized file listing, so a directory that cannot be read
+  is counted once and both walks write the same `CCD_RECORD_PATHS` entry.
 
 **Coupled sites that must move together.**
 
@@ -72,9 +78,10 @@ other admitted transcript to find its siblings.
   classify the line that holds the first cwd with `inheritedRecord` and answer a fork with
   `forkOwnCwd`; a probe that took a fork's first cwd as its directory would skip the fork beside
   a session in its own worktree and list it beside its parent.
-- `CCD_RECORD_PATHS` has two writers, `ccdIndex` and `ccdApp`, and both keep the last match in
-  walk order; `desktopRecordOf` calls `ccdApp` and then reads the path once, for
-  `repositoryVerdicts`, `openTaskChips`, `linkedSessions` and `unreadReports` alike.
+- `CCD_RECORD_PATHS` has two writers, `ccdIndex` and `ccdApp`, and both write it only through
+  `settledRecord`; `desktopRecordOf` calls `ccdApp`, answers `ambiguousRecordReason` with the
+  stores `CCD_AMBIGUOUS` holds for an id there, and otherwise reads the path once, for `repositoryVerdicts`, `openTaskChips`,
+  `linkedSessions` and `unreadReports` alike.
 - `ccdAppEntry` is the one desktop-entry builder, and `ccdIndex` and `ccdApp` both call it.
   `DR3` in the verdict suite derives the stored key set from it and fails when either walk
   builds its entry another way.
@@ -99,13 +106,14 @@ record larger than `DESKTOP_RECORD_MAX_BYTES`; off Windows it also refuses an en
 account owns or that grants group or other write:
 
 - `ccdStoreProbe` judges each store candidate that exists with
-  `realDirectory(dir, writableOnlyByCaller)`. A refused candidate never becomes the store, and
+  `realDirectory(dir, writableOnlyByCaller)`, and every candidate that passes is a store the
+  lookup reads (`stores`, `store` being the first of them). A refused candidate never is, and
   `lineage --diagnose` marks it `REFUSED`; when no candidate resolves, it names the permission
-  fix rather than `ZENSU_CCD_STORE`, which is judged by the same rule. A refused candidate ahead
-  of the winning one also counts as a refused entry, so when a later candidate wins and holds no
-  record of the session, the brief says store entries were refused rather than that the record
-  is missing. A refused candidate after the winning one is never read, so it is marked but not
-  counted. `ZENSU_CCD_STORE` stays authoritative, so a refused override leaves no store at all.
+  fix rather than `ZENSU_CCD_STORE`, which is judged by the same rule. Every refused candidate
+  counts as a refused entry, wherever it sits in the list, because the session's record could be
+  in it: a session found in no accepted store reads as refused entries rather than as missing
+  (`OM7`, `OM7b`). `ZENSU_CCD_STORE` stays authoritative, so a refused override leaves no store
+  at all.
 - `ccdRecordFiles` and `accountForHostSession` judge every folder they enter the same way, and
   refuse a symbolic link where a folder or a `local_*.json` is expected without following it.
   `ownedRegularFile` judges a record before the walk lists it and before the host-session probe
@@ -149,7 +157,7 @@ the check refuses nothing there. `umask 022` heads `test-session-trail-verdict.s
 check, `OM1` to `OM4` fail and the FIFO case hangs until its timeout. `OM5` pins the
 plugin-tree-incomplete diagnostic and the lazy load, `OM6` a refused `ccd-session-presets.json`
 in both forms, `OM7` a refused candidate passed over for a later one, `OM7b` a refused candidate
-after the winning one, `OM8` and `OM9` the decisions a refused presets file and a refused,
+after an accepted one, which is counted too, `OM8` and `OM9` the decisions a refused presets file and a refused,
 unparsable or unlisted record of the running session leave (`presets-unread` and `started-unread`,
 `.claude/rules/session-trail-linked-sessions.md`), `OM10`, a ledger check that shares the block,
 the refused ledger records behind `ledger-unread`, `OM11` the decisions a refused presets folder
@@ -160,8 +168,95 @@ null account an edge records when the host-session probe meets a refused workspa
 folder or record. `L3j`, `L3k` and `L3l` in `test-linked-session-route.sh` pin the one owner, the
 named `realDirectory` policies and the scratch buffer.
 
+**Where the stores are: Claude's default folder, every Zensu Session Hub profile and every store the
+user names, and all of them are read.** A Claude Desktop launched with `--user-data-dir=<folder>`
+keeps its records in `<folder>/claude-code-sessions`, and the Zensu Session Hub runs every account
+that way, under `~/Library/Application Support/Zensu Session Hub/Claude-Profile/<hub account id>`.
+A lookup that probed Claude's default folder alone answered "no record" for every moved session.
+Measured on 2026-11-17 on the machine where three moves stranded their linked sessions: the default
+store held 0 records and ten canonical profile folders held them all. `ccdStoreCandidates`
+therefore lists, in this order:
+
+- every store `ZENSU_CCD_EXTRA_STORES` names (`namedStoreCandidates`), a list split at the
+  platform's path delimiter whose blank entries name none. The named stores come first, so a named
+  real path wins the `SAME AS` pairing against a discovered spelling of the same store. The
+  store-folder remedies rely on that order: for a discovered store whose folder is a symbolic link
+  they tell the user to add the store's real path to this variable, and that store's real folder is
+  then the one judged while every other store stays read (`DF9`).
+- the default list;
+- every Session Hub profile folder whose name is a canonical lowercase UUID (the Hub's own
+  `canonical_id` rule in `src-tauri/src/data_folders.rs`), sorted, from `hubProfileFolders`. A
+  stopped source Claude is still found this way: the Hub moves a session that is not running from
+  its saved source (`resolve_source` in `src-tauri/src/session_move.rs` falls back to
+  `Source::saved` on `error.moveNotRunning`), and two of the ten profiles had no running Claude
+  when it was measured. A profiles folder that exists and cannot be listed counts once as unread in
+  `ccdStoreProbe` and nowhere else; `lineage --diagnose` names it on an `UNREAD` line and as
+  `profilesUnread`, and a session no read store holds then reads `PROFILES_UNREAD_REASON` rather
+  than a plain miss (`DF11`).
+
+**No store comes from a process's arguments (decision 2026-11-18).** A confined process of the same
+user can start a process named `Claude`, the genuine Claude binary included, on a folder of its own
+inside the home, and records planted there could make a real session ambiguous, carry chips and
+linked-session start calls into a brief, or mark a live session archived, which lets `release` drop
+its `source-busy` blocker. A location the Hub or Claude Desktop owns cannot be planted that way, and
+a store the user names is the user's own trust decision. So a Claude Desktop on a data folder of its
+own outside the Hub is read once its store is named in `ZENSU_CCD_EXTRA_STORES`, and `DF7` pins
+that neither copy reads `--user-data-dir`.
+
+Candidates are deduplicated by spelling (`distinctCandidates`), and two accepted candidates with
+one real path are read once: the later one is listed `SAME AS` the first (`sameAs`), so a store
+reached through a symlinked folder is not read twice and does not make every session ambiguous.
+**A session id whose record two stores hold is read from neither** (`ambiguousRecordReason`, which
+names the stores), because which copy is the session's own cannot be told and a guess would carry
+another account's chips and linked sessions. `accountForHostSession` and `hostNamedRecord` apply
+the same rule to the host session file, so the account an edge records and the running session's
+own record are never taken from a copy. `ZENSU_CCD_STORE` stays the only store while it is set: no
+default, profile or named store is probed as a candidate or read, and `lineage --diagnose` lists
+the override alone (`DF6`). One check still looks past it on purpose: `desktopOwnStore`, which
+picks the remedy for a refused folder that holds a named store, compares that store with every
+discovered candidate of `ccdStoreCandidates(true)`, the profile folders included and the named
+stores left out, so a profile store named through either variable keeps the remedy of Claude
+Desktop's own store. That check lists the profiles folder, reads no record, counts nothing and
+decides no linked session.
+
+**The suites stay hermetic by clearing both variables.** `ZENSU_CCD_EXTRA_STORES` can name a store
+outside `HOME`, so the verdict, lineage and linked-session-route suites unset it at the top beside
+`ZENSU_CCD_STORE`, and every `DF` runner clears both.
+
+**Pins.** The `DF` family in `tests/structure/test-session-trail-verdict.sh` runs under both
+`trail.mjs` copies, on POSIX hosts, against a home with an empty default store, two profile stores,
+a profile folder that is no UUID, a store in a folder with a space that only `ZENSU_CCD_EXTRA_STORES`
+names and a store outside every candidate. It pins the probe list in text and `--json` with and
+without named stores (`DF1`), a record in a profile store with its chips, linked session, preset
+and report (`DF2`), a named store, its blank entries and its refusal (`DF3`), one id in two stores
+with both named in the reason (`DF4`), a refused profile store (`DF5`), the override over both
+variables (`DF6`), the folders that are no candidate and the absent process source (`DF7`), the
+host account across stores (`DF8`), a profile folder that is a symbolic link and the additive remedy
+that reads it through its real folder (`DF9`), the store folder each read judged and the started
+set's branches with a running session (`DF10`, `.claude/rules/session-trail-linked-sessions.md`)
+and an unlistable profiles folder (`DF11`, skipped as root). `WR4b` pins the release line for a
+source in another data folder of the same account.
+
 **Bounds, accepted and named.**
 
+- The Session Hub profile path is the macOS one, so on Windows and Linux only the default
+  candidates and the named stores are read; a Claude Desktop there on a data folder of its own needs
+  its store in `ZENSU_CCD_EXTRA_STORES`.
+- A Claude Desktop on a data folder of its own outside the Hub stays unread until its store is
+  named: its sessions read as having no record, and a takeover run from one of its sessions holds
+  every linked session that could start as `started-unread`, because the host id names a record
+  no read store holds.
+- A refused candidate that is another spelling of an accepted store is counted as refused,
+  although the store is read through the accepted spelling; that is the fail-safe direction.
+- The resolver of a linked session's delivery route, `storeCandidates` in
+  `hooks/lib/linked-session-v1.js`, reads the named stores, its platform's default stores and the
+  Session Hub profile stores in the order `ccdStoreCandidates` probes them, but probes the profile
+  path on macOS only, takes no other platform's default and refuses a relative entry; it answers an
+  own record two stores hold with `none` (`own-record-ambiguous`), and counts toward that answer
+  every entry under the record's name, a refused one included, where this skill counts only the
+  records it accepts (`.claude/rules/session-delivery-route.md`). `L3o` in
+  `tests/structure/test-linked-session-route.sh` holds the two macOS candidate lists equal in the
+  four layouts that rule file names, and in no other.
 - The SKIPPED count covers only what the command read, and `references/commands.md` says so.
   For the same reason the NOTE of plain-text `show` can count transcripts that `show --json`,
   which never probes siblings, does not read.
