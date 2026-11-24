@@ -3366,13 +3366,13 @@ const MOVE_ALTERNATIVE = (pid) => [
 ];
 
 const RELEASE_AFTER = [
-  'LAST, whichever route you took: once your own worktree holds everything you still need from',
-  'the old one, run session-trail\'s release command for the old session from your own worktree.',
-  'It names every reason it refuses, such as a live session still working in the old worktree or',
-  'a nested repository inside it; a busy or unmeasured old session only needs --force on the re-run.',
-  'Otherwise it ends any keep anchor this plugin still holds there, so an archive no longer leaves',
-  'that worktree on disk, and says that the old session can now be archived or removed. It reports',
-  'uncommitted, unpushed and ignored files there without refusing over them; an archive deletes them with the worktree.',
+  'BEFORE THE REMAINING WORK, whichever route you took: once your own worktree holds everything you still need from the old one,',
+  'which is right after the carry-over or the move where one applies, run session-trail\'s release command for the old session from it. That is the takeover\'s last step, not the',
+  'work\'s: nothing it checks waits for the work you continue. It names every reason it refuses, such as a live session still working in the old worktree or a nested repository inside',
+  'it; a busy or unmeasured old session only needs --force on the re-run. Otherwise it ends any keep anchor this plugin still holds there, so an archive no longer leaves that worktree',
+  'on disk, and says that the old session can now be archived or removed: tell the user at once. While linked sessions of the old session are still to be continued, say instead that',
+  'its archive waits until each has carried its work over, which its own release reports, or the user leaves it behind; and while one of them shared this worktree, hold this release',
+  'back until then. The release reports uncommitted, unpushed and ignored files there without refusing over them; an archive deletes them with the worktree.',
 ];
 
 // One table, four arms, two legs — and the ARM is chosen once, above the split.

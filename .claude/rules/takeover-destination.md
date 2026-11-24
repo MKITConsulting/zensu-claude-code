@@ -56,6 +56,69 @@ forbidden needle is the LONGER `add <path> -b claude/`, because its own prose le
 offers `-b claude/<name>-cont` as the remedy when git reports the branch already checked
 out somewhere.
 
+**The release closes the takeover before the old session's remaining work, never after it.** A
+release worded as the last step is read as the last step of the work. Measured on 2026-11-24 in
+one takeover under PLM 0.41.0: `takeover --force` at 10:34:22, the carry-over at 10:34:54, the
+push and the pull request at 10:36, the first `release`, a dry run, at 10:36:46, a second
+question about four nested worktrees answered 28 minutes later, `release --apply` at 11:07:47
+and the archive line at 11:11. `cmdRelease` checks nothing that waits for the continued work, so
+four things hold together:
+
+- **Order.** `RELEASE_AFTER` opens with `BEFORE THE REMAINING WORK` and names the release as the
+  takeover's last step, not the work's. Step 4's closing paragraph and flow 5 step 7 of
+  `references/handoff.md` say the same and place it after the linked sessions, the worktree or
+  the move, the carry-over, the chips and the Autopilot run. `RELEASE_AFTER` keeps seven lines:
+  it sits above `printResume` in PLM's `trail.mjs`, so another line count moves the `trail.mjs`
+  citation of `docs/multi-repo-chains-spec.md` and `docs/multi-repo-chains-overview.html` that
+  `T36` grades.
+- **The plan pass runs `release` as a dry run, and reads it for its blockers alone.** The one
+  plan confirmation carries each blocker that needs the user's decision: steps 0 and 1 of
+  `references/takeover.md`, flow 5 steps 3 and 4 of `references/handoff.md`, and the `release`
+  row of `references/commands.md`. A dry run writes nothing: `cmdRelease` reaches
+  `retireAnchors` only under `--apply`, and `WR1`, `WR3` and `FK3` in the verdict suite pin
+  that. An unblocked dry run still answers with text written for the end of a takeover: `READY`
+  prints the `ARCHIVE` lines with or without `--apply` (`WR5`, `WR11`), `RELEASABLE` ends in a
+  hint to run `--apply`, and a busy source names `--force` as the answer to a takeover the user
+  confirmed. So every carrier says that before the yes its `ARCHIVE` line is not relayed and
+  its hints are not followed. The dry run measures the old tree in place, so what it names
+  about that tree binds the create route: after a move nothing is left at the recorded path
+  and `release` is ready at once (`WR12`), and the confirmation names a nested repository or
+  another live session there as a cost of the move. `release` refuses `--receipt`, so step 0
+  names the verbs that ignore it. A blocker the dry run did not name, or one that takes time,
+  costs no question either: the session names it, goes on with the work and runs the release
+  again once it is settled.
+- **The archive is reported at once**, in a line of its own before the remaining work and again
+  in that turn's closing message, because a worktree without its keep marker is one the pool
+  may reuse or reap again (`docs/worktree-keep.md`). While linked sessions of the old session
+  are still to be continued, the session says instead that the archive waits for them: every
+  one the takeover started, every one it keeps **later** and every one it listed for a takeover
+  by hand. The wait ends for each when its continuation has carried its work over, which its
+  own `release` reports with its `ARCHIVE` line, or when the user has decided to leave it
+  behind. The `archive_session` tool description in the Claude Desktop 6.28899.6 bundle, read
+  on 2026-11-24 and not driven live, says that archiving a session also archives its side
+  sessions that share its worktree or have finished; whether the sidebar's archive does the
+  same is unmeasured. `references/archive.md` carries that fact with its source.
+- **A shared checkout holds the release itself back.** A linked session that shared its
+  parent's checkout (`sharedCheckout` in `linked-sessions-v1.mjs`) has its tree in the old
+  worktree. `release --apply` there also ends the keep anchor of a session that is not running
+  and removes the marker (`WR9`), and that session's continuation gets `session-inside` from
+  its own `release` while the old session's process is registered in the shared tree. So the
+  taker releases only once that continuation reports its carry-over or the user leaves the
+  session behind, and for that continuation a `release` that refuses for that process alone
+  counts as its report.
+
+Pins: the unit case `every arm on both legs closes with the release step, whichever form
+renders it` in `tests/structure/worktree-advice-v1.test.js` holds the lead, its place, the
+at-once report, the wait, the hold and that no line opens with `LAST,`; `T41` and its eight
+`T41-control` mutants in `tests/structure/test-session-trail-skill.sh` grade both copies'
+takeover, handoff, archive and command references and each script's release step; and the
+step-order needles of `CH6` and `LS14` in `tests/structure/test-session-trail-verdict.sh` name
+the heading. Known gaps: the order, the wait and the hold are prose, so nothing checks that a
+session released before it continued the work, or waited; the taker learns of a carry-over
+only from that continuation's own report; the report reaches a user who reads the session, and
+the Zensu Session Hub shows no release state; and the wait for linked sessions rests on one
+tool description.
+
 **ONE ALTERNATIVE exists and it is NOT an arm, which is the whole reason it took this
 long to ship.** `MOVE_ALTERNATIVE` offers `git worktree move` on the PRESENT leg, and the
 create recipe stays the default because it is the only route that takes nothing from the

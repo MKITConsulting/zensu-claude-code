@@ -2712,6 +2712,174 @@ for spec in "handoff-call|cmdHandoff-caution-call|a handoff brief that no longer
 done
 rm -rf "$T40_SANDBOX"
 
+release_timing_sites() {
+  local tk="$1" ho="$2" ar="$3" cm="$4" tr="$5" bad="" n
+  local at_start at_chips at_run at_release para step0 confirm
+  local flow at_dry at_wait at_force at_rel dry_line wait_line rel_line linked row code
+  at_start="$(grep -nF "**Start the old session's linked sessions here, right after \`takeover --force\`, in the turn in which the user confirmed the plan.**" "$tk" | head -1 | cut -d: -f1)"
+  at_chips="$(grep -nF "**Carry the old session's open task chips over, always, before you release it.**" "$tk" | head -1 | cut -d: -f1)"
+  at_run="$(grep -nF "**Carry the old session's durable Autopilot run over before you release it, or leave it behind on purpose.**" "$tk" | head -1 | cut -d: -f1)"
+  at_release="$(grep -nF '**Whichever route you took, release the old session before its remaining work' "$tk" | head -1 | cut -d: -f1)"
+  para=""
+  if [ -n "$at_start" ] && [ -n "$at_chips" ] && [ -n "$at_run" ] && [ -n "$at_release" ] \
+    && [ "$at_start" -lt "$at_chips" ] && [ "$at_chips" -lt "$at_run" ] && [ "$at_run" -lt "$at_release" ]; then
+    para="$(sed -n "${at_release}p" "$tk")"
+  else
+    bad="$bad step-order=$at_start/$at_chips/$at_run/$at_release"
+  fi
+  for n in "The release is the takeover's last step, not the work's" \
+    'before you edit, test, commit or push anything of the remaining work' \
+    "when the brief says of a linked session still to be continued that it shared its parent's checkout" \
+    'Release then only once its continuation reports that it carried its work over, or the user has decided to leave it behind' \
+    'The plan confirmation of step 1 carried the blockers the dry run named' \
+    'costs no question of its own either' \
+    'Tell the user at once, in their own language and in a line of its own before the remaining work starts' \
+    'say it again in the closing message of that turn' \
+    'While linked sessions of the old session are still to be continued, say instead that the archive of the old session waits for them' \
+    'Still to be continued is every linked session this takeover started, every one it keeps **later**, and every one it listed for a takeover by hand' \
+    'when its continuation has carried its work over, which its own `release` reports with its `ARCHIVE` line, or when the user has decided to leave it behind' \
+    'so for it a `release` that refuses for that process alone reports the same' \
+    'When a later turn of this session shows that the wait has ended for the last of them' \
+    'Archive or delete it yourself only when the user explicitly names that session'; do
+    case "$para" in (*"$n"*) ;; (*) bad="$bad [release:$n]" ;; esac
+  done
+  step0="$(grep -F '**Know what the takeover will persist before you run it.**' "$tk" | head -1)"
+  case "$step0" in
+    (*'`release <selector>` without `--apply`, a dry run that changes nothing and names what would block the release of step 4'*) ;;
+    (*) bad="$bad step0-dry-run-absent" ;;
+  esac
+  case "$step0" in
+    (*'before the yes you neither relay its `ARCHIVE` line nor follow its `--apply` or `--force` hint'*) ;;
+    (*) bad="$bad step0-dry-run-unbounded" ;;
+  esac
+  grep -qF 'leave it out of `release`, which refuses it' "$tk" || bad="$bad step0-receipt-sentence"
+  confirm="$(grep -F "It names the brief's linked sessions too" "$tk" | head -1)"
+  for n in 'It carries what the `release` dry run names as blocking as well' \
+    'so that the release of step 4 costs no question after the yes' \
+    'so what it names about that tree binds the create route' \
+    'as a cost of the move instead of a blocker to resolve' \
+    'is no such blocker: the hazard line already states it, and `--force` on the release answers it'; do
+    case "$confirm" in (*"$n"*) ;; (*) bad="$bad [confirm:$n]" ;; esac
+  done
+  grep -qiF 'release the old session last' "$tk" "$ho" && bad="$bad retired-last-is-back"
+  flow="$(awk '/^## 5\./{f=1;next} /^## /{f=0} f' "$ho")"
+  at_dry="$(printf '%s\n' "$flow" | grep -nF 'Run `release <selector> --all` without `--apply` as well' | head -1 | cut -d: -f1)"
+  at_wait="$(printf '%s\n' "$flow" | grep -nF "wait for the user's confirmation" | head -1 | cut -d: -f1)"
+  at_force="$(printf '%s\n' "$flow" | grep -nF '`takeover <selector> --all --force`' | head -1 | cut -d: -f1)"
+  at_rel="$(printf '%s\n' "$flow" | grep -nF '**Release the old session before its remaining work, whichever route you took**' | head -1 | cut -d: -f1)"
+  dry_line=""
+  wait_line=""
+  rel_line=""
+  if [ -n "$at_dry" ] && [ -n "$at_wait" ] && [ -n "$at_force" ] && [ -n "$at_rel" ] \
+    && [ "$at_dry" -lt "$at_wait" ] && [ "$at_wait" -lt "$at_force" ] && [ "$at_force" -lt "$at_rel" ]; then
+    dry_line="$(printf '%s\n' "$flow" | sed -n "${at_dry}p")"
+    wait_line="$(printf '%s\n' "$flow" | sed -n "${at_wait}p")"
+    rel_line="$(printf '%s\n' "$flow" | sed -n "${at_rel}p")"
+  else
+    bad="$bad handoff-order=$at_dry/$at_wait/$at_force/$at_rel"
+  fi
+  case "$dry_line" in
+    (*'before the confirmation you neither relay its `ARCHIVE` line nor follow its `--apply` or `--force` hint'*) ;;
+    (*) bad="$bad handoff-dry-run-unbounded" ;;
+  esac
+  case "$wait_line" in
+    (*"each blocker the \`release\` dry run named that needs the user's decision, with what resolves it"*) ;;
+    (*) bad="$bad handoff-confirmation-lacks-blockers" ;;
+  esac
+  case "$wait_line" in
+    (*'binds the create route and is a cost to name on the move route'*) ;;
+    (*) bad="$bad handoff-confirmation-lacks-route" ;;
+  esac
+  for n in "it is the takeover's last step, not the work's" \
+    'Relay its `ARCHIVE` line to the user at once, before the remaining work starts' \
+    'While linked sessions of the old session are still to be continued, say instead that its archive waits for them' \
+    "hold the release itself back while one of them shared its parent's checkout"; do
+    case "$rel_line" in (*"$n"*) ;; (*) bad="$bad [handoff:$n]" ;; esac
+  done
+  linked="$(grep -F -- '- **Linked sessions**: can be archived with it.' "$ar" | head -1)"
+  for n in 'archiving a session also archives its side sessions that share its worktree or have finished' \
+    'not driven live' \
+    'while linked sessions of the old session are still to be continued, the old session is archived only once the wait of `references/takeover.md` step 4 has ended for each of them'; do
+    case "$linked" in (*"$n"*) ;; (*) bad="$bad [archive:$n]" ;; esac
+  done
+  grep -qF 'may reuse or reap that worktree again, so tell the user at once that the old session can be archived' "$ar" || bad="$bad archive-at-once-absent"
+  grep -qF 'That holds for the release that closes a takeover, never for the dry run of its plan pass' "$ar" || bad="$bad archive-plan-pass-unbounded"
+  row="$(grep -F '| `release <selector>` |' "$cm" | head -1)"
+  for n in "run before that session's remaining work is continued" \
+    'the plan pass of a takeover runs it to learn what would block the release' \
+    'its `ARCHIVE` line is not relayed and its `--apply` and `--force` hints are not followed' \
+    'Relay all of it to the user after the release that closes the takeover' \
+    'say instead that its archive waits for them'; do
+    case "$row" in (*"$n"*) ;; (*) bad="$bad [commands:$n]" ;; esac
+  done
+  code="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$tr")"
+  [ "$(printf '%s\n' "$code" | grep -cF "  'BEFORE THE REMAINING WORK, whichever route you took: once your own worktree holds everything you still need from the old one,'")" = "1" ] || bad="$bad trail-lead"
+  for n in 'which is right after the carry-over or the move where one applies' \
+    'nothing it checks waits for the work you continue' \
+    'says that the old session can now be archived or removed: tell the user at once' \
+    'While linked sessions of the old session are still to be continued, say instead that' \
+    'its archive waits until each has carried its work over, which its own release reports, or the user leaves it behind' \
+    'while one of them shared this worktree, hold this release'; do
+    printf '%s\n' "$code" | grep -qF -- "$n" || bad="$bad [trail:$n]"
+  done
+  printf '%s\n' "$code" | grep -qF "'LAST, whichever route you took" && bad="$bad trail-retired-lead-is-back"
+  printf '%s' "$bad"
+}
+T41_BAD="$(release_timing_sites "$REF_TAKEOVER" "$REF_HANDOFF" "$REF_ARCHIVE" "$REF_COMMANDS" "$TRAIL_MJS")"
+[ -z "$T41_BAD" ] \
+  && check "T41 [hub] the takeover reference releases the old session after the linked sessions, the chips and the Autopilot hand-over and before its remaining work, its plan pass runs the release dry run and the plan confirmation carries the blockers, the archive is reported at once with the wait for linked sessions, and flow 5, the archive reference, the release row and the script's lead follow" PASS \
+  || check "T41 [hub] release timing:$T41_BAD" FAIL
+T41_BAD="$(release_timing_sites "$PLM_REF_TAKEOVER" "$PLM_SKILL_DIR/references/handoff.md" "$PLM_SKILL_DIR/references/archive.md" "$PLM_REF_COMMANDS" "$PLM_TRAIL_MJS")"
+[ -z "$T41_BAD" ] \
+  && check "T41 [plm] PLM's frozen copy carries the same release timing in its takeover, handoff, archive and command references and in its script's lead" PASS \
+  || check "T41 [plm] release timing:$T41_BAD" FAIL
+T41_SANDBOX="$(mktemp -d -t session-trail-t41-XXXXXX)"
+for spec in \
+  "heading|step-order=|a release paragraph that calls the release the last step again" \
+  "order|step-order=|a release paragraph moved ahead of the chips" \
+  "confirm|[confirm:|a plan confirmation without the blockers of the dry run" \
+  "bound|step0-dry-run-unbounded|a step 0 that lets the dry run of the plan pass be relayed or followed" \
+  "narrow|[release:While linked sessions|a release paragraph whose archive wait covers only started sessions" \
+  "shared|[release:so for it|a release paragraph without the shared-checkout end of the wait" \
+  "advice|[trail:While linked sessions|a script whose release step lacks the archive wait" \
+  "trail|trail-lead|a script whose release step opens with the retired lead"; do
+  mode="${spec%%|*}"; rest="${spec#*|}"; want="${rest%%|*}"; what="${rest#*|}"
+  T41_ERR="$(node -e '
+    const fs = require("fs");
+    const [takeover, trail, mode, dir] = process.argv.slice(1);
+    let t = fs.readFileSync(takeover, "utf8");
+    let s = fs.readFileSync(trail, "utf8");
+    const swap = (text, from, to) => { if (!text.includes(from)) throw new Error("anchor missing: " + from); return text.replace(from, to); };
+    if (mode === "heading") t = swap(t, "release the old session before its remaining work", "release the old session last");
+    if (mode === "order") {
+      const lines = t.split("\n");
+      const rel = lines.findIndex((l) => l.includes("**Whichever route you took, release the old session before its remaining work"));
+      const chips = lines.findIndex((l) => l.includes("open task chips over, always, before you release it.**"));
+      if (rel < 0 || chips < 0) throw new Error("anchor missing: step-4 paragraphs");
+      const [moved] = lines.splice(rel, 1);
+      lines.splice(chips, 0, moved);
+      t = lines.join("\n");
+    }
+    if (mode === "confirm") t = swap(t, "It carries what the `release` dry run names as blocking as well", "It carries nothing of the release");
+    if (mode === "bound") t = swap(t, "before the yes you neither relay its `ARCHIVE` line nor follow its `--apply` or `--force` hint", "before the yes you may relay it");
+    if (mode === "narrow") t = swap(t, "While linked sessions of the old session are still to be continued, say instead that the archive of the old session waits for them", "When this takeover started linked sessions, say instead that the archive of the old session waits for them");
+    if (mode === "shared") t = swap(t, "so for it a `release` that refuses for that process alone reports the same", "so nothing more is needed");
+    if (mode === "advice") s = swap(s, "While linked sessions of the old session are still to be continued, say instead that", "Say that");
+    if (mode === "trail") s = swap(s, "BEFORE THE REMAINING WORK, whichever route you took: once", "LAST, whichever route you took: once");
+    fs.writeFileSync(dir + "/takeover.md", t);
+    fs.writeFileSync(dir + "/trail.mjs", s);
+  ' "$REF_TAKEOVER" "$TRAIL_MJS" "$mode" "$T41_SANDBOX" 2>&1)"
+  if [ -n "$T41_ERR" ]; then
+    check "T41-control $what could not be built ($T41_ERR)" FAIL
+    continue
+  fi
+  case "$(release_timing_sites "$T41_SANDBOX/takeover.md" "$REF_HANDOFF" "$REF_ARCHIVE" "$REF_COMMANDS" "$T41_SANDBOX/trail.mjs")" in
+    (*"$want"*) check "T41-control $what fails the release-timing check as $want" PASS ;;
+    (*) check "T41-control $what passes the release-timing check" FAIL ;;
+  esac
+done
+rm -rf "$T41_SANDBOX"
+
 echo "----"
 echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
 [ "$FAIL" -eq 0 ]

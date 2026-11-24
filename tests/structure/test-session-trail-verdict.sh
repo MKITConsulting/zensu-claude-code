@@ -7448,7 +7448,7 @@ CH_AT_THREADS="$(printf '%s\n' "$CH_HO" | grep -nxF '## Open threads' | head -1 
 
 CH_REF="$HUB_SKILL_DIR/references/takeover.md"
 CH_AT_CARRY="$(grep -nF "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1 | cut -d: -f1)"
-CH_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session last' "$CH_REF" | head -1 | cut -d: -f1)"
+CH_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session before its remaining work' "$CH_REF" | head -1 | cut -d: -f1)"
 CH_STEP="$(grep -F "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1)"
 CH_BAD=""
 [ -n "$CH_AT_CARRY" ] && [ -n "$CH_AT_RELEASE" ] && [ "$CH_AT_CARRY" -lt "$CH_AT_RELEASE" ] || CH_BAD="$CH_BAD order=$CH_AT_CARRY/$CH_AT_RELEASE"
@@ -7825,7 +7825,7 @@ printf '%s\n' "$LS_HO" | grep -qF 'read the records again, so start only the ses
 
 LS_AT_START="$(grep -nF "**Start the old session's linked sessions here, right after \`takeover --force\`, in the turn in which the user confirmed the plan.**" "$CH_REF" | head -1 | cut -d: -f1)"
 LS_AT_CARRY="$(grep -nF "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1 | cut -d: -f1)"
-LS_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session last' "$CH_REF" | head -1 | cut -d: -f1)"
+LS_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session before its remaining work' "$CH_REF" | head -1 | cut -d: -f1)"
 LS_BAD=""
 [ -n "$LS_AT_START" ] && [ -n "$LS_AT_CARRY" ] && [ -n "$LS_AT_RELEASE" ] && [ "$LS_AT_START" -lt "$LS_AT_CARRY" ] && [ "$LS_AT_CARRY" -lt "$LS_AT_RELEASE" ] || LS_BAD="$LS_BAD order=$LS_AT_START/$LS_AT_CARRY/$LS_AT_RELEASE"
 for LS_NEEDLE in 'mcp__ccd_session__start_session' '`initiation` `user_asked`, `context` `fresh`, `use_worktree` true, no `source_branch` and no `branch_name`' 'never more than 8 times in one takeover' 'before the worktree, the carry-over, the chips and `release`' "It names the brief's linked sessions too" 'call `list_start_targets` before the confirmation' "Never leave one out on your own judgment: not because its own work looks finished, since the linked sessions below it follow only through it" "So the confirmation never offers a restart as an alternative to finishing that session's work here, and none of its answer options leaves a session marked start out." 'a later move of it on its own lands it at the top level, where Claude cannot link it under a session again' 'Leave out no session that it marks **start** on your own judgment' "which records it as \`confirmed\` and carries the plan answer's linked sessions with \`--linked-start\`"; do
