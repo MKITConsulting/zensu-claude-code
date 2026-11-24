@@ -41,6 +41,13 @@ test("claimLine skips every verdict head, the correction heads included", () => 
   assert.equal(lib.claimLine("[ts] CLAIM RETRACTED — S1 (line 3, correction line 9): S1 WIRED x"), null);
 });
 
+test("a copied EDIT SUPERSEDED verdict line is never read as a claim", () => {
+  assert.ok(lib.VERDICT_HEADS.includes("EDIT SUPERSEDED "));
+  assert.equal(lib.claimLine("EDIT SUPERSEDED — S02: src/a.ts, replaced by R1-F9"), null);
+  assert.equal(lib.claimLine("[10:00:05] EDIT SUPERSEDED — S02 IMPL completed — files: a.ts, replaced by R1-F9"), null);
+  assert.equal(lib.claimLine("S02 IMPL completed — files: a.ts").label, "S02");
+});
+
 test("claimLine records the line head and the commentary tail", () => {
   const claim = lib.claimLine("[ts] S2 IMPL completed — files: a.ts b.ts | moved helpers");
   assert.equal(claim.head, "[ts] S2 IMPL completed — files:");

@@ -132,14 +132,17 @@ function sessionName(runDir, options = {}) {
 }
 
 function buildConfig(runDir, origins, rules, statePath = null) {
-  const args = ['--no-proxy-server'];
-  if (rules.length > 0) args.push(`--host-resolver-rules=${rules.join(',')}`);
-  const contextOptions = { serviceWorkers: 'block' };
+  const pins = new Map();
+  for (const rule of rules) {
+    const pin = consent.resolverPin(rule);
+    if (pin) pins.set(pin.host, pin.address);
+  }
+  const contextOptions = { serviceWorkers: 'allow' };
   if (statePath) contextOptions.storageState = statePath;
   return {
     browser: {
       isolated: true,
-      launchOptions: { args },
+      launchOptions: { args: consent.fenceArgs(origins, pins) },
       contextOptions,
     },
     network: { allowedOrigins: origins },
@@ -437,8 +440,13 @@ function checkReadiness(readiness, env, signedIn) {
   }
   const measured = consent.PLAYWRIGHT_CLI_SOURCE_VERSION;
   const installed = readiness.installedVersion(env);
-  if (installed.source === 'manifest' && installed.version === measured) return;
-  throw new Error(`${versionCause(installed, measured)}, so no run config is written; ${versionRemedy(installed)}`);
+  if (installed.source !== 'manifest' || installed.version !== measured) {
+    throw new Error(`${versionCause(installed, measured)}, so no run config is written; ${versionRemedy(installed)}`);
+  }
+  const ambient = consent.ambientOverride(env);
+  if (ambient) {
+    throw new Error(`${consent.ambientDeny(ambient)}, so no run config is written; unset it where it is set, in the environment Claude Code started with or in a shell profile, and start the run again`);
+  }
 }
 
 function defaultReadiness() {

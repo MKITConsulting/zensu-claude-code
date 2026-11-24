@@ -7,12 +7,29 @@ const ALLOW_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'LSP', 'WebSearch', 'WebFetch
 const SETUP_TOOLS = ['EnterWorktree'];
 const PLAIN = /^[^;&|<>$`\\\r\n]*$/;
 const QUIET = /\s+([12]?>\s*\/dev\/null|2>&1)(?=\s|$)/g;
-const READ_COMMAND = /^(ls|cat|head|tail|wc|pwd|tree|file|stat|cd|grep|egrep|fgrep|rg|find|echo|printf|nl|true|test|\[)(\s|$)|^sed\s+-n\s+\d+(,\d+)?p(\s+[^\s-]\S*)*$|^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?(status|log|diff|show|ls-files|rev-parse|check-ignore)(\s|$)|^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?remote(\s+(-v|--verbose))?$|^(node\s+--test|npm\s+(run\s+)?test|pnpm\s+(run\s+)?test)(\s|$)|^node\s+(--version|-v)$/;
-const NAME_FLAG = /^(test|\[|printf)\s(.*\s)?-[vR](\s|$)/;
+const READ_COMMAND = /^(ls|cat|head|tail|wc|pwd|tree|file|stat|cd|grep|egrep|fgrep|rg|find|echo|printf|nl|true|test|\[)(\s|$)|^sed\s+-n\s+\d+(,\d+)?p(\s+[^\s-]\S*)*$|^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?(status|log|diff|show|ls-files|rev-parse|check-ignore|version)(\s|$)|^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?remote(\s+(-v|--verbose))?$|^(node\s+--test|npm\s+(run\s+)?test|pnpm\s+(run\s+)?test)(\s|$)|^(node\s+(--version|-v)|git\s+--version)$/;
+const CONFIG_COMMAND = /^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?config(?=\s|$)/;
+const CONFIG_READS = new Set(['--get', '--get-all', '--get-regexp', '--list', '-l']);
+const CONFIG_SUBCOMMANDS = new Set(['get', 'list']);
+const CONFIG_SOURCES = new Set(['-f', '--file', '--blob']);
+const CONFIG_FLAG = /^(--(global|system|local|worktree|show-origin|show-scope|name-only|null|includes|no-includes|fixed-value|all|regexp|bool|int|bool-or-int|path|expiry-date)|-z|--(type|default|value|file|blob)=.*)$/;
+const CONFIG_STDIN = /^-?$|(^|\/)(dev|proc)(\/|$)/;
+const CONFIG_GLOB = /[*?[\]]/;
+const VERSION_PROGRAM = /^[\w.+-]+$/;
+const NAME_FLAG = /^(test|\[)\s(.*\s)?-[vR](\s|$)|^printf\s(.*\s)?-v/;
+const TREE_WRITE = /^tree\s(.*\s)?-[A-Za-z]*[oR]/;
+const TREE_FLAG = /^-[A-Za-z]*[oR]/;
+const FILE_WRITE = /^file\s(.*\s)?(-[A-Za-z0-9]*C|--compile(=|\s|$))/;
+const FILE_FLAG = /^(-[A-Za-z0-9]*C|--compile(=|$))/;
+const NODE_TEST = /^node\s+--test(?=\s|$)/;
+const SCRIPT_TEST = /^(npm|pnpm)\s+(run\s+)?test(?=\s|$)/;
+const SCRIPT_FLAG = /^(--silent|-s|--quiet|-q|--if-present)$/;
+const TEST_FLAG = /^--test-(name-pattern|skip-pattern|only|concurrency|timeout|shard|force-exit|coverage-(include|exclude|lines|branches|functions))(=.*)?$|^--experimental-test-coverage$|^--test-reporter=(spec|tap|dot|junit|lcov)$/;
+const WORD_END = /[ \t\r\n;&|<>()]/;
 const UNSAFE_FLAG = /(^|\s)(--output|--ext-diff|--pre|--watch|--stdin|--test-reporter-destination|--test-update-snapshots|-exec|-execdir|-delete|-ok|-okdir|-fprint|-fprint0|-fprintf|-fls)(=|\s|$)/;
 const FOLLOW = /^tail\s(.*\s)?(-[A-Za-z0-9]*[fF][A-Za-z0-9]*|--follow)(=|\s|$)/;
 const SETUP_COMMAND = /^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?(worktree|checkout|switch|branch)(\s|$)/;
-const QUOTED_META = /[;&|<>()$`\\]/;
+const QUOTED_META = /[;&|<>()$`\\{}*?[\]]/;
 const SED_READ = /^sed\s+-n\s+\d+(,\d+)?p(\s+[^\s-]\S*)*$/;
 const WRITE_FLAG = /^(--output|--ext-diff|--pre|--test-reporter-destination|--test-update-snapshots|--write|--fix|--in-place)(=|$)|^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/;
 const ROUTE_FLAG = /zensu-delivery-route\.sh["']?\s+--(?:direct|build)(?=\s|$)|(?:^|\s)--tdd-begin(?=\s|$)/;
@@ -132,10 +149,72 @@ function segments(command) {
   return parts.map((p) => p.trim()).filter(Boolean);
 }
 
+function readsDevice(args) {
+  return args.some((word, i) => {
+    if (CONFIG_SOURCES.has(word)) return CONFIG_STDIN.test(args[i + 1] || '');
+    const value = /^--(file|blob)=(.*)$/.exec(word);
+    return Boolean(value) && CONFIG_STDIN.test(value[2]);
+  });
+}
+
+function configReads(args) {
+  if (readsDevice(args)) return false;
+  let reads = CONFIG_SUBCOMMANDS.has(args[0]);
+  let i = reads ? 1 : 0;
+  for (; i < args.length && args[i].startsWith('-'); i += 1) {
+    const word = args[i];
+    if (CONFIG_SOURCES.has(word)) i += 1;
+    else if (CONFIG_READS.has(word)) reads = true;
+    else if (!CONFIG_FLAG.test(word)) return false;
+  }
+  const names = args.slice(i);
+  return reads || (names.length === 1 && names[0].includes('.'));
+}
+
+function configPart(part) {
+  const head = CONFIG_COMMAND.exec(part);
+  return Boolean(head) && !CONFIG_GLOB.test(part) && configReads(part.slice(head[0].length).split(/\s+/).filter(Boolean));
+}
+
+function expands(part) {
+  const open = [];
+  for (let i = 0; i < part.length; i += 1) {
+    const c = part[i];
+    if (c === '{') open.push(false);
+    else if (c === '}' && open.length) {
+      if (open.pop()) return true;
+    } else if (open.length && (c === ',' || part.startsWith('..', i))) open[open.length - 1] = true;
+  }
+  return false;
+}
+
+function testWords(words) {
+  return words.every((word) => !word.startsWith('-') || TEST_FLAG.test(word));
+}
+
+function scriptWords(words) {
+  const end = words.indexOf('--');
+  return (end < 0 ? words : words.slice(0, end)).every((word) => !word.startsWith('-') || SCRIPT_FLAG.test(word));
+}
+
+function testRead(part) {
+  const script = SCRIPT_TEST.exec(part);
+  if (script) return scriptWords(part.slice(script[0].length).split(/\s+/).filter(Boolean));
+  const head = NODE_TEST.exec(part);
+  return !head || testWords(part.slice(head[0].length).split(/\s+/).filter(Boolean));
+}
+
+function unquote(word) {
+  return word.replace(/"((?:[^"\\]|\\[\s\S])*)"|'([^']*)'|\\([\s\S])/g, (m, double, single, escaped) => {
+    if (double !== undefined) return double;
+    return single !== undefined ? single : escaped;
+  });
+}
+
 function bashPart(raw) {
   const part = raw.replace(QUIET, '');
-  if (!PLAIN.test(part)) return 'other';
-  if (READ_COMMAND.test(part) && !UNSAFE_FLAG.test(part) && !FOLLOW.test(part) && !NAME_FLAG.test(part)) return 'read';
+  if (!PLAIN.test(part) || expands(part)) return 'other';
+  if ((READ_COMMAND.test(part) || configPart(part)) && !UNSAFE_FLAG.test(part) && !FOLLOW.test(part) && !NAME_FLAG.test(part) && !TREE_WRITE.test(part) && !FILE_WRITE.test(part) && testRead(part)) return 'read';
   if (SETUP_COMMAND.test(part)) return 'setup';
   return 'other';
 }
@@ -176,10 +255,15 @@ function lex(text, base) {
   const signals = [];
   let words = [];
   let word = null;
+  let bare = false;
   let start = -1;
   const take = () => {
     if (word !== null) words.push(word);
     word = null;
+  };
+  const descriptor = () => {
+    if (word !== null && bare && /^\d+$/.test(word)) word = null;
+    else take();
   };
   const cut = () => {
     take();
@@ -187,8 +271,9 @@ function lex(text, base) {
     words = [];
     start = -1;
   };
-  const add = (s, at) => {
+  const add = (s, at, plain) => {
     if (start < 0) start = at;
+    bare = (word === null || bare) && plain === true;
     word = (word === null ? '' : word) + s;
   };
   const flag = (code, at, part) => signals.push({ at: base + at, code, part });
@@ -197,6 +282,28 @@ function lex(text, base) {
     parts.push(...inner.parts);
     signals.push(...inner.signals);
     return end < 0 ? text.length : end + 1;
+  };
+  const quoted = (from) => {
+    let k = from;
+    while (k < text.length && text[k] !== '"') {
+      if (text[k] === '\\') k += 2;
+      else if (text[k] === '$' && text[k + 1] === '(') k = nested(k + 2, closing(text, k + 2));
+      else if (text[k] === '`') k = nested(k + 1, backtick(text, k + 1));
+      else k += 1;
+    }
+    return k + 1;
+  };
+  const shellWord = (from) => {
+    let k = from;
+    while (k < text.length && !WORD_END.test(text[k])) {
+      if (text[k] === '\\') k += 2;
+      else if (text[k] === "'") k = text.indexOf("'", k + 1) < 0 ? text.length : text.indexOf("'", k + 1) + 1;
+      else if (text[k] === '"') k = quoted(k + 1);
+      else if (text[k] === '$' && text[k + 1] === '(') k = nested(k + 2, closing(text, k + 2));
+      else if (text[k] === '`') k = nested(k + 1, backtick(text, k + 1));
+      else k += 1;
+    }
+    return Math.min(k, text.length);
   };
   let i = 0;
   while (i < text.length) {
@@ -254,30 +361,23 @@ function lex(text, base) {
       cut();
       return { parts, signals };
     } else if (c === '<') {
-      take();
+      descriptor();
       let j = i + (text.startsWith('<<<', i) ? 3 : 1);
       if (text[j] === '&') j += 1;
       while (text[j] === ' ' || text[j] === '\t') j += 1;
-      const source = /^("[^"]*"|'[^']*'|[^\s;&|<>()])*/.exec(text.slice(j))[0];
-      for (let k = j; k < j + source.length; k += 1) {
-        if (text[k] === '$' && text[k + 1] === '(') k = nested(k + 2, closing(text, k + 2)) - 1;
-        else if (text[k] === '`') k = nested(k + 1, backtick(text, k + 1)) - 1;
-      }
-      i = j + source.length;
+      i = shellWord(j);
     } else if (c === '>' || (c === '&' && next === '>')) {
-      take();
+      if (c === '>') descriptor();
+      else take();
       let j = c === '&' ? i + 2 : i + 1;
       if (text[j] === '>' || text[j] === '|') j += 1;
-      if (text[j] === '&') {
-        j += 1;
-        while (j < text.length && /[0-9-]/.test(text[j])) j += 1;
-      } else {
-        while (text[j] === ' ' || text[j] === '\t') j += 1;
-        const target = /^[^\s;&|<>()]*/.exec(text.slice(j))[0];
-        if (target.replace(/^["']|["']$/g, '') !== '/dev/null') flag('redirect', i, text.slice(i, j + target.length));
-        j += target.length;
-      }
-      i = j;
+      const copies = text[j] === '&';
+      if (copies) j += 1;
+      while (text[j] === ' ' || text[j] === '\t') j += 1;
+      const end = shellWord(j);
+      const target = unquote(text.slice(j, end));
+      if (target !== '/dev/null' && !(copies && /^(\d+-?|-)$/.test(target))) flag('redirect', i, text.slice(i, end));
+      i = end;
     } else if (c === '&' && next === '&') {
       cut();
       i += 2;
@@ -292,7 +392,7 @@ function lex(text, base) {
       cut();
       i += 1;
     } else {
-      add(c, i);
+      add(c, i, true);
       i += 1;
     }
   }
@@ -309,6 +409,7 @@ function gitSignal(rest) {
   const sub = rest[i];
   if (sub === undefined) return null;
   if (sub === 'remote') return rest.slice(i + 1).every((x) => x === '-v' || x === '--verbose') ? null : 'git:remote';
+  if (sub === 'config') return configReads(rest.slice(i + 1)) ? null : 'git:config';
   return GIT_READS.has(sub) ? null : `git:${sub}`;
 }
 
@@ -327,11 +428,16 @@ function partSignal(all) {
   if (MUTATION.test(text)) return 'zensu-mutation';
   const flagged = words.find((w) => WRITE_FLAG.test(w));
   if (flagged) return `flag:${flagged.split('=')[0]}`;
+  if (VERSION_PROGRAM.test(program) && rest.length === 1 && (rest[0] === '--version' || (program === 'npx' && rest[0] === '-v'))) return null;
   if (program.includes('/') && !READ_PROGRAMS.has(name)) return `program:${program}`;
   if (WRITE_PROGRAMS.has(name) || RUN_PROGRAMS.has(name)) return `program:${name}`;
-  if (name === 'node') return rest[0] === '--test' || (rest.length === 1 && VERSION.includes(rest[0])) ? null : 'program:node';
+  if (name === 'node') return (rest[0] === '--test' && testWords(rest.slice(1))) || (rest.length === 1 && VERSION.includes(rest[0])) ? null : 'program:node';
+  if (name === 'tree') return rest.some((w) => TREE_FLAG.test(w)) ? 'program:tree' : null;
+  if (name === 'file') return rest.some((w) => FILE_FLAG.test(w)) ? 'program:file' : null;
   if (PACKAGE_MANAGERS.has(name)) {
-    const quiet = rest[0] === 'test' || (rest[0] === 'run' && rest[1] === 'test') || (rest.length === 1 && VERSION.includes(rest[0]))
+    const script = rest[0] === 'test' ? rest.slice(1) : rest[0] === 'run' && rest[1] === 'test' ? rest.slice(2) : null;
+    if (script && name !== 'yarn' && !scriptWords(script)) return `program:${name}`;
+    const quiet = script || (rest.length === 1 && VERSION.includes(rest[0]))
       || PACKAGE_READS.has(rest[0]) || (rest[0] === 'config' && (rest[1] === 'get' || rest[1] === 'list'));
     return quiet ? null : `program:${name}`;
   }
@@ -387,7 +493,9 @@ function bashVerdict(command) {
   const runsHelper = (s) => CAPTURE_COMMAND.test(s.part) || (s.code === 'program:node' && held.has((NODE_VARIABLE.exec(s.part) || [])[1]));
   const deciding = signals.filter((s) => !SETUP_SIGNALS.has(s.code) && !(capture && runsHelper(s)));
   if (capture && !deciding.length) return { decision: 'SETUP', code: 'capture', part: '' };
-  const proven = provenDecision(text);
+  const proof = provenDecision(text);
+  const misread = signals.some((s) => (s.code.startsWith('git:') || s.code === 'redirect') && (proof === 'ALLOW' || !SETUP_SIGNALS.has(s.code)));
+  const proven = misread ? null : proof;
   if (proven) return { decision: proven, code: proven === 'ALLOW' ? 'read' : 'setup', part: '' };
   if (deciding.length) return { decision: 'END', code: deciding[0].code, part: deciding[0].part };
   if (signals.length && /[\r\n]/.test(text)) return { decision: 'END', code: 'multi-line', part: text.split(/\r?\n/)[0] };

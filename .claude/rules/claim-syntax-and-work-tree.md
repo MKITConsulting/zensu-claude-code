@@ -1,6 +1,7 @@
 ---
 paths:
   - "hooks/lib/edit-landing-claims-v1.js"
+  - "hooks/lib/edit-landing-receipt-v1.js"
   - "hooks/lib/zensu-edit-landing.sh"
   - "hooks/lib/zensu-log.sh"
   - "hooks/lib/round-prepare-v1.js"
@@ -12,6 +13,7 @@ paths:
   - "skills/build/references/review-chain.md"
   - "skills/self-review/SKILL.md"
   - "tests/structure/edit-landing-claims-v1.test.js"
+  - "tests/structure/edit-landing-scope-v1.test.js"
   - "tests/structure/test-edit-landing-audit.sh"
   - "tests/structure/test-tdd-complete-receipt-gate.sh"
 ---
@@ -256,3 +258,173 @@ one installation. The optional receipt field `workTree` is the one entry that re
 precedent changed the value domain of an existing field (`log`), which an older reader misread.
 Here no existing field changes; an older gate ignores `workTree`, and a newer gate refuses an
 older receipt on a work-tree chain with a re-run remedy.
+
+## Superseded claims
+
+On 2026-11-20 an Autopilot-bound chain in a consuming project could not pass `--chain-done`. Step
+`S02` added an error code in six files and the audit certified those claims; review fix `R1-F9`
+removed the code again as dead code. A certification holds only while the claimed file is
+byte-identical, and a predicate proof needs a literal that holds on the current file, so the six
+claims could never be proven again, and a bound chain cannot arm a new generation. The gate had no
+state for an edit that landed and was then replaced on purpose.
+
+**A supersede is a predicate proof, not a run-log line.** A `--predicates` entry takes one
+optional field, `supersededBy`, in both forms:
+`{"step","path","sha256","absent":[…],"supersededBy":"<later step>"}`, and
+`{"step","path","missing":true,"supersededBy":"<later step>"}` for a file the later step deleted.
+It never carries `present`, and the literal form needs at least one `absent` literal. A run-log
+line was weighed and dropped: the proof demands evidence bound to the current bytes, reuses the
+one verifier and the one persistence rule the audit has, and needs no claim grammar, row kind,
+write-time check or manifest.
+
+**When it counts.** `resolveSupersedes` in `edit-landing-receipt-v1.js` accepts the proof for a
+claim `T` only when all of this holds. Every breach fails the audit with exit 2 and its own
+sentence, like any invalid proof.
+
+1. `T` is neither certified in this audit nor proven by an ordinary proof in the same document.
+2. `T` has landing evidence (below).
+3. A claim `B` of the `supersededBy` step names the same file and comes after the last claim of
+   `T` in the run log.
+4. `B` is landed in this audit: certified, or proven in the same document. There is no
+   transitivity, and a step never supersedes itself.
+5. The `absent` literals hold on the current bytes, or the file is missing, under the rules of
+   the ordinary proof.
+
+**Landing evidence (`landedOnce`).** `prepareClaims` grants it from two sources. Sticky: the
+previous audit scope holds the claim as `certified` or `landedOnce`, and the claim's path
+resolution did not move. First sight: the claim has no earlier entry, its file has an earlier
+snapshot that differs from the current bytes, and every claim first seen on that file carries the
+same step. The second source exists because a fix round's audit grades every dirty file
+`PENDING PREDICATE`, so a fix-round claim is never certified before the terminus, and a round 2
+fix that undoes a round 1 fix would otherwise wedge the same way. `--round-prepare` attributes a
+round's claims by the same two-label idea, but against its own round-start snapshot, which records
+every changed path, while the audit snapshots only files some claim named; the two therefore
+disagree in the cases the Known gaps list. A claim without evidence cannot be superseded, and the
+refusal says what the code knows: the audit scope records no landing for it.
+
+**The recovery command names the work tree.** A terminus refusal prints `Run: <audit command>`
+followed by `RECOVERY_GUIDANCE`, which names the supersede proof. An audit of another claim root
+re-roots the scope (`prepareScope` drops `previous`), and with it every certification and every
+landing evidence. So `auditRecoveryCommand` appends `--work-tree <project root>/<workTree>` when
+the session receipt records a work tree (`boundWorkTree`), in the terminus refusal (`freshVerb`)
+and in the `AUDIT SESSION REQUIRED` refusal (`sessionGate`) alike, the guidance says to keep that
+operand, and a recorded work tree the command cannot carry is printed as the placeholder
+`<work tree>`, which fails when run as written rather than grading the anchor. A chain that works
+in the anchor prints the command as before. A git fault keeps the record. The audit validates
+`--work-tree` only while git answers, so a fault run hands the checkpoint no work tree, while
+`prepareScope` keeps the scope on its claim root. `checkpointScope` therefore records the work
+tree that scope is bound to (`scopeWorkTree`, the claim root's path below the project root)
+whenever the audit names none. A checkpoint without the key would make the command printed after
+git recovers audit the anchor and re-root the scope. `scopeWorkTree` hands that path on without
+the reader's path check, as the shell hands `WORK_TREE_REL` to the ordinary checkpoint and to the
+sealed receipt, so the three writers agree and the readers in `edit-landing-receipt-v1.js` decide
+alone, each through `claimPath`: `boundWorkTree` for the recovery command, `gradedRoot` for the
+freshness check behind `--check-receipt`, and the `check-context` verb. A path `claimPath`
+rejects therefore reads back as the placeholder in the recovery command, never as a chain that
+works in the anchor.
+
+**Verdict and counts.** The grader prints
+`EDIT SUPERSEDED — <step>: <path>, replaced by <step2>` through `render_claim_value`, and the
+claim counts toward `claims`, `landed` and `exempt_superseded`. The tally field and the receipt
+key `exemptSuperseded` exist only above zero, so a chain without a supersede keeps its output and
+its receipt keys, and `receiptFresh` is unchanged because a clean receipt still has
+`landed === claims`. The audit scope keeps `supersededBy` and `landedOnce: true` on a claim entry
+only while the claim is not certified. A later audit carries the verdict while the file's bytes
+are unchanged and `B` is still certified, the rule a certification follows; a changed file needs
+a fresh proof for both claims. A supersede records no bypass-ledger entry, because it escapes no
+gate. Both summary renderers carry the line verbatim and mark it 🟡
+(`.claude/rules/status-marker-legend.md`).
+
+**Coupled sites.** `supersedingStep`, `resolveSupersedes`, `verifyPredicates`, `prepareClaims`,
+`finishScope`, `persistedScope`, `writeScopeFlags` (the `superseded` flag file, one
+`index<TAB>step` line per claim), `auditRecoveryCommand`, `boundWorkTree`, `scopeWorkTree`,
+`checkpointScope` and `RECOVERY_GUIDANCE` in `edit-landing-receipt-v1.js`;
+`superseded_claim`, `grade_claim`, the tally line and the receipt writer in
+`zensu-edit-landing.sh`; `VERDICT_HEADS` in `edit-landing-claims-v1.js`, so a copied verdict is
+never read as a claim; `AUDIT_NOTICE` in `round-prepare-v1.js`, so `--round-prepare` carries the
+line; `receiptLine` in `review-packet-v1.js`, which renders `exempt_superseded=<n>` only for a
+receipt that holds the key; the `unclean` remedy of `--tdd-complete` in `zensu-log.sh`. Texts:
+step 5b b) and c) and step 9 of `audit.md`, the `edit_landing_evidence` definition at its four
+sites (`agents/code-reviewer.md`, `agents/review-aspect.md`, `agents/review-judge.md` and step
+10.2c of `skills/build/references/review-chain.md`), "Final report" in
+`skills/self-review/SKILL.md` (the `self-review` entry of `test-skill-text-budget.sh` holds that
+body's exact size), `COMBINED_SUMMARY_DIRECTIVE` in `hooks/post-review-tdd-delegate.sh`,
+discipline patch 10, the marker paragraph and the `## What I built` row of
+`docs/build-workflow.md`, the lead-in, the `## Terminal Edit-Landing Gate` section and its
+"What it prints" bullet in `docs/gates.md`, and the `ZENSU_EDIT_LANDING_GATE` row of
+`docs/configuration.md`.
+Pins: the supersede cases, the four work-tree recovery cases (a stale receipt, a git fault, a
+recorded work tree no reader can use, and a git fault on a path `claimPath` rejects, which skips
+on win32), the pure checkpoint case, which holds both halves of `scopeWorkTree` on every host (a
+rejected path below the project root is recorded as written, and a claim root at or outside the
+project root records none), and the anchor fault case, which requires a checkpoint without the
+key, of `tests/structure/edit-landing-scope-v1.test.js`, `E14` and `E14a` in
+`test-terminal-edit-landing-gate.sh`, `S4`, `S4a` and `X29b` in `test-edit-landing-audit.sh`,
+`D10c` in `test-tdd-complete-receipt-gate.sh`, one case each in the claims, round-prepare and
+review-packet unit files, and both literal loops of
+`evals/config-gate/test-post-review-combined-summary.sh`. No suite pins the verdict's name at
+the four `edit_landing_evidence` sites or in step 9.
+
+**Known gaps.**
+
+- A step undone before any audit saw it land has no landing evidence and keeps its verdict: an
+  edit reverted inside the implementing phase, and two steps that one audit first sees on the same
+  file.
+- First-sight evidence proves that the file changed between two audits while one step newly
+  claimed it, not that this step's own edit changed it.
+- A claim an audit first saw before its edit landed keeps an entry without evidence and never
+  gains any, because first sight is granted only to a claim without an earlier entry. The
+  `--round-prepare` exit-1 flow reaches it: the audit seals its receipt before the verb stops the
+  round, and the re-run verb then reports the claim landed.
+- A fix-round claim on a changed file that no earlier claim named gains none either: first sight
+  needs an earlier snapshot, and the audit snapshots only claimed files. A test file written while
+  implementing in strict mode is such a file. The verb attributes that claim as landed.
+- Every claim entry an audit of an older installation wrote as uncertified carries no landing
+  evidence, a claim that audit or an earlier one had certified included. A chain that was already
+  refused before the update is therefore not rescued by it. That is a decision, not an oversight:
+  the persisted scope holds nothing that tells a once-certified claim from one that never landed,
+  and the verdict lines in the run log are model-written text the audit never reads as evidence.
+- A proof reaches a claim only while the grader resolves its path. A claim spelled without a
+  directory component loses it once its file is neither on disk nor in the change set
+  (`normalize_claim`), so no proof entry can name it, the deletion form included. The ordinary
+  `missing` proof has the same bound.
+- Each claim in the four cases above keeps the exits it had before this change: a new generation
+  for a standalone chain, and for a bound chain none but the gate variable. Closing them needs a
+  second evidence source, for example a round-start digest of changed files no claim named, and
+  the previous audit's resolved path for a claim the grader can no longer resolve.
+- An ordinary proof with only `absent` literals and no `supersededBy` still passes and prints
+  `EDIT LANDED` for an edit that is gone. Refusing it would break proofs that are valid today.
+- `VERDICT` in `round-prepare-v1.js` reads no `EDIT SUPERSEDED` line. A claim of the round being
+  prepared that an earlier audit graded superseded is carried as a notice and left out of its
+  label's state, so a label whose every file is superseded gets no `ROUND LANDING` line and no
+  `fixed` line from the verb.
+- A fault checkpoint records a work tree only from a scope an earlier audit bound to it. The
+  first audit of a work-tree chain that stops on a git fault records none, and loses nothing,
+  because no certification exists yet. A checkpoint an installation without `scopeWorkTree` wrote
+  stays without the key, so the command printed for it audits the anchor.
+- The topology rule refuses a tab or a line break in a work tree's name and no other character
+  `claimPath` rejects. A work tree whose project-relative path holds a backslash, or a control
+  character other than those, is therefore audited, and every receipt of it, checkpoint and
+  sealed alike, records a path that `claimPath` in `edit-landing-receipt-v1.js` and
+  `workTreeRelative` in `review-packet-v1.js` reject. Two other readers of the key,
+  `_tc_receipt_verdict` of `--tdd-complete` and `auditedWorkTree` of the doctor row, screen out a
+  control character and accept a backslash. `--check-receipt`, the check the terminus runs,
+  never accepts a receipt of such a tree: it refuses a sealed receipt that is current and clean
+  with `the receipt names a work tree that is not a path inside the project`, an unclean one as
+  not clean before it reaches that check, and a checkpoint, like every checkpoint, with
+  `the latest audit did not complete; re-run it`. Each refusal prints the recovery command with
+  the placeholder. Refusing the tree up front belongs in `--work-tree` and `--work-tree-check`,
+  which would change what both accept.
+- A bound chain whose terminus refuses for a cause that no edit or proof removes, such as a claim
+  that never landed, still has no exit other than the gate variable.
+- Windows is unmeasured, and the ports were not included.
+
+**Version: `patch`.** Walked against `.claude/rules/runtime-lineage.md`: no context-record or
+workflow-state field, no hook, matcher, config key, `permissionDecision` or attestation change.
+The receipt and the audit scope gain keys that no reader validates. The proof document is the
+entry that reads close, because `verifyPredicates` rejects an unknown key. The reason behind the
+strict-key-set entry is a runtime that cannot read what a session wrote, and it does not apply
+here: a proof document is written for one audit call and is never session state, a newer runtime
+accepts every document an older one accepted, and an older runtime that is handed the new field
+refuses it with exit 2, which fails closed. An older terminus accepts a clean receipt the newer
+audit wrote, because `landed === claims` holds.

@@ -285,12 +285,32 @@ test("landing in a round compares each dirty claimed file with the round-start s
       "CLAIM RETRACTED — R1-F3 (line 4, correction line 9): docs/x.md",
       "CLAIM CORRECTION IGNORED — line 10: it names one entry twice",
       "EDIT LANDING AUDIT ROOT — graded the chain work tree .claude/worktrees/w",
+      "EDIT SUPERSEDED — S1: src/edited.js, replaced by R1-F1",
     ],
     round,
     start,
     current,
   });
-  assert.equal(notices.carried.length, 3);
+  assert.equal(notices.carried.length, 4);
+});
+
+test("a carried EDIT SUPERSEDED verdict reaches the caller and counts for no claim of the round", () => {
+  const round = lib.parseRound("1");
+  const start = { at: 0, truncated: 0, files: { "src/edited.js": "sha256:old" } };
+  const current = { "src/edited.js": "sha256:new" };
+  const verdict = "EDIT SUPERSEDED — S1: src/edited.js, replaced by R1-F1";
+  const result = lib.resolveLanding({
+    auditLines: [
+      verdict,
+      "PENDING PREDICATE — R1-F1: src/edited.js was already dirty before this round; union membership is not evidence — re-read the target predicate",
+    ],
+    round,
+    start,
+    current,
+  });
+  assert.deepEqual(result.carried.filter((line) => line.startsWith("EDIT SUPERSEDED")), [verdict]);
+  assert.deepEqual(result.steps.map((step) => [step.step, step.state]), [["R1-F1", "landed"]]);
+  assert.equal(result.otherPending, 0);
 });
 
 test("without a round-start snapshot no claim of the round counts as landed", () => {

@@ -151,9 +151,11 @@ with `cp -Rc` into the run directory and passes `-clonedSourcePackagesDirPath` w
 - The driver-fence bullet of `rules/drivers.md` §3 and the last paragraph of
   `rules/browser-verification.md` §1 ↔ the cause list that `rules/acceptance-consent.md` owns
   and the other sites that spell it (`.claude/rules/acceptance-verification-gate.md` names them
-  under "A driver fence is a cause of its own") ↔ `serviceWorkers: 'block'` in
-  `scripts/verify-browser-config.js` ↔ `P10o` and `P10p`, of which `P10o` fails once the helper
-  stops writing the block.
+  under "A driver fence is a cause of its own") ↔ `serviceWorkers: 'allow'` in
+  `scripts/verify-browser-config.js` ↔ `P10o` and `P10p`, of which `P10o` pins the value the
+  helper writes. No driver has a fence today, so that bullet and the owner file name the category
+  without an instance, and the last paragraph of section 1 is the rule for a page a service
+  worker answers from its cache.
 
 **Known gaps, accepted and named:**
 

@@ -24,6 +24,13 @@ const SUBAGENT = Object.freeze({ agent_id: 'agent-1', agent_type: 'general-purpo
 const LOCAL_TARGET = Object.freeze({ origin: 'http://127.0.0.1:4300', evidenceMode: 'declared-safe' });
 const LEGACY_LOCAL_TARGET = Object.freeze({ origin: 'http://127.0.0.1:4300', routes: ['/', '/login'], evidenceMode: 'declared-safe' });
 const DENIED = 'Zensu browser consent gate denied the playwright-cli call: ';
+const FENCE_PROXY_ARG = '--proxy-server=http://zensu-fence.invalid:9';
+const RUN_CONFIG_REMEDY = 'write the run config again with the run-config helper of this installation';
+const CONTEXT_FAULT = `the run config must allow service workers and set nothing else on the context; ${RUN_CONFIG_REMEDY}`;
+const ARGUMENT_COUNT_FAULT = `the run config launch arguments must be exactly the fence proxy, its bypass list and the resolver rules; ${RUN_CONFIG_REMEDY}`;
+const PROXY_FAULT = `the run config must send every connection to the fence proxy http://zensu-fence.invalid:9 and name no other proxy and no fallback; ${RUN_CONFIG_REMEDY}`;
+const BYPASS_FAULT = `the run config proxy bypass list is not the one its allowed origins derive: <-loopback> first, then one host:port entry per origin; ${RUN_CONFIG_REMEDY}`;
+const RESOLVER_FAULT = `the run config resolver rules are not the ones its allowed origins and pins derive: the pins, the catch-all MAP * ^NOTFOUND and one EXCLUDE per localhost or address-literal host; ${RUN_CONFIG_REMEDY}`;
 
 function tempDir(t, prefix = 'zensu-consent-') {
   const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
@@ -899,6 +906,47 @@ test('open refuses an ambient PLAYWRIGHT_MCP_ override and a global config that 
   assert.equal(denied(openCommand(file, 'http://127.0.0.1:4200/'), { env }), REASONS.GLOBAL_BROWSER_NOT_CHROMIUM);
 });
 
+test('open refuses a launch environment that takes service-worker requests out of request interception, with a text of its own', (t) => {
+  const { file } = runConfig(t, ['http://127.0.0.1:4200']);
+  const env = isolatedEnv(t);
+  const name = 'PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK';
+  const text = `the launch environment sets ${name}, which takes the requests of a service worker out of the request interception the run config relies on`;
+  for (const value of ['1', '0', 'false', 'x']) {
+    assert.equal(denied(openCommand(file, 'http://127.0.0.1:4200/'), { env: { ...env, [name]: value } }), text, value);
+  }
+  assert.equal(denied(openCommand(file), { env: { ...env, [name]: '1' } }), text);
+  assert.equal(decide(openCommand(file, 'http://127.0.0.1:4200/'), { env: { ...env, [name]: '' } }).verdict, 'ask');
+  assert.equal(decide(openCommand(file, 'http://127.0.0.1:4200/'), { env: { ...env, [`${name}_X`]: '1' } }).verdict, 'ask');
+  assert.equal(decide(cli('goto http://127.0.0.1:4200/'), { env: { ...env, [name]: '1' } }).verdict, 'ask');
+  assert.equal(denied(`${name}=1 ${openCommand(file, 'http://127.0.0.1:4200/')}`, { env }), REASONS.ENV_ASSIGNMENT);
+  assert.equal(denied(`env ${name}=1 ${openCommand(file, 'http://127.0.0.1:4200/')}`, { env }), REASONS.ENV_ASSIGNMENT);
+  assert.equal(denied(`export ${name}=1; ${openCommand(file, 'http://127.0.0.1:4200/')}`, { env }), REASONS.ENV_BUILTIN);
+  assert.doesNotMatch(text, /overrides the run config/);
+  assert.equal(REASONS.BROWSER_NOT_CHROMIUM,
+    'the run config fences the browser with Chromium switches, so --browser must name a chrome, msedge or chromium channel');
+  assert.equal(REASONS.GLOBAL_BROWSER_NOT_CHROMIUM,
+    'the global playwright-cli config selects a browser other than chromium, which ignores the Chromium switches the run config fences the browser with');
+});
+
+test('the launch environment check folds the letter case of a variable name on Windows only, as Windows reads environment names', (t) => {
+  const name = consent.WORKER_NETWORK_ENV;
+  const folded = 'Playwright_Disable_Service_Worker_Network';
+  const text = `the launch environment sets ${name}, which takes the requests of a service worker out of the request interception the run config relies on`;
+  assert.equal(consent.ambientOverride({ [folded]: '1' }, 'win32'), name);
+  assert.equal(consent.ambientOverride({ [folded]: '1' }, 'darwin'), '');
+  assert.equal(consent.ambientOverride({ [folded]: '1' }, 'linux'), '');
+  assert.equal(consent.ambientOverride({ [folded]: '' }, 'win32'), '');
+  assert.equal(consent.ambientOverride({ [name]: '1' }, 'linux'), name);
+  assert.equal(consent.ambientOverride({ playwright_mcp_config: 'x' }, 'win32'), 'playwright_mcp_config');
+  assert.equal(consent.ambientOverride({ playwright_mcp_config: 'x' }, 'linux'), '');
+  assert.equal(consent.ambientDeny(name), text);
+  assert.equal(consent.ambientDeny('playwright_mcp_config'), 'the launch environment sets playwright_mcp_config, which overrides the run config');
+  const { file } = runConfig(t, ['http://127.0.0.1:4200']);
+  const env = isolatedEnv(t);
+  assert.equal(denied(openCommand(file, 'http://127.0.0.1:4200/'), { env: { ...env, [folded]: '1' }, platform: 'win32' }), text);
+  assert.equal(decide(openCommand(file, 'http://127.0.0.1:4200/'), { env: { ...env, [folded]: '1' }, platform: 'darwin' }).verdict, 'ask');
+});
+
 test('a first loopback navigation asks with a prompt naming the session and the origin, never a route', () => {
   const decision = decide(cli('goto http://127.0.0.1:4200/teams/t-81/sprints/s-7'));
   assert.equal(decision.verdict, 'ask');
@@ -1321,6 +1369,24 @@ test('runConfigShape requires a resolver pin for every remote hostname and refus
   assert.equal(denied(openCommand(plain.file), { env, payload: HUMAN }), FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
 });
 
+test('runConfigShape refuses a host that starts with a dot or holds a list separator under every scheme, and keeps a trailing dot', (t) => {
+  const env = isolatedEnv(t);
+  const dotted = runConfig(t, ['https://.example.com'], ['MAP .example.com 93.184.216.34']);
+  assert.deepEqual(consent.readRunConfig(dotted.file), { ok: false, fault: `https://.example.com: ${FLOOR_REASONS.HOSTNAME_PATTERN}` });
+  assert.equal(denied(openCommand(dotted.file), { env, payload: HUMAN }), `https://.example.com: ${FLOOR_REASONS.HOSTNAME_PATTERN}`);
+  for (const origin of ['http://.example.com', 'ws://.example.com', 'http://a;b.example.com', 'http://a,b.example.com', 'http://*.example.com']) {
+    assert.deepEqual(consent.readRunConfig(runConfig(t, [origin]).file), { ok: false, fault: `${origin}: ${FLOOR_REASONS.HOSTNAME_PATTERN}` }, origin);
+  }
+  const trailing = runConfig(t, ['https://app.example.com.'], ['MAP app.example.com. 93.184.216.34']);
+  const shape = consent.readRunConfig(trailing.file);
+  assert.equal(shape.ok, true, shape.fault);
+  assert.deepEqual(trailing.config.browser.launchOptions.args, [
+    FENCE_PROXY_ARG,
+    '--proxy-bypass-list=<-loopback>;app.example.com.:443',
+    '--host-resolver-rules=MAP app.example.com. 93.184.216.34,MAP * ^NOTFOUND',
+  ]);
+});
+
 test('the remote prompt names the origin as parsed, never promises a session-long grant for it, and leaves the loopback prompt unchanged', () => {
   const single = consent.promptText({ origins: ['https://app.example.com'], session: SESSION, remote: ['https://app.example.com'] });
   assert.equal(single, [
@@ -1382,7 +1448,7 @@ test('a run config written from buildConfig passes and reports its origins and p
   assert.deepEqual(read.origins, shape.origins);
 });
 
-test('the run config refuses extra keys, a proxy and a loosened browser or context block', (t) => {
+test('the run config refuses extra keys, a proxy block and a loosened browser or context block', (t) => {
   const { file, config } = runConfig(t, ['http://127.0.0.1:4200']);
   const variant = (mutate) => {
     const copy = structuredClone(config);
@@ -1394,15 +1460,149 @@ test('the run config refuses extra keys, a proxy and a loosened browser or conte
   assert.equal(variant((c) => { c.browser.isolated = false; }), 'the run config must keep the browser isolated');
   assert.equal(variant((c) => { c.browser.launchOptions.proxy = { server: 'http://proxy.example.com:8080' }; }),
     'the run config launchOptions carry unexpected keys');
-  assert.equal(variant((c) => { c.browser.launchOptions.args = ['--proxy-server=http://proxy.example.com:8080']; }),
-    'the run config launch arguments must be --no-proxy-server and at most one resolver pin list');
-  assert.equal(variant((c) => { c.browser.launchOptions.args.push('--proxy-server=http://proxy.example.com:8080'); }),
-    'the run config carries a launch argument other than a resolver pin list');
-  assert.equal(variant((c) => { c.browser.contextOptions.serviceWorkers = 'allow'; }),
-    'the run config must block service workers and set nothing else on the context');
-  assert.equal(variant((c) => { c.browser.contextOptions.viewport = { width: 1, height: 1 }; }),
-    'the run config must block service workers and set nothing else on the context');
+  assert.equal(variant((c) => { c.browser.contextOptions.serviceWorkers = 'block'; }), CONTEXT_FAULT);
+  assert.equal(variant((c) => { delete c.browser.contextOptions.serviceWorkers; }), CONTEXT_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions = {}; }), CONTEXT_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.viewport = { width: 1, height: 1 }; }), CONTEXT_FAULT);
   assert.equal(variant((c) => { c.network.blockedOrigins = []; }), 'the run config network block carries unexpected keys');
+});
+
+test('fenceArgs derives the fence proxy, one bypass entry per host and port and one resolver rule per host', () => {
+  const args = (origins, pins = []) => consent.fenceArgs(origins, new Map(pins));
+  const pin = [['app.example.com', '93.184.216.34']];
+  assert.deepEqual(args(['https://app.example.com', 'http://localhost:9090'], pin), [
+    FENCE_PROXY_ARG,
+    '--proxy-bypass-list=<-loopback>;app.example.com:443;localhost:9090',
+    '--host-resolver-rules=MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE localhost',
+  ]);
+  const table = [
+    [['http://127.0.0.1:4200'], [], '<-loopback>;127.0.0.1:4200', 'MAP * ^NOTFOUND,EXCLUDE 127.0.0.1'],
+    [['http://[::1]:4200'], [], '<-loopback>;[::1]:4200', 'MAP * ^NOTFOUND,EXCLUDE ::1'],
+    [['http://localhost:4200'], [], '<-loopback>;localhost:4200', 'MAP * ^NOTFOUND,EXCLUDE localhost'],
+    [['https://app.example.com'], pin, '<-loopback>;app.example.com:443', 'MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND'],
+    [['https://app.example.com:8443'], pin, '<-loopback>;app.example.com:8443', 'MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND'],
+    [['https://93.184.216.34'], [], '<-loopback>;93.184.216.34:443', 'MAP * ^NOTFOUND,EXCLUDE 93.184.216.34'],
+    [['http://127.0.0.1'], [], '<-loopback>;127.0.0.1:80', 'MAP * ^NOTFOUND,EXCLUDE 127.0.0.1'],
+    [['ws://127.0.0.1', 'wss://app.example.com'], pin, '<-loopback>;127.0.0.1:80;app.example.com:443',
+      'MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE 127.0.0.1'],
+    [['http://localhost:4200', 'http://localhost:9090'], [], '<-loopback>;localhost:4200;localhost:9090', 'MAP * ^NOTFOUND,EXCLUDE localhost'],
+    [['https://app.example.com', 'wss://app.example.com'], pin, '<-loopback>;app.example.com:443', 'MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND'],
+    [['http://localhost:8080', 'ws://localhost:8080'], [], '<-loopback>;localhost:8080', 'MAP * ^NOTFOUND,EXCLUDE localhost'],
+    [['https://app.example.com'], [['app.example.com', '2606:2800:220:1:248:1893:25c8:1946']], '<-loopback>;app.example.com:443',
+      'MAP app.example.com [2606:2800:220:1:248:1893:25c8:1946],MAP * ^NOTFOUND'],
+    [['http://app.example.com'], [], '<-loopback>;app.example.com:80', 'MAP * ^NOTFOUND'],
+    [['http://localhost:9090', 'https://b.example.com', 'http://127.0.0.1:4200', 'https://a.example.com', 'http://[::1]:4201'],
+      [['a.example.com', '93.184.216.34'], ['b.example.com', '93.184.216.35']],
+      '<-loopback>;localhost:9090;b.example.com:443;127.0.0.1:4200;a.example.com:443;[::1]:4201',
+      'MAP b.example.com 93.184.216.35,MAP a.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE localhost,EXCLUDE 127.0.0.1,EXCLUDE ::1'],
+    [['http://localhost:4200'], [['localhost', '93.184.216.34'], ['other.example.com', '93.184.216.34']], '<-loopback>;localhost:4200',
+      'MAP * ^NOTFOUND,EXCLUDE localhost'],
+  ];
+  for (const [origins, pins, bypass, rules] of table) {
+    assert.deepEqual(args(origins, pins), [FENCE_PROXY_ARG, `--proxy-bypass-list=${bypass}`, `--host-resolver-rules=${rules}`], origins.join(' '));
+  }
+  assert.deepEqual(consent.resolverPin('MAP app.example.com 93.184.216.34'), { host: 'app.example.com', address: '93.184.216.34' });
+  assert.deepEqual(consent.resolverPin('MAP APP.example.com [2606:2800:220:1:248:1893:25c8:1946]'),
+    { host: 'app.example.com', address: '2606:2800:220:1:248:1893:25c8:1946' });
+  for (const rule of ['MAP * ^NOTFOUND', 'EXCLUDE localhost', 'MAP app.example.com', 'MAP a b c', '', 7]) {
+    assert.equal(consent.resolverPin(rule), null, String(rule));
+  }
+});
+
+test('the run config refuses launch arguments that differ from the derivation, each with a fixed fault that names the remedy', (t) => {
+  const { file, config } = runConfig(t, ['https://app.example.com', 'http://localhost:9090'], ['MAP app.example.com 93.184.216.34']);
+  const [proxy, bypass, rules] = config.browser.launchOptions.args;
+  assert.deepEqual([proxy, bypass, rules], [
+    FENCE_PROXY_ARG,
+    '--proxy-bypass-list=<-loopback>;app.example.com:443;localhost:9090',
+    '--host-resolver-rules=MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE localhost',
+  ]);
+  assert.equal(consent.runConfigShape(config, file).ok, true);
+  const withArgs = (args) => {
+    const copy = structuredClone(config);
+    copy.browser.launchOptions.args = args;
+    return consent.runConfigShape(copy, file).fault;
+  };
+  const list = (text) => `--proxy-bypass-list=${text}`;
+  const resolver = (text) => `--host-resolver-rules=${text}`;
+  for (const args of [
+    ['--no-proxy-server'],
+    ['--no-proxy-server', resolver('MAP app.example.com 93.184.216.34')],
+    [proxy, bypass],
+    [proxy, bypass, rules, '--proxy-server=http://proxy.example.com:8080'],
+    [proxy, bypass, rules, rules],
+    [proxy, bypass, 7],
+    [],
+    'x',
+    null,
+  ]) {
+    assert.equal(withArgs(args), ARGUMENT_COUNT_FAULT, JSON.stringify(args));
+  }
+  for (const first of [
+    '--proxy-server=http://zensu-fence.invalid:9,direct://',
+    '--proxy-server=http://zensu-fence.invalid:9;direct://',
+    '--proxy-server=http://proxy.example.com:8080',
+    '--proxy-server=http://zensu-fence.invalid:9 ',
+    '--proxy-server=zensu-fence.invalid:9',
+    '--no-proxy-server',
+    bypass,
+  ]) {
+    assert.equal(withArgs([first, bypass, rules]), PROXY_FAULT, first);
+  }
+  for (const second of [
+    list('app.example.com:443;localhost:9090'),
+    list('app.example.com:443;<-loopback>;localhost:9090'),
+    list('<-loopback>;app.example.com;localhost:9090'),
+    list('<-loopback>;app.example.com:443;localhost'),
+    list('<-loopback>;app.example.com:443'),
+    list('<-loopback>;app.example.com:443;localhost:9090;other.example.com:443'),
+    list('<-loopback>;app.example.com:443;localhost:9090;localhost:9091'),
+    list('<-loopback>;localhost:9090;app.example.com:443'),
+    list('<-loopback>;https://app.example.com:443;localhost:9090'),
+    list('<-loopback>;.example.com:443;localhost:9090'),
+    list('<-loopback>;*;app.example.com:443;localhost:9090'),
+    list('<-loopback>;app.example.com:443;localhost:9090;<local>'),
+    list('<-loopback>;app.example.com:443;localhost:9090;'),
+    list('<-loopback>,app.example.com:443,localhost:9090'),
+    list(''),
+    proxy,
+    rules,
+  ]) {
+    assert.equal(withArgs([proxy, second, rules]), BYPASS_FAULT, second);
+  }
+  for (const third of [
+    resolver('MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND'),
+    resolver('MAP app.example.com 93.184.216.34,EXCLUDE localhost'),
+    resolver('MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE localhost,EXCLUDE app.example.com'),
+    resolver('MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE localhost,EXCLUDE other.example.com'),
+    resolver('MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE localhost,EXCLUDE *'),
+    resolver('MAP * ^NOTFOUND,MAP app.example.com 93.184.216.34,EXCLUDE localhost'),
+    resolver('MAP app.example.com 93.184.216.34,EXCLUDE localhost,MAP * ^NOTFOUND'),
+    resolver('MAP APP.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE localhost'),
+    resolver('MAP app.example.com [93.184.216.34],MAP * ^NOTFOUND,EXCLUDE localhost'),
+    resolver('MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE localhost,'),
+    resolver('MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE localhost,MAP * ^NOTFOUND'),
+    resolver('MAP app.example.com 93.184.216.34, MAP * ^NOTFOUND,EXCLUDE localhost'),
+    '--host-rules=MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE localhost',
+    bypass,
+    proxy,
+  ]) {
+    assert.equal(withArgs([proxy, bypass, third]), RESOLVER_FAULT, third);
+  }
+  for (const fault of [CONTEXT_FAULT, ARGUMENT_COUNT_FAULT, PROXY_FAULT, BYPASS_FAULT, RESOLVER_FAULT]) {
+    assert.equal(fault.endsWith(`; ${RUN_CONFIG_REMEDY}`), true, fault);
+  }
+  const literal = runConfig(t, ['https://93.184.216.34', 'http://[::1]:4200']);
+  assert.deepEqual(literal.config.browser.launchOptions.args.slice(1), [
+    '--proxy-bypass-list=<-loopback>;93.184.216.34:443;[::1]:4200',
+    '--host-resolver-rules=MAP * ^NOTFOUND,EXCLUDE 93.184.216.34,EXCLUDE ::1',
+  ]);
+  assert.equal(consent.runConfigShape(literal.config, literal.file).ok, true);
+  for (const third of ['MAP * ^NOTFOUND,EXCLUDE 93.184.216.34', 'MAP * ^NOTFOUND,EXCLUDE 93.184.216.34,EXCLUDE [::1]', 'MAP * ^NOTFOUND']) {
+    const copy = structuredClone(literal.config);
+    copy.browser.launchOptions.args[2] = resolver(third);
+    assert.equal(consent.runConfigShape(copy, literal.file).fault, RESOLVER_FAULT, third);
+  }
 });
 
 test('the run config refuses an empty, oversized, invalid, non-canonical or repeated origin list', (t) => {
@@ -1420,27 +1620,39 @@ test('the run config refuses an empty, oversized, invalid, non-canonical or repe
 });
 
 test('the run config pins only public addresses, only for hosts it allows, once each', (t) => {
-  const { file, config } = runConfig(t, ['https://app.example.com']);
-  const withRules = (rules) => {
-    const copy = structuredClone(config);
-    copy.browser.launchOptions.args = ['--no-proxy-server', `--host-resolver-rules=${rules}`];
-    return consent.runConfigShape(copy, file);
+  const { file, config } = runConfig(t, ['https://app.example.com'], ['MAP app.example.com 93.184.216.34']);
+  const withRules = (rules, base = config, baseFile = file) => {
+    const copy = structuredClone(base);
+    copy.browser.launchOptions.args[2] = `--host-resolver-rules=${rules}`;
+    return consent.runConfigShape(copy, baseFile);
   };
-  const v4 = withRules('MAP app.example.com 93.184.216.34');
-  assert.equal(v4.ok, true);
+  const v4 = withRules('MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND');
+  assert.equal(v4.ok, true, v4.fault);
   assert.deepEqual([...v4.pins], [['app.example.com', '93.184.216.34']]);
-  assert.deepEqual([...withRules('MAP app.example.com [2606:2800:220:1:248:1893:25c8:1946]').pins],
-    [['app.example.com', '2606:2800:220:1:248:1893:25c8:1946']]);
-  assert.equal(withRules('MAP app.example.com 10.0.0.5').fault, 'the run config pins a host to an address that is not globally routable');
-  assert.equal(withRules('MAP app.example.com 127.0.0.1').fault, 'the run config pins a host to an address that is not globally routable');
-  assert.equal(withRules('MAP other.example.com 93.184.216.34').fault, 'the run config pins a host that is not among its allowed origins');
-  assert.equal(withRules('MAP 93.184.216.34 93.184.216.34').fault, 'the run config pins an address literal or pins a host twice');
-  assert.equal(withRules('MAP app.example.com 93.184.216.34,MAP app.example.com 93.184.216.35').fault,
-    'the run config pins an address literal or pins a host twice');
-  assert.equal(withRules('EXCLUDE app.example.com').fault, 'the run config carries a resolver rule other than MAP <host> <address>');
+  const v6 = withRules('MAP app.example.com [2606:2800:220:1:248:1893:25c8:1946],MAP * ^NOTFOUND');
+  assert.equal(v6.ok, true, v6.fault);
+  assert.deepEqual([...v6.pins], [['app.example.com', '2606:2800:220:1:248:1893:25c8:1946']]);
+  assert.equal(withRules('MAP app.example.com 2606:2800:220:1:248:1893:25c8:1946,MAP * ^NOTFOUND').fault, RESOLVER_FAULT);
+  const unroutable = 'the run config pins a host to an address that is not globally routable';
+  assert.equal(withRules('MAP app.example.com 10.0.0.5,MAP * ^NOTFOUND').fault, unroutable);
+  assert.equal(withRules('MAP app.example.com 127.0.0.1,MAP * ^NOTFOUND').fault, unroutable);
+  assert.equal(withRules('MAP app.example.com ^NOTFOUND,MAP * ^NOTFOUND').fault, unroutable);
+  assert.equal(withRules('MAP app.example.com 93.184.216.34,MAP * ~NOTFOUND').fault, unroutable);
+  const stranger = 'the run config pins a host that is not among its allowed origins';
+  assert.equal(withRules('MAP app.example.com 93.184.216.34,MAP other.example.com 93.184.216.34,MAP * ^NOTFOUND').fault, stranger);
+  assert.equal(withRules('MAP app.example.com 93.184.216.34,MAP * 93.184.216.34,MAP * ^NOTFOUND').fault, stranger);
+  const twice = 'the run config pins an address literal or pins a host twice';
+  assert.equal(withRules('MAP 93.184.216.34 93.184.216.34,MAP * ^NOTFOUND').fault, twice);
+  assert.equal(withRules('MAP app.example.com 93.184.216.34,MAP app.example.com 93.184.216.35,MAP * ^NOTFOUND').fault, twice);
+  const unpinned = 'https://app.example.com: the run config carries no resolver pin for this remote host';
+  assert.equal(withRules('MAP * ^NOTFOUND').fault, unpinned);
+  assert.equal(withRules('MAP * ^NOTFOUND,EXCLUDE app.example.com').fault, unpinned);
+  const loopback = runConfig(t, ['http://localhost:4200'], ['MAP localhost 93.184.216.34']);
+  assert.deepEqual(loopback.config.browser.launchOptions.args.slice(1),
+    ['--proxy-bypass-list=<-loopback>;localhost:4200', '--host-resolver-rules=MAP * ^NOTFOUND,EXCLUDE localhost']);
+  assert.equal(consent.runConfigShape(loopback.config, loopback.file).ok, true);
   for (const rule of ['MAP localhost 93.184.216.34', 'MAP LOCALHOST 93.184.216.34']) {
-    const loopback = runConfig(t, ['http://localhost:4200'], [rule]);
-    assert.equal(consent.runConfigShape(loopback.config, loopback.file).fault,
+    assert.equal(withRules(`${rule},MAP * ^NOTFOUND,EXCLUDE localhost`, loopback.config, loopback.file).fault,
       'the run config pins localhost, which the browser must resolve to loopback itself', rule);
   }
 });
@@ -2174,10 +2386,8 @@ test('a run config restores state only from auth/storage-state.json beside it, i
   assert.equal(variant((c) => { c.browser.contextOptions.storageState = path.join(run.runDir, 'storage-state.json'); }), STATE_SHAPE_FAULT);
   assert.equal(variant((c) => { c.browser.contextOptions.storageState = path.join(run.runDir, 'auth', 'other.json'); }), STATE_SHAPE_FAULT);
   assert.equal(variant((c) => { c.browser.contextOptions.storageState = path.join(plain.runDir, 'auth', 'storage-state.json'); }, plain), STATE_SHAPE_FAULT);
-  assert.equal(variant((c) => { c.browser.contextOptions.viewport = { width: 1, height: 1 }; }),
-    'the run config must block service workers and set nothing else on the context');
-  assert.equal(variant((c) => { c.browser.contextOptions.serviceWorkers = 'allow'; }),
-    'the run config must block service workers and set nothing else on the context');
+  assert.equal(variant((c) => { c.browser.contextOptions.viewport = { width: 1, height: 1 }; }), CONTEXT_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.serviceWorkers = 'block'; }), CONTEXT_FAULT);
 });
 
 test('a restoring open runs only on a zensu-verify-auth session, asks with the signed-in sentence and is remembered only by a restored record', (t) => {

@@ -1017,7 +1017,7 @@ fi
 eq "LV32b a re-run finds every part in the publisher's own notes and posts nothing new" \
   "$(grep -c -- '--method POST' "$WORK/live/foreign/calls" || true)" "6"
 
-mkdir -p "$WORK/gh/bin" "$WORK/gh/fixture" "$WORK/gh/listing" "$WORK/gh/fail" "$WORK/gh/reject" "$WORK/gh/empty" "$WORK/gh/inventory"
+mkdir -p "$WORK/gh/bin" "$WORK/gh/fixture" "$WORK/gh/listing" "$WORK/gh/fail" "$WORK/gh/reject" "$WORK/gh/empty" "$WORK/gh/inventory" "$WORK/gh/pinned"
 RM_HEX_C="$(printf '%064d' 0 | tr 0 c)"
 RM_HEX_D="$(printf '%064d' 0 | tr 0 d)"
 RM_HEX_E="$(printf '%064d' 0 | tr 0 e)"
@@ -1040,12 +1040,13 @@ A1="$GH_A1" A2="$GH_A2" B1="$GH_B1" C1="$GH_C1" DIR="$WORK/gh" node -e '
   fs.writeFileSync(e.DIR+"/empty.json",page([],false,null,false));'
 RM_MODEL="$PLUGIN_DIR/tests/structure/lib-fake-gh-graphql.js"
 {
-  printf '%s\n' '#!/bin/bash' 'set -u' "printf '%s\\n' \"\$*\" >> \"\$FAKE_DIR/calls\""
+  gh_host_fake_header
+  printf '%s\n' 'set -u' "printf '%s\\n' \"\$*\" >> \"\$FAKE_DIR/calls\""
   printf 'exec node %q %q "$@"\n' "$RM_MODEL" "$WORK/gh"
 } > "$WORK/gh/bin/gh"
 chmod +x "$WORK/gh/bin/gh"
 rm_pages() {
-  FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" "$@" 2>/dev/null | node -e '
+  GH_HOST= GH_REPO= FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" "$@" 2>/dev/null | node -e '
     var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
       var doc;try{doc=JSON.parse(s);}catch(_){process.stdout.write("not one JSON document");return;}
       var pages=Array.isArray(doc)?doc:[doc];
@@ -1059,7 +1060,7 @@ rm_probe() {
 }
 rm_run() {
   local err rc=0
-  err="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" "$@" 2>&1 >/dev/null)" || rc=$?
+  err="$(GH_HOST= GH_REPO= FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" "$@" 2>&1 >/dev/null)" || rc=$?
   printf 'rc=%s %s' "$rc" "$err"
 }
 rm_refusal() {
@@ -1085,7 +1086,7 @@ GH_PAGE1="PRR_1,PRR_2,PRR_3,PRR_4"
 GH_BOTH="2 page(s) $GH_PAGE1 / PRR_5,PRR_6"
 GH_BODIES="PRR_1+body,PRR_2+body,PRR_3+body,PRR_4+body"
 RM_PAGING_QUERY="$(rm_query ',$endCursor:String' '(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}')"
-GH_PAGED="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate --slurp -f "$(rm_query ',$endCursor:String' '(after:$endCursor){nodes{id body url}pageInfo{hasNextPage endCursor}}')" -f owner=acme -f name=widget -F num=42 2>/dev/null)"
+GH_PAGED="$(GH_HOST= GH_REPO= FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate --slurp -f "$(rm_query ',$endCursor:String' '(after:$endCursor){nodes{id body url}pageInfo{hasNextPage endCursor}}')" -f owner=acme -f name=widget -F num=42 2>/dev/null)"
 eq "RM1 the fake gh slurps two review pages for a query that pages: a cross-page duplicate, a later part, a marker only each page carries, an unmarked review and each page's pageInfo" \
   "$(printf '%s' "$GH_PAGED" | A1="$GH_A1" A2="$GH_A2" B1="$GH_B1" C1="$GH_C1" node -e '
     var e=process.env,s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
@@ -1203,8 +1204,8 @@ GH_WHO="$GH_WHO | other number: $(rm_run api graphql --paginate --slurp -f "$RM_
 GH_WHO="$GH_WHO | renamed: $(rm_pages api graphql --paginate --slurp -f 'query=query($login:String!,$repo:String!,$number:Int!,$endCursor:String){repository(owner:$login,name:$repo){pullRequest(number:$number){reviews(first:100,after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}}}' -f login=acme -f repo=widget -F number=42 -f owner=octo -f name=gadget -F num=43)"
 eq "RM2p the fake gh resolves the pull request from the variables the query binds to repository and pullRequest and fails for another one with the message of GitHub: a swapped owner and name, another owner, name or number, and renamed variables beside unbound wrong ones" "$GH_WHO" \
   "swapped: rc=1 gh: Could not resolve to a Repository with the name 'widget/acme'. | other owner: rc=1 gh: Could not resolve to a Repository with the name 'octo/widget'. | other name: rc=1 gh: Could not resolve to a Repository with the name 'acme/gadget'. | other number: rc=1 gh: Could not resolve to a PullRequest with the number of 43. | renamed: $GH_BOTH"
-GH_ALONE="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 2>/dev/null)"
-GH_SLURPED="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 2>/dev/null)"
+GH_ALONE="$(GH_HOST= GH_REPO= FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 2>/dev/null)"
+GH_SLURPED="$(GH_HOST= GH_REPO= FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 2>/dev/null)"
 eq "RM2q the fake gh prints the pages back to back for --paginate without --slurp, as gh 2.101.0 does" \
   "$(ALONE="$GH_ALONE" SLURPED="$GH_SLURPED" node -e '
     var e=process.env,pages;try{pages=JSON.parse(e.SLURPED);}catch(_){pages=[];}
@@ -1276,6 +1277,12 @@ eq "RM11 the GitHub inventory fetch that --reconcile-review shares selects id, b
       process.stdout.write(pages.length+" pages | "+nodes.length+" reviews | "+nodes.filter(function(r){return typeof r.id==="string"&&typeof r.body==="string"&&typeof r.url==="string";}).length+" with id, body and url");
     });' 2>/dev/null)" \
   "2 pages | 6 reviews | 6 with id, body and url"
+GH_PIN_OUT="$(GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/gh/pinned/hosts" FAKE_DIR="$WORK/gh/pinned" PATH="$WORK/gh/bin:$PATH" \
+  bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 2>/dev/null)"
+eq "RM12 --review-markers on GitHub lists the same markers while GH_HOST names another host" \
+  "$(printf '%s\n' "$GH_PIN_OUT" | LC_ALL=C sort)" "$(printf '%s\n' "$GH_A1" "$GH_B1" "$GH_C1" | LC_ALL=C sort)"
+eq "RM12b every gh call of that listing reaches github.com, the host of the remote" \
+  "$(cut -d' ' -f1 "$WORK/gh/pinned/hosts" 2>/dev/null | LC_ALL=C sort -u)" "github.com"
 
 rm -rf "$WORK"
 
