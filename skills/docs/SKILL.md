@@ -89,7 +89,7 @@ required (`require_feature_page = false`, i.e. wiki-only is opt-in).
   writing a unique per-feature path (`docs/features/<KEY-N>-<slug>.md`) — never a
   shared component README. This is the precise false-green the gate now rejects.
 - **Rule 2 — correct `doc_type`** derived from the feature's `feature_scope` (see
-  the table below).
+  Doc type by feature scope below).
 - **Rule 3 — grounded in real code, never a stub.** The scorer cannot see content
   (the content-length lever was deliberately dropped), so quality is a
   **discipline gate**, not a mechanical one: every doc must describe what THIS
@@ -98,21 +98,14 @@ required (`require_feature_page = false`, i.e. wiki-only is opt-in).
 
 ## Doc type by feature scope
 
-Derive the required `doc_type`(s) from the feature's `feature_scope` (read it in
-Phase 2). Author one doc per required type.
-
-| `feature_scope` | Required `doc_type`(s) | Audience |
-|---|---|---|
-| `default` | `user_facing` | `end_user` |
-| `api` | `api_reference` | `developer` |
-| `internal_only` | `adr` | `internal` |
-| `public_facing` | `user_facing` — **plus** `tutorial` when `estimated_effort` ∈ {L, XL} | `user_facing`→`end_user`; `tutorial`→`developer` |
-
-If `feature_scope` is absent (an older backend), default to `user_facing` and say
-so. When a `public_facing` feature's `estimated_effort` is unknown, author the
-`user_facing` doc and note that the `tutorial` was skipped for lack of an effort
-signal — do not guess. The eight canonical doc types and their required focus live
-in `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`.
+The required `doc_type`(s) and their audience follow from the feature's
+`feature_scope` (read it in Phase 2) and, for `public_facing`, its
+`estimated_effort`. **Read the table under "Required doc types (the release gate)"
+in `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md` before you name a target
+type** (Phase 1 step 3 for a batch, Phase 2 for one feature), with its rules for an
+unset scope and an unknown effort. That table is the one copy of the rule, and
+`/zensu:implement` Step 6 reads it too. Author one doc per required type. The eight
+canonical doc types and their required focus live in the same guide.
 
 ## Workflow
 
@@ -155,8 +148,8 @@ For each feature to document:
 1. `zensu features get <feature-id>` — read `feature_scope`,
    `estimated_effort` (may live on the latest revision), `slug`, `number`,
    `product_id`, and `docs_complete`. Derive the required `doc_type`(s) from the
-   table above. `<feature-id>` must be the feature **UUID** (a slug or KEY-N id
-   fails with `invalid feature id (status 400)`).
+   guide's table (Doc type by feature scope above). `<feature-id>` must be the
+   feature **UUID** (a slug or KEY-N id fails with `invalid feature id (status 400)`).
 2. `zensu doc gen-context <feature-id> --doc-type <type>` — the aggregated
    authoring **context map**: linked source-file paths, symbols, subfeatures,
    security posture, tiers, journeys, existing docs. Per
@@ -262,10 +255,10 @@ zensu link docs <feature-id> \
 the feature's docs score**. For a `public_facing` L/XL feature, publish once per
 required type (`user_facing` and `tutorial`).
 
-> Sibling `/zensu:implement` Step 6 follows the same rule: it updates an existing
-> page with `zensu wiki update` and creates a missing one with `wiki create` or the
-> one-call `--content-file` form of `zensu link docs`. Both produce a feature-linked
-> wiki page.
+> Sibling `/zensu:implement` Step 6 follows the same rules: it takes its doc type(s)
+> from the same guide table, updates an existing page with `zensu wiki update` and
+> creates a missing one with `wiki create` or the one-call `--content-file` form of
+> `zensu link docs`. Both produce a feature-linked wiki page.
 
 **Repo-file mode (`--repo-file`).** Write a **unique per-feature** file, then link
 it:

@@ -1748,6 +1748,117 @@ test('a work-order run reads .zensu/plans/<order>.md and checks its digest only 
   assert.doesNotMatch(missingApproved.lines.join('\n'), /ACCEPTANCE PLAN UNAPPROVED/);
 });
 
+test('record and status carry the plan lookup\'s disclosures on every refusal after the lookup and on none before it', () => {
+  const fixture = runFixture({ store: false });
+  const planPath = path.join(fixture.root, '.zensu', 'plans', `${ORDER_ID}.md`);
+  const planBytes = Buffer.from(planText([['AC-001', 'The order works']]), 'utf8');
+  const specHash = 'c'.repeat(64);
+  sh(fixture.root, 'git commit -q --allow-empty -m next');
+  const head = sh(fixture.root, 'git rev-parse HEAD').trim();
+  const unapproved = { ...withPrHead(fixture.run, head), approvedPlanSha256: specHash, workOrder: { orderId: ORDER_ID, attempt: 1, specHash } };
+  const disclosure = new RegExp(`^ACCEPTANCE PLAN UNAPPROVED — work order ${ORDER_ID} asks for no plan approval, so the criteria of autopilot run ${RUN_ID} come from the session's own plan \\.zensu/plans/${ORDER_ID}\\.md, which no person approved$`);
+  const missingCause = `the plan .zensu/plans/${ORDER_ID}.md does not exist`;
+  const records = path.join(fixture.data, 'acceptance-verify', 'v1', 'records', SESSION);
+  const stored = () => (fs.existsSync(records) ? fs.readdirSync(records).filter((name) => name.endsWith('.json')) : []);
+  const missingStatus = av.status(runBase(fixture, { run: unapproved }));
+  assert.equal(missingStatus.code, 2, missingStatus.lines.join('\n'));
+  assert.equal(missingStatus.lines.length, 2, missingStatus.lines.join('\n'));
+  assert.match(missingStatus.lines[0], disclosure);
+  assert.equal(missingStatus.lines[1], `ACCEPTANCE STATUS — unresolved | ${missingCause}`);
+  const missingRecord = runAttest(fixture, 'AC-001', 'pass', { run: unapproved });
+  assert.equal(missingRecord.code, 1, missingRecord.error);
+  assert.equal(missingRecord.error, missingCause);
+  assert.equal(missingRecord.disclosures.length, 1);
+  assert.match(missingRecord.disclosures[0], disclosure);
+  fs.writeFileSync(planPath, planBytes);
+  const moved = runAttest(fixture, 'AC-001', 'pass', { run: withPrHead(unapproved, fixture.head) });
+  assert.equal(moved.code, 1, moved.error);
+  assert.match(moved.error, new RegExp(`HEAD of the work tree is ${head.slice(0, 12)}, not the pull-request head ${fixture.head.slice(0, 12)};`));
+  assert.equal(moved.disclosures.length, 1);
+  assert.match(moved.disclosures[0], disclosure);
+  const unknown = runAttest(fixture, 'AC-009', 'pass', { run: unapproved });
+  assert.equal(unknown.code, 1, unknown.error);
+  assert.equal(unknown.error, `AC-009 is not an acceptance criterion of .zensu/plans/${ORDER_ID}.md (active: AC-001)`);
+  assert.equal(unknown.disclosures.length, 1);
+  assert.match(unknown.disclosures[0], disclosure);
+  const early = [
+    [runAttest(fixture, 'AC-001', 'maybe', { run: unapproved }), 2, /^--verdict must be one of /],
+    [runAttest(fixture, 'AC-001', 'pass', { run: unapproved, workTreeFault: 'the worktree is gone' }), 2, /^the chain's work tree could not be determined, so no acceptance record can be bound to it: the worktree is gone$/],
+    [runAttest(fixture, 'AC-001', 'pass', { run: unapproved, evidenceText: `used ${FAKE_TOKEN}` }), 1, /^the evidence text matches a secret pattern/],
+  ];
+  for (const [result, code, error] of early) {
+    assert.equal(result.code, code, result.error);
+    assert.match(result.error, error);
+    assert.deepEqual(result.disclosures || [], []);
+  }
+  assert.deepEqual(stored(), []);
+  const approved = { ...unapproved, approvedPlanSha256: sha256(planBytes) };
+  const approvedUnknown = runAttest(fixture, 'AC-009', 'pass', { run: approved });
+  assert.equal(approvedUnknown.code, 1, approvedUnknown.error);
+  assert.deepEqual(approvedUnknown.disclosures, []);
+  const approvedMoved = runAttest(fixture, 'AC-001', 'pass', { run: withPrHead(approved, fixture.head) });
+  assert.equal(approvedMoved.code, 1, approvedMoved.error);
+  assert.deepEqual(approvedMoved.disclosures, []);
+  fs.rmSync(planPath);
+  assert.deepEqual(av.status(runBase(fixture, { run: approved })).lines, [`ACCEPTANCE STATUS — unresolved | ${missingCause}`]);
+  assert.deepEqual(runAttest(fixture, 'AC-001', 'pass', { run: approved }).disclosures, []);
+  const transport = tempDir('transport');
+  fs.writeFileSync(path.join(transport, 'run.json'), JSON.stringify(unapproved));
+  fs.writeFileSync(path.join(transport, 'evidence'), 'Opened the page for AC-001; the snapshot shows it');
+  const env = {
+    ...process.env,
+    ZENSU_AVR_DIR: transport,
+    ZENSU_AVR_PLUGIN_DATA: fixture.data,
+    ZENSU_AVR_SESSION_KEY: SESSION,
+    ZENSU_AVR_PROJECT_ROOT: fixture.root,
+    ZENSU_AVR_RUN: RUN_ID,
+    ZENSU_AVR_AC: 'AC-001',
+    ZENSU_AVR_VERDICT: 'pass',
+    ZENSU_AVR_DRIVER: 'browser',
+    ZENSU_AVR_LABEL: 'zensu-log.sh --acceptance-record',
+  };
+  const shown = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env, encoding: 'utf8' });
+  assert.equal(shown.status, 2, shown.stdout + shown.stderr);
+  const shownLines = shown.stdout.trimEnd().split('\n');
+  assert.equal(shownLines.length, 2, shown.stdout);
+  assert.match(shownLines[0], disclosure);
+  assert.equal(shownLines[1], `ACCEPTANCE STATUS — unresolved | ${missingCause}`);
+  const refused = childProcess.spawnSync(process.execPath, [LIB, 'record'], { env, encoding: 'utf8' });
+  assert.equal(refused.status, 1, refused.stderr);
+  assert.equal(refused.stdout, '');
+  const refusedLines = refused.stderr.trimEnd().split('\n');
+  assert.equal(refusedLines.length, 2, refused.stderr);
+  assert.match(refusedLines[0], disclosure);
+  assert.equal(refusedLines[1], `zensu-log.sh --acceptance-record: ${missingCause}`);
+  assert.deepEqual(stored(), []);
+  const standalone = project({ receipt: false });
+  const escapedUnknown = attest(standalone, 'AC-009', 'pass', { editLandingEscaped: true });
+  assert.equal(escapedUnknown.code, 1, escapedUnknown.error);
+  assert.match(escapedUnknown.error, /^AC-009 is not an acceptance criterion of /);
+  assert.equal(escapedUnknown.disclosures.length, 1);
+  assert.match(escapedUnknown.disclosures[0], /^ACCEPTANCE STEM UNCHECKED — /);
+  assert.deepEqual(attest(standalone, 'AC-009').disclosures, []);
+  assert.equal(attest(standalone, 'AC-001', 'pass', { editLandingEscaped: true }).code, 0);
+  fs.rmSync(path.join(standalone.root, '.zensu', 'plans', `${STEM}.md`));
+  const stemMissing = `the plan .zensu/plans/${STEM}.md does not exist`;
+  const logStem = /^ACCEPTANCE STEM UNCHECKED — .*, so the --log stem was not cross-checked against one$/;
+  const escapedStatus = av.status(base(standalone, { editLandingEscaped: true }));
+  assert.equal(escapedStatus.code, 2, escapedStatus.lines.join('\n'));
+  assert.equal(escapedStatus.lines.length, 2, escapedStatus.lines.join('\n'));
+  assert.match(escapedStatus.lines[0], logStem);
+  assert.equal(escapedStatus.lines[1], `ACCEPTANCE STATUS — unresolved | ${stemMissing}`);
+  const escapedMissing = attest(standalone, 'AC-001', 'pass', { editLandingEscaped: true });
+  assert.equal(escapedMissing.code, 1, escapedMissing.error);
+  assert.equal(escapedMissing.error, stemMissing);
+  assert.equal(escapedMissing.disclosures.length, 1);
+  assert.match(escapedMissing.disclosures[0], logStem);
+  assert.deepEqual(av.status(base(standalone)).lines, ['ACCEPTANCE STATUS — unresolved | no edit-landing receipt exists for this chain; run the Phase 6 step 5b Edit Landing Audit first, because acceptance records bind to the plan its receipt names']);
+  const escapedGate = gate(standalone, { editLandingEscaped: true });
+  assert.equal(escapedGate.state, 'unresolved', escapedGate.lines.join('\n'));
+  assert.match(escapedGate.lines[0], /^ACCEPTANCE STEM UNCHECKED — .*, so the plan was taken from the newest acceptance record$/);
+  assert.match(escapedGate.lines.join('\n'), new RegExp(`^ACCEPTANCE — unresolved \\| the plan \\.zensu/plans/${STEM}\\.md does not exist`, 'm'));
+});
+
 test('a run whose work tree is a nested worktree binds its records to the combined tree, and an edit there makes them stale', () => {
   const fixture = runFixture();
   const tree = boundWorktree(fixture);
