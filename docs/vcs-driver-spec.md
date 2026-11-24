@@ -587,7 +587,11 @@ specified in `skills/autopilot/rules/conventions.md`.
     model in `tests/structure/lib-fake-gh-graphql.js` that `test-vcs-review-marker-reconcile.sh`
     also answers its GraphQL listing with; RM3-RM10 drive the GitHub listing against that fake,
     RM10 over a pull request without reviews, and RM11 the inventory fetch `--reconcile-review`
-    shares. The fake is modelled on gh 2.101.0 and serves one pull request, `acme/widget#42`, read
+    shares. The fake starts with the header of `tests/structure/lib-gh-host-fake.sh`, so a call
+    that does not reach the remote's host is refused: RM12 and RM12b run the GitHub listing under
+    `GH_HOST=example.invalid` and require the same markers from github.com only, and the direct
+    probes of the model run with `GH_HOST` and `GH_REPO` empty, so a shell that sets either
+    cannot move them. The fake is modelled on gh 2.101.0 and serves one pull request, `acme/widget#42`, read
     from the variables the query binds to `repository(owner:, name:)` and `pullRequest(number:)`;
     any other one fails with GitHub's not-found message. It checks the `String` and `Int`
     variables of an anonymous query the way GitHub does and fails with gh's message: first a

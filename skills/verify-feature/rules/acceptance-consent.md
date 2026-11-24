@@ -14,9 +14,8 @@ account, a non-loopback host or a signed build, or the driver that observes it c
 criterion the run could observe but did not prove is not `partial`: verify it again, or record
 `fail` when what was observed contradicts it.
 
-A driver fence is a state the driver can never show, whoever drives it. Today there is one: the
-`browser` driver's run config blocks service workers, so a criterion that depends on one (an
-update prompt, an offline cache, push, background sync) is never observed in that browser.
+A driver fence is a state the driver can never show, whoever drives it. No driver has a fence
+of this kind today.
 
 ## Where consent comes from
 
@@ -54,11 +53,11 @@ with these options in this order:
 
 A criterion that a driver fence rules out takes no **Provide access now**, whatever else it
 needs: no login, account, service or driver lifts the fence. Ask about it with the other two
-options, in their order, and name the fence in the question (for the `browser` driver: its run
-config blocks service workers). When the project has a durable test that produces the state in a
-real browser or on a real device, name that test as the check its `## Manual Acceptance` row
-will carry. When other open criteria have a cause the user can unblock, put both groups into the
-same `AskUserQuestion` call as two questions, so the user is still asked once.
+options, in their order, and name the fence in the question. When the project has a durable
+test that produces the state in a real browser or on a real device, name that test as the check
+its `## Manual Acceptance` row will carry. When other open criteria have a cause the user can
+unblock, put both groups into the same `AskUserQuestion` call as two questions, so the user is
+still asked once.
 
 Never offer, set or mention a way to switch the acceptance gate off.
 

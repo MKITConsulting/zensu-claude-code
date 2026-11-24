@@ -9749,7 +9749,7 @@ fs.writeFileSync(path.join(hostDir, `${host}.json`), JSON.stringify({ sessionId:
     [ "$DF_GOT" = "start/null:false:0000d2=false=presets,0000d1=false=started" ] || DF_BAD="$DF_BAD control=$DF_GOT"
     chmod 775 "$DF_TWO_DIR"
     DF_GOT="$(df_linked "$DF_SELF" "")"
-    [ "$DF_GOT" = "if-named/presets-unread:true:0000d2=true=presets,0000d1=false=started" ] || DF_BAD="$DF_BAD presets-folder=$DF_GOT"
+    [ "$DF_GOT" = "if-named/presets-unread:true:0000d2=true=presets,Claude=false=presets,0000d1=false=presets+started" ] || DF_BAD="$DF_BAD presets-folder=$DF_GOT"
     DF_MD="$(dfself "$DF_SELF" "" takeover "$DF_PARENT2" --all --no-record --no-git)"
     [ "$(printf '%s\n' "$DF_MD" | grep -c '^_The folder that holds the Claude Desktop store, ')" = 1 ] || DF_BAD="$DF_BAD presets-note-count"
     printf '%s\n' "$DF_MD" | grep -F '_The folder that holds the Claude Desktop store, ' | grep -qF "\`$DF_TWO_DIR\`, grants group or other write, so the saved environments cannot be trusted" || DF_BAD="$DF_BAD presets-note"
@@ -9802,6 +9802,159 @@ fs.writeFileSync(path.join(hostDir, `${host}.json`), JSON.stringify({ sessionId:
         && check "DF11 a Session Hub profiles folder that cannot be listed is counted and named: show reads its sessions as skipped, the takeover reasons say a profile store may hold the record, and lineage --diagnose names the folder in text and --json; with ZENSU_CCD_STORE set it counts nothing, also where a store-folder check looks at the discovered candidates, and once listable it is no longer named (control)" PASS \
         || check "DF11 unlistable profiles folder:$DF_BAD" FAIL
     fi
+  done
+  DFP_HOME="$FAKE/dfp"
+  DFP_SUPPORT="$DFP_HOME/Library/Application Support"
+  DFP_PROFILES="$DFP_SUPPORT/Zensu Session Hub/Claude-Profile"
+  DFP_OWN_DIR="$DFP_PROFILES/d0000000-0000-4000-8000-0000000000e1"
+  DFP_OTHER_DIR="$DFP_PROFILES/d0000000-0000-4000-8000-0000000000e2"
+  DFP_OTHER_PRESETS="$DFP_OTHER_DIR/ccd-session-presets.json"
+  DFP_PARENT="df0000e1-0000-4000-8000-0000000000e1"
+  DFP_OWN_ONLY="df0000e6-0000-4000-8000-0000000000e6"
+  mkdir -p "$DFP_SUPPORT/Claude/claude-code-sessions" "$DFP_OTHER_DIR/claude-code-sessions"
+  node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, support, ownDir, otherDir, parent, ownOnly] = process.argv.slice(1);
+const cwd = path.join(home, "work", "wt-dfp");
+fs.mkdirSync(cwd, { recursive: true });
+const dir = path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+const now = Date.now();
+for (const [sid, title] of [[parent, "dfp parent"], [ownOnly, "dfp own only"]]) {
+  fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+    JSON.stringify({ type: "custom-title", customTitle: title, sessionId: sid }),
+    JSON.stringify({ type: "user", message: { role: "user", content: `start ${title}` }, cwd, gitBranch: "branch-dfp", isSidechain: false, timestamp: iso, sessionId: sid }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd, gitBranch: "branch-dfp", isSidechain: false, timestamp: iso, sessionId: sid }),
+  ].join("\n") + "\n");
+}
+const local = (n) => `local_df0000${n}-0000-4000-8000-0000000000${n}`;
+const put = (org, n, record) => {
+  const folder = path.join(ownDir, "claude-code-sessions", "acct-p", org);
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, `${local(n)}.json`), JSON.stringify({ sessionId: local(n), isArchived: false, ...record }));
+};
+const child = (org, n, parentRun, environment, order) => put(org, n, { cliSessionId: `df0000${n}-0000-4000-8000-0000000000${n}`, title: `dfp child ${n}`, originCwd: cwd, createdAt: now + order, startedFromEnvironmentId: environment, spawnedFrom: { sessionId: local(parentRun), sideSession: true, taskId: `task_${n}`, title: `spawned ${n}` } });
+put("org-p", "e1", { cliSessionId: parent, title: "dfp parent record" });
+child("org-p", "e2", "e1", "env-fallback", 2);
+child("org-p", "e3", "e1", "env-own", 3);
+child("org-p", "e4", "e1", "env-split", 4);
+child("org-p", "e5", "e1", "env-split-ssh", 5);
+put("org-q", "e6", { cliSessionId: ownOnly, title: "dfp own only record" });
+child("org-q", "e7", "e6", "env-own", 7);
+const presets = (list) => JSON.stringify({ byAccount: { "acct-p": { presets: list.map(([id, name, kind]) => ({ id, name, target: { kind } })) } } });
+fs.writeFileSync(path.join(support, "Claude", "ccd-session-presets.json"), presets([["env-fallback", "Fallback Env", "local"], ["env-own", "Default Own Env", "local"], ["env-split", "Split A", "local"], ["env-split-ssh", "Local Box", "local"]]));
+fs.writeFileSync(path.join(ownDir, "ccd-session-presets.json"), presets([["env-own", "Own Env", "local"]]));
+fs.writeFileSync(path.join(otherDir, "ccd-session-presets.json"), presets([["env-split", "Split B", "local"], ["env-split-ssh", "Remote Box", "ssh"], ["env-own", "Remote Own", "ssh"]]));
+' "$DFP_HOME" "$DFP_SUPPORT" "$DFP_OWN_DIR" "$DFP_OTHER_DIR" "$DFP_PARENT" "$DFP_OWN_ONLY" 2>/dev/null
+  cp "$DFP_OTHER_PRESETS" "$DFP_HOME/other-presets.json"
+  DFS_HOME="$FAKE/dfs"
+  DFS_REAL="$DFS_HOME/real/claude-code-sessions"
+  DFS_PARENT="df0000f1-0000-4000-8000-0000000000f1"
+  mkdir -p "$DFS_HOME/Library/Application Support/Claude" "$DFS_REAL"
+  node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, parent] = process.argv.slice(1);
+const cwd = path.join(home, "work", "wt-dfs");
+fs.mkdirSync(cwd, { recursive: true });
+const dir = path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${parent}.jsonl`), [
+  JSON.stringify({ type: "custom-title", customTitle: "dfs parent", sessionId: parent }),
+  JSON.stringify({ type: "user", message: { role: "user", content: "start dfs parent" }, cwd, gitBranch: "branch-dfs", isSidechain: false, timestamp: iso, sessionId: parent }),
+  JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd, gitBranch: "branch-dfs", isSidechain: false, timestamp: iso, sessionId: parent }),
+].join("\n") + "\n");
+const local = (n) => `local_df0000${n}-0000-4000-8000-0000000000${n}`;
+const folder = path.join(store, "acct-s", "org-s");
+fs.mkdirSync(folder, { recursive: true });
+fs.writeFileSync(path.join(folder, `${local("f1")}.json`), JSON.stringify({ sessionId: local("f1"), isArchived: false, cliSessionId: parent, title: "dfs parent record" }));
+for (const [n, environment, order] of [["f2", "env-remote", 2], ["f3", "env-local", 3]]) {
+  fs.writeFileSync(path.join(folder, `${local(n)}.json`), JSON.stringify({ sessionId: local(n), isArchived: false, cliSessionId: `df0000${n}-0000-4000-8000-0000000000${n}`, title: `dfs child ${n}`, originCwd: cwd, createdAt: Date.now() + order, startedFromEnvironmentId: environment, spawnedFrom: { sessionId: local("f1"), sideSession: true, taskId: `task_${n}`, title: `spawned ${n}` } }));
+}
+fs.writeFileSync(path.join(home, "Library", "Application Support", "Claude", "ccd-session-presets.json"), JSON.stringify({ byAccount: { "acct-s": { presets: [{ id: "env-remote", name: "Remote Default", target: { kind: "ssh" } }, { id: "env-local", name: "Local Default", target: { kind: "local" } }] } } }));
+' "$DFS_HOME" "$DFS_REAL" "$DFS_PARENT" 2>/dev/null
+  ln -s "$DFS_REAL" "$DFS_HOME/Library/Application Support/Claude/claude-code-sessions"
+  dfpenv() { env -u CLAUDE_CONFIG_DIR -u ZENSU_CCD_STORE -u ZENSU_CCD_EXTRA_STORES -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_HOST_SESSION_ID -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME HOME="$DFP_HOME" USERPROFILE="$DFP_HOME" "$@"; }
+  dfprun() { dfpenv node "$TRAIL_MJS" "$@" --config-dir "$DFP_HOME/.claude" 2>/dev/null; }
+  dfp_linked() {
+    wr_json "$1" 'o.linkedSessions.sessions.map((s) => [s.run.slice(12, 14), s.decision, String(s.why), s.preset ? String(s.preset.name) + "|" + String(s.preset.kind) : "none"].join("/")).join(",") + ":" + o.linkedSessions.storeFolderRefused + ":" + (o.linkedSessions.storeFolders || []).map((f) => (f.dir.split("/").pop() === "Claude" ? "default" : f.dir.slice(-2)) + "=" + f.refused + "=" + f.reads.join("+")).join(",")'
+  }
+  dfsrun() { env -u CLAUDE_CONFIG_DIR -u ZENSU_CCD_STORE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_HOST_SESSION_ID -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME HOME="$DFS_HOME" USERPROFILE="$DFS_HOME" ZENSU_CCD_EXTRA_STORES="$DFS_REAL" node "$TRAIL_MJS" "$@" --config-dir "$DFS_HOME/.claude" 2>/dev/null; }
+  dfs_linked() {
+    wr_json "$(dfsrun takeover "$DFS_PARENT" --all --no-record --no-git --json)" 'o.linkedSessions.sessions.map((s) => [s.run.slice(12, 14), s.decision, String(s.why), s.preset ? String(s.preset.name) + "|" + String(s.preset.kind) : "none"].join("/")).join(",") + ":" + o.linkedSessions.storeFolderRefused + ":" + (o.linkedSessions.storeFolders || []).map((f) => f.dir.split("/").pop() + "=" + f.refused + "=" + f.reads.join("+")).join(",")'
+  }
+  DFP_ALL="e1=false=presets,default=false=presets,e2=false=presets"
+  DFP_HELD="e2/if-named/presets-unread/null|null,e3/start/null/Own Env|local,e4/if-named/presets-unread/null|null"
+  DFP_MERGED="e2/start/null/Fallback Env|local,e3/start/null/Own Env|local,e4/start/null/null|null,e5/stays/ssh/null|ssh:false:$DFP_ALL"
+  for TRAIL_MJS in "$HUB_TRAIL_MJS" "$PLM_TRAIL_MJS"; do
+    DF_BAD=""
+    DF_JSON="$(dfprun takeover "$DFP_PARENT" --all --no-record --no-git --json)"
+    DF_GOT="$(dfp_linked "$DF_JSON")"
+    [ "$DF_GOT" = "$DFP_MERGED" ] || DF_BAD="$DF_BAD merged=$DF_GOT"
+    [ "$(wr_json "$DF_JSON" 'JSON.stringify(o.linkedSessions.presetsUnread)')" = "[]" ] || DF_BAD="$DF_BAD merged-unread"
+    DF_MD="$(dfprun takeover "$DFP_PARENT" --all --no-record --no-git)"
+    printf '%s\n' "$DF_MD" | grep -qF -- '- saved environment: `Fallback Env`; pass it as `preset`' || DF_BAD="$DF_BAD brief-name"
+    printf '%s\n' "$DF_MD" | grep -qxF -- '- saved environment: it could not be named here' || DF_BAD="$DF_BAD brief-stays"
+    [ "$(wr_json "$DF_JSON" 'String(o.linkedSessions.presetsProfilesUnread)')" = "null" ] || DF_BAD="$DF_BAD merged-profiles"
+    printf '%s\n' "$DF_MD" | grep -qF '_The Zensu Session Hub profiles folder `' && DF_BAD="$DF_BAD merged-profiles-note"
+    printf '{' > "$DFP_OTHER_PRESETS"
+    DF_JSON="$(dfprun takeover "$DFP_PARENT" --all --no-record --no-git --json)"
+    DF_GOT="$(dfp_linked "$DF_JSON")"
+    [ "$DF_GOT" = "$DFP_HELD,e5/if-named/presets-unread/null|null:false:$DFP_ALL" ] || DF_BAD="$DF_BAD unparsable=$DF_GOT"
+    [ "$(wr_json "$DF_JSON" 'o.linkedSessions.presetsUnread.map((u) => u.file + "=" + u.state).join(",")')" = "$DFP_OTHER_PRESETS=unreadable" ] || DF_BAD="$DF_BAD unparsable-named"
+    dfprun takeover "$DFP_PARENT" --all --no-record --no-git | grep -F '_The saved environments file `' | grep -qF 'could not be read or did not parse. Each linked session whose saved environment it could decide starts only when the user names it' || DF_BAD="$DF_BAD unparsable-note"
+    DF_GOT="$(dfp_linked "$(dfprun takeover "$DFP_OWN_ONLY" --all --no-record --no-git --json)")"
+    [ "$DF_GOT" = "e7/start/null/Own Env|local:false:e1=false=presets" ] || DF_BAD="$DF_BAD own-file-only=$DF_GOT"
+    cp "$DFP_HOME/other-presets.json" "$DFP_OTHER_PRESETS"
+    chmod 664 "$DFP_OTHER_PRESETS"
+    DF_JSON="$(dfprun takeover "$DFP_PARENT" --all --no-record --no-git --json)"
+    DF_GOT="$(dfp_linked "$DF_JSON")"
+    [ "$DF_GOT" = "$DFP_HELD,e5/if-named/presets-unread/null|null:false:$DFP_ALL" ] || DF_BAD="$DF_BAD refused-file=$DF_GOT"
+    [ "$(wr_json "$DF_JSON" 'o.linkedSessions.presetsUnread.map((u) => u.file + "=" + u.state).join(",")')" = "$DFP_OTHER_PRESETS=refused" ] || DF_BAD="$DF_BAD refused-file-named"
+    dfprun takeover "$DFP_PARENT" --all --no-record --no-git | grep -F '_The saved environments file `' | grep -qF 'was refused: another account owns it or can write it, it is not a regular file, it is larger than 8 MiB, or it could not be opened or read. Each linked session whose saved environment it could decide starts only when the user names it._' || DF_BAD="$DF_BAD refused-file-note"
+    chmod 644 "$DFP_OTHER_PRESETS"
+    chmod 775 "$DFP_OTHER_DIR"
+    DF_GOT="$(dfp_linked "$(dfprun takeover "$DFP_PARENT" --all --no-record --no-git --json)")"
+    [ "$DF_GOT" = "$DFP_HELD,e5/stays/ssh/null|ssh:true:e1=false=presets,default=false=presets,e2=true=presets" ] || DF_BAD="$DF_BAD refused-folder=$DF_GOT"
+    dfprun takeover "$DFP_PARENT" --all --no-record --no-git | grep -F '_The folder that holds the Claude Desktop store, ' | grep -qF "\`$DFP_OTHER_DIR\`, grants group or other write, so the saved environments cannot be trusted" || DF_BAD="$DF_BAD refused-note"
+    chmod 755 "$DFP_OTHER_DIR"
+    chmod 775 "$DFP_OWN_DIR"
+    DF_GOT="$(dfp_linked "$(dfprun takeover "$DFP_PARENT" --all --no-record --no-git --json)")"
+    [ "$DF_GOT" = "e2/if-named/presets-unread/null|null,e3/stays/ssh/null|ssh,e4/if-named/presets-unread/null|null,e5/stays/ssh/null|ssh:true:e1=true=presets,default=false=presets,e2=false=presets" ] || DF_BAD="$DF_BAD own-folder=$DF_GOT"
+    DF_GOT="$(dfp_linked "$(dfprun takeover "$DFP_OWN_ONLY" --all --no-record --no-git --json)")"
+    [ "$DF_GOT" = "e7/stays/ssh/null|ssh:true:e1=true=presets,default=false=presets,e2=false=presets" ] || DF_BAD="$DF_BAD own-folder-listed=$DF_GOT"
+    chmod 755 "$DFP_OWN_DIR"
+    chmod 775 "$DFP_SUPPORT/Claude/claude-code-sessions"
+    DF_GOT="$(dfp_linked "$(dfprun takeover "$DFP_PARENT" --all --no-record --no-git --json)")"
+    [ "$DF_GOT" = "$DFP_MERGED" ] || DF_BAD="$DF_BAD refused-default-store=$DF_GOT"
+    chmod 755 "$DFP_SUPPORT/Claude/claude-code-sessions"
+    DF_GOT="$(dfp_linked "$(dfpenv ZENSU_CCD_STORE="$DFP_OWN_DIR/claude-code-sessions" node "$TRAIL_MJS" takeover "$DFP_PARENT" --all --no-record --no-git --json --config-dir "$DFP_HOME/.claude" 2>/dev/null)")"
+    [ "$DF_GOT" = "e2/start/null/null|null,e3/start/null/Own Env|local,e4/start/null/null|null,e5/start/null/null|null:false:e1=false=presets" ] || DF_BAD="$DF_BAD override=$DF_GOT"
+    DF_GOT="$(dfs_linked)"
+    [ "$DF_GOT" = "f2/stays/ssh/Remote Default|ssh,f3/start/null/Local Default|local:false:real=false=presets,Claude=false=presets" ] || DF_BAD="$DF_BAD linked-default-store=$DF_GOT"
+    if [ "$(id -u)" != 0 ]; then
+      DFS_PROFILES="$DFS_HOME/Library/Application Support/Zensu Session Hub/Claude-Profile"
+      mkdir -p "$DFS_PROFILES"
+      chmod 300 "$DFS_PROFILES"
+      DF_GOT="$(dfs_linked)"
+      DF_KEY="$(wr_json "$(dfsrun takeover "$DFS_PARENT" --all --no-record --no-git --json)" 'String(o.linkedSessions.presetsProfilesUnread)')"
+      DF_MD="$(dfsrun takeover "$DFS_PARENT" --all --no-record --no-git)"
+      printf '%s' '{"byAccount":{"acct-s":{"presets":[{"id":"env-remote","name":"Remote Own","target":{"kind":"ssh"}},{"id":"env-local","name":"Local Own","target":{"kind":"local"}}]}}}' > "$DFS_HOME/real/ccd-session-presets.json"
+      DF_OWN="$(dfs_linked)"
+      DF_OWN_KEY="$(wr_json "$(dfsrun takeover "$DFS_PARENT" --all --no-record --no-git --json)" 'String(o.linkedSessions.presetsProfilesUnread)')"
+      rm -f "$DFS_HOME/real/ccd-session-presets.json"
+      chmod 755 "$DFS_PROFILES"
+      [ "$DF_GOT" = "f2/stays/ssh/Remote Default|ssh,f3/if-named/presets-unread/null|null:false:real=false=presets,Claude=false=presets" ] || DF_BAD="$DF_BAD profiles-unread=$DF_GOT"
+      [ "$DF_KEY" = "$DFS_PROFILES" ] || DF_BAD="$DF_BAD profiles-unread-named=$DF_KEY"
+      printf '%s\n' "$DF_MD" | grep -qxF "_The Zensu Session Hub profiles folder \`$DFS_PROFILES\` could not be listed, so the saved environments file of each profile in it was not read. Each linked session whose saved environment one of those files could decide starts only when the user names it; once this account can list the folder, running the takeover again reads them._" || DF_BAD="$DF_BAD profiles-unread-note"
+      [ "$DF_OWN" = "f2/stays/ssh/Remote Own|ssh,f3/start/null/Local Own|local:false:real=false=presets" ] || DF_BAD="$DF_BAD profiles-unread-own-file=$DF_OWN"
+      [ "$DF_OWN_KEY" = "null" ] || DF_BAD="$DF_BAD profiles-unread-own-file-named=$DF_OWN_KEY"
+      rmdir "$DFS_PROFILES" "$DFS_HOME/Library/Application Support/Zensu Session Hub"
+    fi
+    [ -z "$DF_BAD" ] \
+      && check "DF12 a linked session of a record in a Session Hub profile store is named from another store's presets file when its own does not list the saved environment, the own file's description wins and settles its ids, an id two other files describe differently is named by neither and stays without a start sentence when one names SSH, an unparsable or refused other file is named with its state and holds only the sessions it could decide, a refused folder holding one does the same and is reported with the presets read, an own file whose folder is refused settles nothing and an SSH description elsewhere keeps its sessions here, a refused default store still has its folder's presets file read, also when it is a symbolic link to a store ZENSU_CCD_EXTRA_STORES names, an unlistable Session Hub profiles folder leaves that read incomplete and is named in the JSON and the brief, but not once the own file settles every saved environment, a record whose own file names every saved environment reads no other file, and ZENSU_CCD_STORE reads only its own (controls)" PASS \
+      || check "DF12 saved environments across stores:$DF_BAD" FAIL
   done
   TRAIL_MJS="$HUB_TRAIL_MJS"
 fi

@@ -43,6 +43,15 @@ const AMBIENT_TEXT_RE = /(^|[^A-Za-z0-9_])(PLAYWRIGHT_MCP_|PWTEST_)/;
 const REDEFINITION_RE = /(^|[\s;&|({])(function\s+)?playwright-cli\s*\(\s*\)|(^|[\s;&|({])function\s+playwright-cli(\s|$|\{)/i;
 const RUN_CONFIG_NAME = 'playwright-cli.json';
 const RUN_OUTPUT_DIR_NAME = 'browser';
+const FENCE_PROXY = 'http://zensu-fence.invalid:9';
+const FENCE_PROXY_SWITCH = '--proxy-server=';
+const FENCE_BYPASS_SWITCH = '--proxy-bypass-list=';
+const FENCE_RESOLVER_SWITCH = '--host-resolver-rules=';
+const FENCE_LOOPBACK_RULE = '<-loopback>';
+const FENCE_CATCH_ALL_RULE = 'MAP * ^NOTFOUND';
+const RESOLVER_PIN_RE = /^MAP (\S+) (\S+)$/;
+const RUN_CONFIG_REMEDY = 'write the run config again with the run-config helper of this installation';
+const WORKER_NETWORK_ENV = 'PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK';
 const MAX_RUN_ORIGINS = 8;
 const MAX_RUN_CONFIG_BYTES = 16384;
 const MAX_GLOBAL_CONFIG_BYTES = 65536;
@@ -161,8 +170,8 @@ const REASONS = Object.freeze({
   FLAG_DENIED: 'is not available in a /zensu:verify-feature browser session; do not retry it under another session name or through another program',
   CONFIG_REQUIRED: 'open on a zensu-verify session needs --config=<absolute path> naming the run config written by scripts/verify-browser-config.js',
   OPEN_OUTSIDE_CONFIG: 'the open target is outside the run config allowedOrigins',
-  BROWSER_NOT_CHROMIUM: 'the run config pins hosts with Chromium switches, so --browser must name a chrome, msedge or chromium channel',
-  GLOBAL_BROWSER_NOT_CHROMIUM: 'the global playwright-cli config selects a browser other than chromium, which ignores the run config resolver pins',
+  BROWSER_NOT_CHROMIUM: 'the run config fences the browser with Chromium switches, so --browser must name a chrome, msedge or chromium channel',
+  GLOBAL_BROWSER_NOT_CHROMIUM: 'the global playwright-cli config selects a browser other than chromium, which ignores the Chromium switches the run config fences the browser with',
   POLICY_INVALID: 'the navigation policy in the launch environment is invalid',
   NOT_POLICY_TARGET: 'origin is not a target of the navigation policy, and this session cannot show the permission prompt because its permission mode is bypassPermissions, dontAsk or not reported; switch the session to Manual or Auto (CLI: --permission-mode default or auto) to be asked, or add the origin to the policy and relaunch Claude Code',
   NOT_POLICY_KIND: 'origin is not of the kind the navigation policy names, because a local policy names loopback origins only and a remote policy public HTTPS origins only, and this session cannot show the permission prompt because its permission mode is bypassPermissions, dontAsk or not reported; switch the session to Manual or Auto (CLI: --permission-mode default or auto) to be asked, or relaunch Claude Code with a policy whose mode fits the origin and that names it as a target',
@@ -1281,6 +1290,41 @@ function sameKeys(value, expected) {
   return JSON.stringify(Object.keys(value).sort()) === JSON.stringify(expected.slice().sort());
 }
 
+function hostPort(parsed) {
+  return parsed.port || (['https:', 'wss:'].includes(parsed.protocol) ? '443' : '80');
+}
+
+function bracketed(address) {
+  return net.isIP(address) === 6 ? `[${address}]` : address;
+}
+
+function resolverPin(rule) {
+  const match = typeof rule === 'string' && rule !== FENCE_CATCH_ALL_RULE ? rule.match(RESOLVER_PIN_RE) : null;
+  return match ? { host: match[1].toLowerCase(), address: match[2].replace(/^\[|\]$/g, '') } : null;
+}
+
+function fenceArgs(origins, pins) {
+  const bypass = [FENCE_LOOPBACK_RULE];
+  const maps = [];
+  const excludes = [];
+  const hosts = new Set();
+  for (const origin of origins) {
+    const parsed = new URL(origin);
+    const host = floor.normalizeHostname(parsed.hostname);
+    const entry = `${bracketed(host)}:${hostPort(parsed)}`;
+    if (!bypass.includes(entry)) bypass.push(entry);
+    if (hosts.has(host)) continue;
+    hosts.add(host);
+    if (net.isIP(host) || floor.isLocalHost(host)) excludes.push(`EXCLUDE ${host}`);
+    else if (pins.has(host)) maps.push(`MAP ${host} ${bracketed(pins.get(host))}`);
+  }
+  return [
+    `${FENCE_PROXY_SWITCH}${FENCE_PROXY}`,
+    `${FENCE_BYPASS_SWITCH}${bypass.join(';')}`,
+    `${FENCE_RESOLVER_SWITCH}${[...maps, FENCE_CATCH_ALL_RULE, ...excludes].join(',')}`,
+  ];
+}
+
 function runConfigShape(config, configPath) {
   const fail = (fault) => ({ ok: false, fault });
   if (!sameKeys(config, ['browser', 'network', 'outputDir'])) return fail('the run config carries keys beyond browser, network and outputDir');
@@ -1289,8 +1333,8 @@ function runConfigShape(config, configPath) {
   if (browser.isolated !== true) return fail('the run config must keep the browser isolated');
   if (!sameKeys(browser.launchOptions, ['args'])) return fail('the run config launchOptions carry unexpected keys');
   const restoring = sameKeys(browser.contextOptions, ['serviceWorkers', 'storageState']);
-  if ((!restoring && !sameKeys(browser.contextOptions, ['serviceWorkers'])) || browser.contextOptions.serviceWorkers !== 'block') {
-    return fail('the run config must block service workers and set nothing else on the context');
+  if ((!restoring && !sameKeys(browser.contextOptions, ['serviceWorkers'])) || browser.contextOptions.serviceWorkers !== 'allow') {
+    return fail(`the run config must allow service workers and set nothing else on the context; ${RUN_CONFIG_REMEDY}`);
   }
   if (!sameKeys(network, ['allowedOrigins'])) return fail('the run config network block carries unexpected keys');
   const origins = network.allowedOrigins;
@@ -1306,23 +1350,19 @@ function runConfigShape(config, configPath) {
   }
   if (new Set(origins).size !== origins.length) return fail('the run config names an origin twice');
   const args = browser.launchOptions.args;
-  if (!Array.isArray(args) || args.length < 1 || args.length > 2 || args[0] !== '--no-proxy-server') {
-    return fail('the run config launch arguments must be --no-proxy-server and at most one resolver pin list');
+  if (!Array.isArray(args) || args.length !== 3 || args.some((arg) => typeof arg !== 'string')) {
+    return fail(`the run config launch arguments must be exactly the fence proxy, its bypass list and the resolver rules; ${RUN_CONFIG_REMEDY}`);
   }
+  const resolverFault = `the run config resolver rules are not the ones its allowed origins and pins derive: the pins, the catch-all ${FENCE_CATCH_ALL_RULE} and one EXCLUDE per localhost or address-literal host; ${RUN_CONFIG_REMEDY}`;
+  if (!args[2].startsWith(FENCE_RESOLVER_SWITCH)) return fail(resolverFault);
   const pins = new Map();
-  if (args.length === 2) {
-    const match = typeof args[1] === 'string' ? args[1].match(/^--host-resolver-rules=(.+)$/) : null;
-    if (!match) return fail('the run config carries a launch argument other than a resolver pin list');
-    for (const rule of match[1].split(',')) {
-      const pin = rule.match(/^MAP (\S+) (\S+)$/);
-      if (!pin) return fail('the run config carries a resolver rule other than MAP <host> <address>');
-      const host = pin[1].toLowerCase();
-      const address = pin[2].replace(/^\[|\]$/g, '');
-      if (net.isIP(host) || pins.has(host)) return fail('the run config pins an address literal or pins a host twice');
-      if (floor.isLocalHost(host)) return fail('the run config pins localhost, which the browser must resolve to loopback itself');
-      if (!floor.isPublicAddress(address)) return fail('the run config pins a host to an address that is not globally routable');
-      pins.set(host, address);
-    }
+  for (const rule of args[2].slice(FENCE_RESOLVER_SWITCH.length).split(',')) {
+    const pin = resolverPin(rule);
+    if (!pin) continue;
+    if (net.isIP(pin.host) || pins.has(pin.host)) return fail('the run config pins an address literal or pins a host twice');
+    if (floor.isLocalHost(pin.host)) return fail('the run config pins localhost, which the browser must resolve to loopback itself');
+    if (!floor.isPublicAddress(pin.address)) return fail('the run config pins a host to an address that is not globally routable');
+    pins.set(pin.host, pin.address);
   }
   for (const host of pins.keys()) {
     if (!origins.some((origin) => floor.normalizeHostname(new URL(origin).hostname) === host)) {
@@ -1331,12 +1371,19 @@ function runConfigShape(config, configPath) {
   }
   for (const origin of origins) {
     const parsed = new URL(origin);
-    if (!['https:', 'wss:'].includes(parsed.protocol)) continue;
     const host = floor.normalizeHostname(parsed.hostname);
     if (net.isIP(host) || floor.isLocalHost(host)) continue;
     if (!floor.isExactHost(host)) return fail(`${origin}: ${floor.FLOOR_REASONS.HOSTNAME_PATTERN}`);
-    if (!pins.has(host)) return fail(`${origin}: the run config carries no resolver pin for this remote host`);
+    if (['https:', 'wss:'].includes(parsed.protocol) && !pins.has(host)) return fail(`${origin}: the run config carries no resolver pin for this remote host`);
   }
+  const fence = fenceArgs(origins, pins);
+  if (args[0] !== fence[0]) {
+    return fail(`the run config must send every connection to the fence proxy ${FENCE_PROXY} and name no other proxy and no fallback; ${RUN_CONFIG_REMEDY}`);
+  }
+  if (args[1] !== fence[1]) {
+    return fail(`the run config proxy bypass list is not the one its allowed origins derive: ${FENCE_LOOPBACK_RULE} first, then one host:port entry per origin; ${RUN_CONFIG_REMEDY}`);
+  }
+  if (args[2] !== fence[2]) return fail(resolverFault);
   if (typeof config.outputDir !== 'string' || !path.isAbsolute(config.outputDir)) return fail('the run config outputDir must be absolute');
   let configDir;
   try { configDir = fs.realpathSync.native(path.dirname(configPath)); }
@@ -1414,11 +1461,21 @@ function globalConfigFault(env) {
   return '';
 }
 
-function ambientOverride(env) {
+function ambientOverride(env, platform = process.platform) {
+  const fold = platform === 'win32' ? (name) => name.toUpperCase() : (name) => name;
   for (const name of Object.keys(env || {})) {
-    if (/^PLAYWRIGHT_MCP_/.test(name) && env[name] !== undefined && env[name] !== '') return name;
+    const key = fold(name);
+    if ((/^PLAYWRIGHT_MCP_/.test(key) || key === WORKER_NETWORK_ENV) && env[name] !== undefined && env[name] !== '') {
+      return key === WORKER_NETWORK_ENV ? WORKER_NETWORK_ENV : name;
+    }
   }
   return '';
+}
+
+function ambientDeny(name) {
+  return name === WORKER_NETWORK_ENV
+    ? `the launch environment sets ${name}, which takes the requests of a service worker out of the request interception the run config relies on`
+    : `the launch environment sets ${name}, which overrides the run config`;
 }
 
 function readPolicy(env) {
@@ -1492,8 +1549,8 @@ function judgeCall(call, context) {
     if (typeof args.config !== 'string') return { deny: REASONS.CONFIG_REQUIRED };
     const config = readRunConfig(args.config);
     if (!config.ok) return { deny: config.fault };
-    const ambient = ambientOverride(context.env);
-    if (ambient) return { deny: `the launch environment sets ${ambient}, which overrides the run config` };
+    const ambient = ambientOverride(context.env, context.platform);
+    if (ambient) return { deny: ambientDeny(ambient) };
     const globalFault = globalConfigFault(context.env);
     if (globalFault) return { deny: globalFault };
     restored = '';
@@ -1561,7 +1618,7 @@ function evaluate({ command, payload, env, records, policy, platform }) {
     return marks.named ? { verdict: 'deny', reason: REASONS.SESSION_UNRESOLVED } : { verdict: 'none' };
   }
   const answerable = ANSWERABLE_MODES.includes((payload || {}).permission_mode);
-  const context = { principal: principalOf(payload || {}), env: env || {}, policy, answerable };
+  const context = { principal: principalOf(payload || {}), env: env || {}, policy, answerable, platform };
   const remembered = Array.isArray(records) ? records : [];
   const known = new Set(remembered.map((entry) => entry.origin));
   const knownRestored = new Set(remembered.filter(restoredRecord).map((entry) => entry.origin));
@@ -1817,6 +1874,9 @@ module.exports = {
   SESSION_PREFIX,
   SESSION_RE,
   STATE_SEGMENTS,
+  WORKER_NETWORK_ENV,
+  ambientDeny,
+  ambientOverride,
   analyzeCommand,
   appendRecord,
   authGuardRegistered,
@@ -1826,6 +1886,7 @@ module.exports = {
   consentRecorderRegistered,
   emptyMemory,
   evaluate,
+  fenceArgs,
   globalConfigFault,
   globalConfigFile,
   isIsoInstant,
@@ -1844,6 +1905,7 @@ module.exports = {
   readRunConfig,
   recordingStream,
   resolveRecipeFile,
+  resolverPin,
   runConfigShape,
   runPost,
   runPre,
