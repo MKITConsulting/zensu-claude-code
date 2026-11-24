@@ -2,6 +2,7 @@
 paths:
   - "hooks/stop-chain-enforcer.sh"
   - "hooks/lib/zensu-stop-deadline.sh"
+  - "hooks/lib/zensu-prompt-deadline.sh"
   - "hooks/lib/stop-idle-probe-v1.js"
   - "hooks/lib/zensu-session.sh"
   - "hooks/lib/session-control-core-v1.js"
@@ -82,6 +83,23 @@ the supervisor kills both groups at once.
   (green run 36556263889, session setup included), and a deadline near that figure would
   silently stop enforcing there. The floor keeps a lowered value above an ordinary macOS or
   Linux armed Stop.
+- **Copies.** `hooks/lib/zensu-prompt-deadline.sh` supervises `hooks/user-prompt-tdd-reminder.sh`
+  with the same worker, watchdog, kill, cleanup and abort shape
+  (`.claude/rules/session-delivery-route.md` §"The reminder's time budget"), and
+  `_zensu_linked_session_answer` in `hooks/lib/zensu-linked-session.sh` runs a third, budget-only
+  group watchdog around the lineage resolver. They stay copies because the deadline action
+  differs: this hook keeps a decision already written and otherwise releases with a notice, the
+  reminder prints a fallback its hook supplies, keyed on what the worker classified and recorded,
+  and the lineage watchdog answers `deferred`; the bounds differ as well (10 to 75 s, 10 to 20 s,
+  the deadline minus a reserve). A fix to the group kill, its Git Bash fallback, the cleanup or the
+  abort traps moves every copy. One owner that takes the deadline action as a parameter is a
+  follow-up.
+- **A kill can land inside an adopting bind.** Both supervised workers bind with automatic
+  adoption opted in (`.claude/rules/automatic-adoption.md`), so a deadline kill between the
+  adoption's copy to the superseded name and its record swap leaves the crash-resume shape,
+  `superseded-record-exists`, which refuses every later automatic adoption of that record until
+  the superseded file is moved. The window is one file copy and one rename. The core completing or
+  rolling back an interrupted adoption on the next bind would close it, and is a separate change.
 
 **User-visible notices (`stop_notice` + `emit_stop_notices`).** Claude Code shows the stderr of
 an exit-0 Stop hook to nobody (read from the host binary; `.claude/rules/autopilot-run-scope.md`
@@ -172,7 +190,7 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   bind functions unset it (`L36`, `L49`). A variable or a file that a model-side Bash command
   could set is never a pre-verified binding; `CONTROL_BINDINGS` needs no new entry for that
   reason.
-- **Opt-in, three callers.** The Stop hook and `hooks/post-review-tdd-delegate.sh` call
+- **Opt-in, four callers.** The Stop hook and `hooks/post-review-tdd-delegate.sh` call
   `zensu_memoize_project_dir`, each right after its only bind, and `_zensu_bound_work_tree_lookup`
   in `zensu-log.sh` calls it first, inside the subshell `_zensu_bound_work_tree` runs it in, so
   that memo ends with the subshell. Every other entry point verifies on every call, as before, and
@@ -193,6 +211,15 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   2026-10-27, three of them after the claim returned: the record retire, the claim-field parse
   and the emit. `BR4b` in `tests/structure/test-background-review.sh`
   pins the single verification (`.claude/rules/background-review-completion.md`).
+  `hooks/user-prompt-tdd-reminder.sh` is the fourth caller. It memoizes right after its origin and
+  slash-command exits, so a task notification or a bare slash command pays nothing extra. Its one
+  bind comes before the memo and can re-mint the context record through automatic adoption; after
+  the memo the reminder writes only `.zensu/state` markers and the prompt ledger.
+  Measured with a classifying `node` shim on a linked session's first prompt: 16 `node` children,
+  six of them root verifications (`tdd_state_file`, four inside `tdd_session_active`, the route
+  root), before the memo and the one-read payload change, and 9 with one verification after them.
+  `L48` in `tests/structure/test-linked-session-route.sh` holds both numbers
+  (`.claude/rules/session-delivery-route.md` §"The reminder's time budget").
 - **What a reuse no longer re-checks.** The record file's content and the runtime digest are read
   once per hook run. A record or plugin tree changed WHILE one Stop runs is not seen again. The
   digest was never a defence there, because a changed tree includes the code that checks it.
@@ -206,13 +233,14 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   `core.readContext({ recordsDir, sessionId: key })` in `zensu_resolve_project_dir` and the argv
   `session-control-core-v1.js session-key `. Rewording either turns the count checks of the
   latency suite red, and rewording the first also those of `BR4b` in
-  `tests/structure/test-background-review.sh` and `Z107i` in `tests/structure/test-zen-mode.sh`,
-  whose shims classify by the same literal. Three in-code rationales assume every `zensu_resolve_project_dir` call
+  `tests/structure/test-background-review.sh`, `Z107i` in `tests/structure/test-zen-mode.sh` and
+  the budget block of `tests/structure/test-linked-session-route.sh` (`L48` and its hung-child
+  cases), whose shims classify by the same literal. Three in-code rationales assume every `zensu_resolve_project_dir` call
   spawns `node`: the optional argument of `zensu_pending_review_claim_file` in
   `zensu-tdd-phase.sh`, the `zensu_pending_review_file` note in `zensu-autopilot-state.sh`, and
   the `S7t` comment in `tests/structure/test-autopilot-stop-enforcer.sh`. They hold for every
-  caller that does not memoize; on the Stop path, in the post-review delegate and inside the
-  work-tree lookup the memo answers instead.
+  caller that does not memoize; on the Stop path, in the post-review delegate, inside the
+  work-tree lookup and in the prompt reminder the memo answers instead.
 - **Port.** Host half only; `session-control-core-v1.js` is unchanged. `zensu-codex`,
   `zensu-kiro` and `zensu-antigravity` were NOT included. A port that adopts the memo must take
   the `_ZENSU_PROJECT_DIR_MEMO` unset in both bind functions with it, or a re-bind keeps a stale

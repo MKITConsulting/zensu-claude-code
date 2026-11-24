@@ -1333,5 +1333,327 @@ UNNAMED_OUT="$(remind "$WT" "$NX_CLI" "$NX_HOST" "add a function to foo.js")"
   && [ "$(linked_state "$WT" "$NX_CLI")" = unresolved ]; } \
   && check "L47 a linked session whose records sit only in a store ZENSU_CCD_EXTRA_STORES names, after an entry that names no store, inherits build, while the same layout without the variable stays unresolved and inherits nothing" PASS \
   || check "L47 named store (field='$(last_field "$NAMED_OUT")' inherited=$(inherited_state "$WT" "$NC_CLI") linked=$(linked_state "$WT" "$NC_CLI") unnamed='$(last_field "$UNNAMED_OUT")' unnamed-inherited=$(inherited_state "$WT" "$NX_CLI") unnamed-linked=$(linked_state "$WT" "$NX_CLI"))" FAIL
+echo "== Budget: the reminder prints its route field within its deadline =="
+DEADLINE_LIB="$PLUGIN_DIR/hooks/lib/zensu-prompt-deadline.sh"
+BSHIM="$T/budget-shim"; BTRACE="$T/budget-trace.log"; BPIDS="$T/budget-hung.pids"
+mkdir -p "$BSHIM"
+cat > "$BSHIM/node" <<SHIM_EOF
+#!/bin/bash
+case "\$*" in
+  (*'core.readContext({ recordsDir, sessionId: key })'*) kind=verify ;;
+  (*linked-session-v1.js*) kind=resolver ;;
+  (*ZENSU_DIRECTIVE_PLACEHOLDERS*) kind=substitute ;;
+  (*classifyPreToolPayload*) kind=principal ;;
+  (*'j.hooks.defaultDeliveryRoute'*) kind=config ;;
+  (*) kind=other ;;
+esac
+printf '%s\n' "\$kind" >> "$BTRACE"
+if [ -n "\${ZT_HANG:-}" ] && [ "\$kind" = "\$ZT_HANG" ]; then
+  printf '%s\n' "\$\$" >> "$BPIDS"
+  exec sleep 120
+fi
+exec "$REAL_NODE" "\$@"
+SHIM_EOF
+chmod +x "$BSHIM/node"
+budget_count() { grep -cx "$1" "$BTRACE" 2>/dev/null || true; }
+budget_hook() {
+  local root="$1" cli="$2" host="$3" prompt="$4" hang="${5:-}" deadline="${6:-}" config="${7:-$CFG_DEFAULT}" entry="${8:-cli}"
+  prompt_json "$cli" "$prompt" | HOME="$HOOK_HOME" CLAUDE_PROJECT_DIR="$root" CLAUDE_CODE_HOST_SESSION_ID="$host" \
+    CLAUDE_CODE_ACCOUNT_UUID="$HOOK_ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" ZENSU_CONFIG="$config" \
+    CLAUDE_CODE_ENTRYPOINT="$entry" ZT_HANG="$hang" ZENSU_PROMPT_DEADLINE_SECONDS="$deadline" PATH="$BSHIM:$PATH" bash "$REMINDER" 2>/dev/null
+}
+hung_alive() {
+  local pid tries alive=0
+  [ -s "$BPIDS" ] || { echo 0; return; }
+  while IFS= read -r pid; do
+    tries=0
+    while [ "$tries" -lt 30 ] && ps -p "$pid" -o command= 2>/dev/null | grep -qF 'sleep 120'; do
+      sleep 0.1
+      tries=$((tries + 1))
+    done
+    ps -p "$pid" -o command= 2>/dev/null | grep -qF 'sleep 120' && alive=$((alive + 1))
+  done < "$BPIDS"
+  echo "$alive"
+}
+
+session "$WT" "$P_HOST"; BP_CLI="$CLI"; BP_HOST="$HOST"
+: > "$BTRACE"
+BP_OUT="$(budget_hook "$WT" "$BP_CLI" "$BP_HOST" "add a function to foo.js" | ctx)"
+BP_ALL="$(grep -c . "$BTRACE" 2>/dev/null || true)"; BP_VERIFY="$(budget_count verify)"; BP_RESOLVER="$(budget_count resolver)"
+{ [ "$(last_field "$BP_OUT")" = "$INHERITED" ] && opens_with_lead "$BP_OUT" \
+  && [ "$BP_VERIFY" = 1 ] && [ "$BP_RESOLVER" = 1 ] && [ "${BP_ALL:-99}" -le 9 ]; } \
+  && check "L48 a linked first prompt verifies the project root once and starts at most nine node children, and still inherits with the brief note (node=$BP_ALL)" PASS \
+  || check "L48 process budget (node=$BP_ALL verify=$BP_VERIFY resolver=$BP_RESOLVER field='$(last_field "$BP_OUT")')" FAIL
+
+session "$WT" "$P_HOST"; BH_CLI="$CLI"; BH_HOST="$HOST"
+: > "$BTRACE"; : > "$BPIDS"
+BH_START=$SECONDS
+BH_OUT="$(budget_hook "$WT" "$BH_CLI" "$BH_HOST" "add a function to foo.js" resolver 12 | ctx)"
+BH_TOOK=$((SECONDS - BH_START))
+BH_ALIVE="$(hung_alive)"
+{ [ "$(last_field "$BH_OUT")" = "$ASK" ] && printf '%s' "$BH_OUT" | grep -qF 'AskUserQuestion' \
+  && ! printf '%s' "$BH_OUT" | grep -qF 'shortened' && [ "$(lead_count "$BH_OUT")" = 0 ] \
+  && [ "$(budget_count resolver)" = 1 ] && [ ! -e "$(linked_marker "$WT" "$BH_CLI")" ] \
+  && [ "$(inherited_state "$WT" "$BH_CLI")" = none ] && [ "$BH_TOOK" -le 20 ] && [ "$BH_ALIVE" = 0 ]; } \
+  && check "L49 a resolver that does not answer within the lineage budget is stopped, the full reminder takes its field from the ordinary ladder, and no lineage answer is cached (${BH_TOOK}s)" PASS \
+  || check "L49 hung resolver (field='$(last_field "$BH_OUT")' took=${BH_TOOK}s alive=$BH_ALIVE marker=$([ -e "$(linked_marker "$WT" "$BH_CLI")" ] && echo present || echo absent))" FAIL
+session "$WT" "$P_HOST"; BO_CLI="$CLI"; BO_HOST="$HOST"
+route "$BO_CLI" "$WT" --direct >/dev/null
+session "$WT" "$P_HOST"; BG_CLI="$CLI"; BG_HOST="$HOST"
+: > "$BTRACE"; : > "$BPIDS"
+BO_OUT="$(budget_hook "$WT" "$BO_CLI" "$BO_HOST" "add a function to foo.js" resolver 12 | ctx)"
+BG_OUT="$(budget_hook "$WT" "$BG_CLI" "$BG_HOST" "add a function to foo.js" resolver 12 "$CFG_TDD" | ctx)"
+BO_ALIVE="$(hung_alive)"
+{ [ "$(last_field "$BO_OUT")" = "ZENSU DELIVERY ROUTE: direct (session marker)" ] \
+  && [ "$(last_field "$BG_OUT")" = "ZENSU DELIVERY ROUTE: build (hooks.defaultDeliveryRoute)" ] \
+  && [ "$(budget_count resolver)" = 2 ] && [ "$BO_ALIVE" = 0 ] \
+  && [ ! -e "$(linked_marker "$WT" "$BO_CLI")" ] && [ ! -e "$(linked_marker "$WT" "$BG_CLI")" ] \
+  && [ "$(inherited_state "$WT" "$BO_CLI")" = none ] && [ "$(inherited_state "$WT" "$BG_CLI")" = none ]; } \
+  && check "L49b under a deferred lineage the session's own marker and the configured default still decide the field" PASS \
+  || check "L49b ladder under deferral (own='$(last_field "$BO_OUT")' config='$(last_field "$BG_OUT")' resolver=$(budget_count resolver) alive=$BO_ALIVE)" FAIL
+: > "$BTRACE"
+BH_NEXT="$(budget_hook "$WT" "$BH_CLI" "$BH_HOST" "add a function to foo.js" | ctx)"
+{ [ "$(last_field "$BH_NEXT")" = "$INHERITED" ] && [ "$(linked_state "$WT" "$BH_CLI")" = linked ] \
+  && [ "$(budget_count resolver)" = 1 ]; } \
+  && check "L50 the next prompt after a deferred lineage resolves it again and inherits build" PASS \
+  || check "L50 retry after deferral (field='$(last_field "$BH_NEXT")' linked=$(linked_state "$WT" "$BH_CLI"))" FAIL
+session "$WT" "$P_HOST"; BZ_CLI="$CLI"; BZ_HOST="$HOST"
+: > "$BTRACE"
+BZ_ANSWER="$(CLAUDE_CODE_HOST_SESSION_ID="$BZ_HOST" CLAUDE_CODE_ACCOUNT_UUID="$HOOK_ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" \
+  PATH="$BSHIM:$PATH" bash -c 'source "$0"; source "$1"; zensu_linked_session_resolve "$2" "$3" "$4" 0' \
+  "$CONFIG_LIB" "$LINKED_LIB" "$WT" "$(key_of "$BZ_CLI")" "$BZ_CLI" 2>/dev/null)"
+{ [ "$BZ_ANSWER" = deferred ] && [ "$(budget_count resolver)" = 0 ] && [ ! -e "$(linked_marker "$WT" "$BZ_CLI")" ]; } \
+  && check "L50b a spent lineage budget answers deferred without starting the resolver or writing a marker" PASS \
+  || check "L50b zero budget (answer='$BZ_ANSWER' resolver=$(budget_count resolver))" FAIL
+
+FB_DIR="$T/fallback"; mkdir -p "$FB_DIR"
+fb_run() {
+  local name="$1" start=$SECONDS
+  shift
+  budget_hook "$@" > "$FB_DIR/$name.raw"
+  printf '%s\n' "$((SECONDS - start))" > "$FB_DIR/$name.took"
+}
+fb_ctx() { ctx < "$FB_DIR/$1.raw"; }
+fb_took() { cat "$FB_DIR/$1.took" 2>/dev/null || echo 99; }
+fb_has() { printf '%s' "$1" | grep -qF -- "$2"; }
+FB_PROMPT="add a function to foo.js"
+FB_CI_EVENT='<ci-monitor-event>CI failed on the pull request.</ci-monitor-event>'
+session "$WT" "$P_HOST"; FT_CLI="$CLI"
+session "$WT" "$P_HOST"; FU_CLI="$CLI"
+session "$WT" "$P_HOST"; FD_CLI="$CLI"
+route "$FD_CLI" "$WT" --build >/dev/null
+session "$WT" "$P_HOST"; FL_CLI="$CLI"; FL_HOST="$HOST"
+session "$WT" "$P_HOST"; FC_CLI="$CLI"
+session "$WT" "$P_HOST"; FR_CLI="$CLI"
+session "$WT" "$P_HOST"; FS_CLI="$CLI"
+: > "$BPIDS"
+fb_run typed "$WT" "$FT_CLI" "" "$FB_PROMPT" substitute 20 &
+fb_run unread "$WT" "$FU_CLI" "" "$FB_PROMPT" config 20 "$CFG_DEFAULT" sdk-ts &
+fb_run decided "$WT" "$FD_CLI" "" "$FB_PROMPT" substitute 20 &
+fb_run brief "$WT" "$FL_CLI" "$FL_HOST" "$FB_PROMPT" substitute 20 &
+fb_run ci "$WT" "$FC_CLI" "" "$FB_CI_EVENT" substitute 20 "$CFG_TDD" &
+fb_run ciunread "$WT" "$FR_CLI" "" "$FB_CI_EVENT" config 20 &
+fb_run silent "$WT" "$FS_CLI" "" "$FB_PROMPT" principal 20 &
+wait
+FB_ALIVE="$(hung_alive)"
+FB_TYPED="$(fb_ctx typed)"
+{ [ "$(last_field "$FB_TYPED")" = "$ASK" ] && fb_has "$FB_TYPED" 'shortened because this hook did not finish within its 20s budget' \
+  && fb_has "$FB_TYPED" 'ZENSU HUMAN PRESENT: yes' && fb_has "$FB_TYPED" 'Rank on your own reading of the request' \
+  && fb_has "$FB_TYPED" 'offers no /zensu:autopilot, so never run it from this reminder' && fb_has "$FB_TYPED" 'TDD-MODE: strict' \
+  && fb_has "$FB_TYPED" 'never states a preference' && fb_has "$FB_TYPED" "The user's own instructions outrank this advice" \
+  && ! fb_has "$FB_TYPED" 'was not read' && ! fb_has "$FB_TYPED" 'No person is confirmed present' \
+  && [ "$(fb_took typed)" -le 32 ] && [ "$FB_ALIVE" = 0 ]; } \
+  && check "L51 a reminder whose work outlives the deadline after reading the route still prints the ask field, the human-present field and the ask safeguards, and no hung child of the seven fallback runs survives ($(fb_took typed)s)" PASS \
+  || check "L51 deadline fallback (field='$(last_field "$FB_TYPED")' took=$(fb_took typed)s alive=$FB_ALIVE ctx='${FB_TYPED:0:80}')" FAIL
+FB_UNREAD="$(fb_ctx unread)"
+{ [ "$(last_field "$FB_UNREAD")" = "$ASK" ] && fb_has "$FB_UNREAD" "The session's delivery route was not read" \
+  && fb_has "$FB_UNREAD" 'ZENSU HUMAN PRESENT: unknown' && fb_has "$FB_UNREAD" 'No person is confirmed present, so the Yes option comes first' \
+  && ! fb_has "$FB_UNREAD" 'Rank on your own reading' && fb_has "$FB_UNREAD" 'offers no /zensu:autopilot' \
+  && [ "$(fb_took unread)" -le 32 ]; } \
+  && check "L51b a deadline before the route was read says so, and without a confirmed person the fallback puts the workflow first" PASS \
+  || check "L51b unread route fallback (field='$(last_field "$FB_UNREAD")' took=$(fb_took unread)s ctx='${FB_UNREAD:0:80}')" FAIL
+FB_DECIDED="$(fb_ctx decided)"
+{ [ "$(last_field "$FB_DECIDED")" = "ZENSU DELIVERY ROUTE: build (session marker)" ] \
+  && fb_has "$FB_DECIDED" 'shortened because this hook' && fb_has "$FB_DECIDED" 'route decided by the field below' \
+  && ! fb_has "$FB_DECIDED" 'ZENSU HUMAN PRESENT' && ! fb_has "$FB_DECIDED" 'AskUserQuestion' \
+  && [ "$(fb_took decided)" -le 32 ]; } \
+  && check "L51c a deadline after the worker read a decided route prints that route's decided line with the real field" PASS \
+  || check "L51c decided fallback (field='$(last_field "$FB_DECIDED")' took=$(fb_took decided)s ctx='${FB_DECIDED:0:80}')" FAIL
+FB_BRIEF="$(fb_ctx brief)"
+{ opens_with_lead "$FB_BRIEF" && [ "$(lead_count "$FB_BRIEF")" = 1 ] && [ "$(last_field "$FB_BRIEF")" = "$INHERITED" ] \
+  && fb_has "$FB_BRIEF" 'shortened because this hook' && [ "$(linked_state "$WT" "$FL_CLI")" = linked ] \
+  && [ "$(fb_took brief)" -le 32 ]; } \
+  && check "L51d a deadline after a linked session's brief was recognized keeps the brief note and the inherited field" PASS \
+  || check "L51d brief fallback (lead=$(lead_count "$FB_BRIEF") field='$(last_field "$FB_BRIEF")' linked=$(linked_state "$WT" "$FL_CLI") took=$(fb_took brief)s)" FAIL
+FB_CI="$(fb_ctx ci)"
+{ [ "$(last_field "$FB_CI")" = "ZENSU DELIVERY ROUTE: build (hooks.defaultDeliveryRoute)" ] && fb_has "$FB_CI" 'CI-monitor event' \
+  && ! fb_has "$FB_CI" 'was not read' && ! fb_has "$FB_CI" 'AskUserQuestion' && [ "$(fb_took ci)" -le 32 ]; } \
+  && check "L52 a CI-monitor event whose work outlives the deadline gets the CI note with the field the worker read, never the ask-first text" PASS \
+  || check "L52 CI deadline fallback (field='$(last_field "$FB_CI")' took=$(fb_took ci)s ctx='${FB_CI:0:60}')" FAIL
+FB_CIU="$(fb_ctx ciunread)"
+{ [ "$(last_field "$FB_CIU")" = "$ASK" ] && fb_has "$FB_CIU" 'CI-monitor event' && fb_has "$FB_CIU" 'the delivery route was not read' \
+  && fb_has "$FB_CIU" 'run the Zensu workflow (the Skill tool with skill zensu:build' && ! fb_has "$FB_CIU" 'AskUserQuestion' \
+  && [ "$(fb_took ciunread)" -le 32 ]; } \
+  && check "L52b a CI-monitor event whose route was not read gets the ask field and the sentence that a code change runs the Zensu workflow" PASS \
+  || check "L52b unread CI fallback (field='$(last_field "$FB_CIU")' took=$(fb_took ciunread)s ctx='${FB_CIU:0:60}')" FAIL
+{ [ ! -s "$FB_DIR/silent.raw" ] && [ "$(fb_took silent)" -le 32 ]; } \
+  && check "L53 a prompt the reminder has not classified by the deadline gets no output at all ($(fb_took silent)s)" PASS \
+  || check "L53 unclassified prompt (took=$(fb_took silent)s raw='$(head -c 60 "$FB_DIR/silent.raw" 2>/dev/null)')" FAIL
+
+B_REG="$(node -e '
+  const { registeredHooks } = require(process.argv[1]);
+  const manifest = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
+  const hit = (registeredHooks(manifest, "UserPromptSubmit") || []).find(({ command }) => /user-prompt-tdd-reminder\.sh/.test(command || ""));
+  process.stdout.write(hit && Number.isInteger(hit.timeout) ? String(hit.timeout) : "none");
+' "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" "$PLUGIN_DIR/hooks/hooks.json" 2>/dev/null)"
+B_CLAMP="$(for v in unset '' 1 0 007 015 99 abc 1234567; do
+  if [ "$v" = unset ]; then bash -c 'source "$0"; zensu_prompt_deadline_seconds' "$DEADLINE_LIB"
+  else ZENSU_PROMPT_DEADLINE_SECONDS="$v" bash -c 'source "$0"; zensu_prompt_deadline_seconds' "$DEADLINE_LIB"; fi
+done 2>/dev/null | tr '\n' ' ')"
+B_MAX="$(bash -c 'source "$0"; printf "%s" "$ZENSU_PROMPT_DEADLINE_MAX_SECONDS"' "$DEADLINE_LIB" 2>/dev/null)"
+{ [ "$B_CLAMP" = "20 20 10 10 10 15 20 20 20 " ] && [ -n "$B_MAX" ] && [ "$B_REG" != none ] && [ "$B_REG" -ge $((B_MAX + 10)) ]; } \
+  && check "L54 the deadline defaults to 20s and clamps to 10-20s, and the reminder's host timeout (${B_REG}s) is at least the ceiling plus 10s" PASS \
+  || check "L54 deadline bounds (clamp='$B_CLAMP' max=$B_MAX registration=$B_REG)" FAIL
+
+
+echo "== Budget: the deadline library supervises a worker =="
+PD="$T/prompt-deadline"; mkdir -p "$PD/mark" "$PD/tmp"
+cat > "$PD/driver.sh" <<'EOF'
+#!/bin/bash
+set -u
+source "$1"
+zensu_prompt_deadline_seconds() { printf '%s\n' "$DRIVER_DEADLINE"; }
+pd_fallback() {
+  printf 'FALLBACK kind=%s deadline=%s route=%s multi=%s long=%s bad=%s\n' "$1" "$2" "$(zensu_prompt_recorded route)" \
+    "$(zensu_prompt_recorded multi)" "$(zensu_prompt_recorded long)" "$(zensu_prompt_recorded Bad)"
+}
+zensu_prompt_supervise "$2" "$3" pd_fallback
+EOF
+cat > "$PD/worker-hang.sh" <<'EOF'
+#!/bin/bash
+[ "${1:-}" = "--zensu-prompt-worker" ] || exit 97
+source "$PD_LIB"
+zensu_prompt_worker_enter "$@"
+printf '%s\n' "$$" >"$MARK_DIR/worker.pid"
+sleep 600 &
+printf '%s\n' "$!" >"$MARK_DIR/grandchild.pid"
+[ -n "${PD_KIND:-}" ] && zensu_prompt_classified "$PD_KIND"
+[ -n "${PD_RAW_KIND:-}" ] && printf '%s\n' "$PD_RAW_KIND" >"$3/classified"
+zensu_prompt_record route 'build (session marker)'
+zensu_prompt_record multi "$(printf 'a\nb')"
+zensu_prompt_record long "$(printf '%0300d' 0)"
+zensu_prompt_record Bad refused
+printf 'partial stdout'
+printf 'partial stderr\n' >&2
+sleep 600
+EOF
+cat > "$PD/worker-delivered.sh" <<'EOF'
+#!/bin/bash
+[ "${1:-}" = "--zensu-prompt-worker" ] || exit 97
+source "$PD_LIB"
+zensu_prompt_worker_enter "$@"
+zensu_prompt_classified prompt
+printf '{"delivered":true}\n'
+zensu_prompt_delivered
+sleep 600
+EOF
+cat > "$PD/worker-fast.sh" <<'EOF'
+#!/bin/bash
+[ "${1:-}" = "--zensu-prompt-worker" ] || exit 97
+source "$PD_LIB"
+zensu_prompt_worker_enter "$@"
+cat >"$MARK_DIR/stdin.copy"
+printf 'fast stdout'
+printf 'fast stderr\n' >&2
+exit 2
+EOF
+pd_drive() {
+  TMPDIR="$PD/tmp" DRIVER_DEADLINE="$1" MARK_DIR="$PD/mark" PD_LIB="$DEADLINE_LIB" PD_KIND="${4:-}" PD_RAW_KIND="${5:-}" \
+    bash "$PD/driver.sh" "$DEADLINE_LIB" "$2" "$3"
+}
+pd_alive() { kill -0 "$(cat "$PD/mark/$1.pid" 2>/dev/null)" 2>/dev/null && echo yes || echo no; }
+pd_sleepers() { ps -ax -o command= 2>/dev/null | grep -cx "sleep $1"; }
+pd_tmp_left() { ls -A "$PD/tmp" | wc -l | tr -d ' '; }
+pd_wait_for() {
+  local tries=0
+  while [ ! -s "$1" ] && [ "$tries" -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done
+  [ -s "$1" ]
+}
+
+rm -f "$PD/mark/"*.pid
+PD_T0=$SECONDS
+pd_drive 2 "$PD/worker-hang.sh" '{"p":1}' prompt >"$PD/d.out" 2>"$PD/d.err"; PD_RC=$?
+PD_TOOK=$((SECONDS - PD_T0))
+{ [ "$PD_RC" = 0 ] && [ "$(cat "$PD/d.out")" = "FALLBACK kind=prompt deadline=2 route=build (session marker) multi= long= bad=" ] \
+  && [ ! -s "$PD/d.err" ] && [ "$PD_TOOK" -le 12 ] && [ "$(pd_alive worker)" = no ] && [ "$(pd_alive grandchild)" = no ] \
+  && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L55 a classified worker past the deadline is stopped with its process group, its partial output is dropped, and the fallback gets the kind, the deadline and only the single-line facts it may read (${PD_TOOK}s)" PASS \
+  || check "L55 hung classified worker (rc=$PD_RC out='$(cat "$PD/d.out")' worker=$(pd_alive worker) grandchild=$(pd_alive grandchild) tmp=$(pd_tmp_left))" FAIL
+
+PD_NAMES="$(LC_ALL=en_US.UTF-8 bash -c '
+  source "$1" >/dev/null 2>&1 || exit 9
+  for name in prompt ok-1 Bad "$2" bad_name "$3"; do
+    if _zensu_prompt_name_ok "$name"; then printf a; else printf r; fi
+  done
+  case B in ([a-z]) printf :collating ;; (*) printf :ascii ;; esac
+' _ "$DEADLINE_LIB" "$(printf '\303\251')" "$(printf '%033d' 0 | tr 0 a)" 2>/dev/null)"
+case "$PD_NAMES" in
+  (aarrrr:collating)
+    check "L55b the kind and fact name screen refuses upper-case, accented, underscored and over-long names under a locale whose bracket ranges collate" PASS ;;
+  (aarrrr:ascii)
+    check "L55b the name screen holds, but bracket ranges did not collate under en_US.UTF-8 in this shell, so the locale probe could not discriminate" PASS ;;
+  (*)
+    check "L55b name screen under a collating locale (got '$PD_NAMES', want aarrrr)" FAIL ;;
+esac
+
+rm -f "$PD/mark/"*.pid
+pd_drive 2 "$PD/worker-hang.sh" '{}' '' 'Not A Kind' >"$PD/d.out" 2>"$PD/d.err"; PD_RC=$?
+{ [ "$PD_RC" = 0 ] && [ ! -s "$PD/d.out" ] && [ ! -s "$PD/d.err" ] && [ "$(pd_alive grandchild)" = no ] && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L56 a classified file that does not hold a kind the library accepts gets no fallback" PASS \
+  || check "L56 refused kind (rc=$PD_RC out='$(cat "$PD/d.out")' grandchild=$(pd_alive grandchild) tmp=$(pd_tmp_left))" FAIL
+
+pd_drive 2 "$PD/worker-delivered.sh" '{}' >"$PD/d.out" 2>"$PD/d.err"; PD_RC=$?
+{ [ "$PD_RC" = 0 ] && [ "$(cat "$PD/d.out")" = '{"delivered":true}' ] && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L57 a worker that marked its output delivered before the deadline is forwarded with exit 0, never replaced by the fallback" PASS \
+  || check "L57 delivered worker (rc=$PD_RC out='$(cat "$PD/d.out")' tmp=$(pd_tmp_left))" FAIL
+
+PD_PAYLOAD='{"hook_event_name":"UserPromptSubmit","prompt":"tab	and \"quote\" and trailing spaces  "}'
+pd_drive 4271 "$PD/worker-fast.sh" "$PD_PAYLOAD" >"$PD/d.out" 2>"$PD/d.err"; PD_RC=$?
+sleep 1
+{ [ "$PD_RC" = 2 ] && [ "$(cat "$PD/d.out")" = "fast stdout" ] && [ "$(cat "$PD/d.err")" = "fast stderr" ] \
+  && [ "$(cat "$PD/mark/stdin.copy")" = "$PD_PAYLOAD" ] && [ "$(pd_sleepers 4271)" = 0 ] && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L58 a worker that finishes in time has stdin, stdout, stderr and its exit code passed through, and leaves no watchdog and no private directory behind" PASS \
+  || check "L58 pass-through (rc=$PD_RC out='$(cat "$PD/d.out")' err='$(cat "$PD/d.err")' sleepers=$(pd_sleepers 4271) tmp=$(pd_tmp_left))" FAIL
+
+rm -f "$PD/mark/"*.pid
+PD_T0=$SECONDS
+TMPDIR="$PD/tmp" DRIVER_DEADLINE=4 MARK_DIR="$PD/mark" PD_LIB="$DEADLINE_LIB" PD_KIND=prompt \
+  bash "$PD/driver.sh" "$DEADLINE_LIB" "$PD/worker-hang.sh" '{}' >/dev/null 2>&1 &
+PD_DRIVER=$!
+pd_wait_for "$PD/mark/grandchild.pid"
+kill -KILL "$PD_DRIVER" 2>/dev/null
+wait "$PD_DRIVER" 2>/dev/null
+PD_GONE=no
+kill -0 "$PD_DRIVER" 2>/dev/null || PD_GONE=yes
+PD_BEFORE="$(pd_alive worker)"
+while [ $((SECONDS - PD_T0)) -lt 8 ]; do sleep 1; done
+{ [ "$PD_GONE" = yes ] && [ "$PD_BEFORE" = yes ] && [ "$(pd_alive worker)" = no ] && [ "$(pd_alive grandchild)" = no ] \
+  && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L59 a supervisor killed by SIGKILL still has its worker group stopped at the deadline and its private directory removed, by the watchdog it left behind" PASS \
+  || check "L59 orphaned worker (supervisor gone=$PD_GONE worker before=$PD_BEFORE after=$(pd_alive worker) grandchild=$(pd_alive grandchild) tmp=$(pd_tmp_left))" FAIL
+
+rm -f "$PD/mark/"*.pid
+TMPDIR="$PD/tmp" DRIVER_DEADLINE=37 MARK_DIR="$PD/mark" PD_LIB="$DEADLINE_LIB" PD_KIND=prompt \
+  bash "$PD/driver.sh" "$DEADLINE_LIB" "$PD/worker-hang.sh" '{}' >"$PD/d.out" 2>&1 &
+PD_DRIVER=$!
+pd_wait_for "$PD/mark/grandchild.pid"
+kill -TERM "$PD_DRIVER" 2>/dev/null
+wait "$PD_DRIVER"
+PD_RC=$?
+sleep 1
+{ [ "$PD_RC" = 143 ] && [ ! -s "$PD/d.out" ] && [ "$(pd_alive worker)" = no ] && [ "$(pd_alive grandchild)" = no ] \
+  && [ "$(pd_sleepers 37)" = 0 ] && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L60 SIGTERM to the supervisor stops the worker group and the watchdog at once, prints nothing and exits 143" PASS \
+  || check "L60 SIGTERM (rc=$PD_RC worker=$(pd_alive worker) grandchild=$(pd_alive grandchild) sleepers=$(pd_sleepers 37) tmp=$(pd_tmp_left))" FAIL
 
 finish

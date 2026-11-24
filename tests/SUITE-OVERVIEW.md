@@ -142,9 +142,10 @@ retained), the mode precedence at the freeze point (`tdd-mode-toggle` — sessio
 choice > `--tdd-mode` caller default > config > vanilla, plus the fail-safe that an
 unreadable marker forces nothing), the two preconditions `--tdd-complete` refuses on —
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
-anchors on — the `build` route a Claude Desktop linked session inherits from its parent and the
-brief note on its first prompt (`linked-session-route`, against a fake desktop store and real git
-worktrees), and the 5-agent review fan-out wiring in `skills/build/references/review-chain.md`.
+anchors on — the `build` route a Claude Desktop linked session inherits from its parent, the
+brief note on its first prompt and the reminder's time budget (`linked-session-route`, against a
+fake desktop store and real git worktrees), and the 5-agent review fan-out wiring in
+`skills/build/references/review-chain.md`.
 
 ### Review chain & findings (31)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·

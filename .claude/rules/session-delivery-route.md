@@ -8,6 +8,7 @@ paths:
   - "hooks/lib/linked-session-v1.js"
   - "hooks/lib/desktop-store-read-v1.js"
   - "hooks/lib/zensu-linked-session.sh"
+  - "hooks/lib/zensu-prompt-deadline.sh"
   - "hooks/lib/zensu-doctor.sh"
   - "hooks/lib/zensu-doctor-report.js"
   - "hooks/session-start-banner.sh"
@@ -269,6 +270,95 @@ that resolves `linked` answers `linked`, because a later prompt is the user's ow
 no sentence: its fast path (B) reads only the user's own approval message, and its heredocs sit close
 to `D44`'s 9,000-character bound.
 
+## The reminder's time budget
+
+**The measured cause.** The FR-007 census of 2026-11-24 found 30 of 510 linked sessions whose first
+prompt carried no route field, because the reminder hit the host's 30 s limit for a hook registered
+without a `timeout` (the transcripts record `timeoutMs: 30000`). All 30 sit inside fan-out bursts,
+13 on 2026-11-07 and 11 on 2026-11-20, and on every one the sibling prompt hooks were slow too:
+zen-mode took 11 to 47 s and hit its own 20 s limit 7 times, worktree-keep hit its 10 s limit 15
+times. The lineage read was not the cost. A linked first prompt ran 16 `node` children in series,
+seven of them hashing the plugin runtime again (the bind and six project-root verifications), and
+at a load average of 90 to 120 on 16 cores the hook took 9.1 to 31.7 s, the lineage resolver's own
+process 1.6 to 2.9 s of it.
+
+**Fewer processes.** The reminder memoizes the root verification
+(`.claude/rules/stop-latency.md`, the memo's fourth caller), reads the payload's prompt and session
+id in one `node` child, and takes the bound session key instead of a `session-key` child: 9
+children on a linked first prompt, one verification. `L48` in
+`tests/structure/test-linked-session-route.sh` holds at most nine and exactly one.
+
+**A deadline for the whole hook.** `hooks/lib/zensu-prompt-deadline.sh` re-runs the reminder as a
+worker in its own process group, with stdin, stdout and stderr in a private `mktemp -d` directory,
+and a watchdog in a group of its own kills that group at the deadline: 20 s by default,
+`ZENSU_PROMPT_DEADLINE_SECONDS` clamped to 10 to 20 s, under the registration's explicit `"timeout":
+30` (`L54` holds the registration at least 10 s above the ceiling). The floor sits above the 6 s
+lineage reserve, so a lowered value still leaves the lineage read time to run. The design follows
+the Stop hook's supervisor and stays a copy of it (`.claude/rules/stop-latency.md` §"Deadline" says
+why), with its residuals: on Git Bash the group kill is unverified, the supervisor itself still
+needs the CPU to start, and a kill can land inside an adopting bind. A worker that finished is
+forwarded as it wrote, and so is one the deadline met after it marked its output delivered: the
+reminder calls `zensu_prompt_delivered` after each emission and before the prompt ledger, and the
+supervisor then exits 0 whatever status the kill left. A worker killed before that leaves the
+supervisor the `classified` file the worker writes once the prompt has passed every silent exit,
+the active-chain check included, and the facts it recorded on the way through
+`zensu_prompt_record`: the route field once read, and `lead` as `brief` once a linked session's
+brief was recognized. The library knows no kind or fact name. The reminder's
+`emit_deadline_fallback` reads the facts through `zensu_prompt_recorded`, screens the route against
+the six spellings of the field, and prints:
+
+- `prompt` with a recorded `build` or `direct` route: that route's decided line, built by the same
+  `decided_line` the worker uses and headed as shortened, with the real field and no human-present
+  field (`L51c`).
+- `prompt` otherwise: a shortened ask reminder with the field `ask` and the human-present field,
+  which also says the route was not read when none was recorded (`L51b`). It carries what every ask
+  shape carries: the ranking clause with a person present and the workflow-first sentence without
+  one, the sentence that this reminder never runs `/zensu:autopilot`, `TDD_STRICT_ASK`,
+  `TDD_UNTRUSTED`, the preference rule and the yield sentence of `docs/precedence.md` (`R15b`
+  counts four carriers). It names the workflow question without the record command, so nothing is
+  recorded from it, and it marks no prompt ledger, so the next prompt still gets the full text
+  (`L51`).
+- either `prompt` shape after a recognized brief opens with `ZENSU_LINKED_BRIEF_LEAD`, which the
+  fallback sources from `zensu-directive.sh` on that path alone (`L51d`).
+- `ci` with a recorded route: the CI note with that field, the text the worker would have printed
+  (`L52`).
+- `ci` without one: the CI note with `ask` and a sentence that a code change in this event runs the
+  Zensu workflow, because `ask` on a CI event otherwise means fix, commit and push without a route
+  (`L52b`).
+- any other kind, and no file: nothing at all, because the prompt may be one the reminder stays
+  silent on, such as a task notification or a session with `tddReminder` off (`L53`).
+
+An unread route reads `ask` because that is the answer the ladder already gives when the root
+cannot be resolved: a hook that could not finish never lets a marker it did not read, or the config
+alone, pick a route. `L55` to `L60` drive the library itself through a small driver: the fallback
+with its facts and the facts it refuses, a kind it refuses, a worker that marked its output
+delivered before the deadline, the pass-through of stdin, stdout, stderr and exit code with nothing
+left behind, a supervisor killed by SIGKILL, and SIGTERM. The name screen spells its letters out
+instead of using bracket ranges, because `/bin/bash` 3.2 collates `[a-z]` under a UTF-8 locale and
+accepts `B` there; `L55b` checks it under `en_US.UTF-8`.
+
+**A budget for the lineage.** The worker hands `zensu_linked_session_resolve` the seconds left until
+the deadline minus the 6 s reserve it passes to `zensu_prompt_lineage_budget` for the rest of its
+run. The resolver then runs in its own process group under a watchdog inside the command
+substitution; one the watchdog kills answers `deferred`,
+writes no marker, and the field comes from the ordinary ladder in the full text (`L49`), so the
+session's own marker and a configured default still decide it (`L49b`); the next prompt resolves
+again (`L50`). A spent budget answers `deferred` without starting the resolver
+(`L50b`). The plan gate passes no budget and resolves as before. A resolver killed by the
+supervisor rather than by its own watchdog keeps running until that watchdog fires, which the reserve
+places before the deadline.
+
+**Known gaps.** The host can stop the supervisor after the worker marked the prompt ledger and
+before the supervisor forwarded the text, so a full text the model never received can count as
+delivered; that takes a machine that cannot run the supervisor between the deadline and the host's
+limit, and the short lines carry every obligation (`.claude/rules/prompt-ledger.md`). The bound
+starts when bash starts: a machine that cannot schedule the supervisor within the host's 30 s still
+loses the field. A worker stopped after the resolver wrote the linked marker and before the brief
+was recorded loses the brief note for good, because the next prompt reads the marker; the reserve
+leaves at least 6 s for that step. The other prompt hooks of a fan-out burst keep their own limits
+and their own costs; the router and zen-mode bind and verify the same way and are the next
+candidates.
+
 ## Placeholders, not interpolation
 
 Each ask-hook keeps exactly TWO quoted `cat <<'JSON'` heredocs, because the parity helper in
@@ -414,7 +504,23 @@ route: a route change moves only the field, and every shape of the reminder carr
   processes through a `node` shim on `PATH`. It skips on native Windows, where the store layout
   it builds is unverified, and carries no native-Windows marker, so
   `windows-native-structure.v1.json` does not list it. It has no `ci-shard-weights.v1.json`
-  figure yet; take one from its first green CI run.
+  figure yet; take one from its first green CI run. Its budget block (`L48` to `L60`) classifies
+  every `node` child through a second shim by literals it shares with the code: the inline
+  `core.readContext({ recordsDir, sessionId: key })` of `zensu_resolve_project_dir`, the
+  resolver's file name, `ZENSU_DIRECTIVE_PLACEHOLDERS` of the substitution,
+  `classifyPreToolPayload` of the principal check and `j.hooks.defaultDeliveryRoute` of
+  `zensu_default_delivery_route`. Rewording one of them turns its check red. The hung-child cases
+  wait for real deadlines; the hook-level fallback cases run side by side, so the block waits
+  about 45 s in all.
+- The time budget: `hooks/lib/zensu-prompt-deadline.sh` (the clamp, `zensu_prompt_supervise`,
+  the worker entry, `zensu_prompt_classified`, `zensu_prompt_record`, `zensu_prompt_recorded`,
+  `zensu_prompt_delivered`, `zensu_prompt_lineage_budget`); the reminder's `CI_NOTE`, the `TDD_*`
+  sentences and `decided_line` it defines above the supervise call, `emit_deadline_fallback` with
+  its six field spellings, which `zensu_delivery_route_field` renders, the stubs it defines when the
+  library does not load, and its three `zensu_prompt_delivered` calls; the optional budget and
+  `_zensu_linked_session_answer` in `hooks/lib/zensu-linked-session.sh`, the third copy of the
+  group watchdog (`.claude/rules/stop-latency.md`); and the reminder's `"timeout": 30` in
+  `hooks/hooks.json`.
 - `evals/plan-approval-hook/`: `route_recorded` in the runner grades `T2.9` on the marker the
   helper writes, through `zensu_delivery_route_marker_path` and
   `zensu_delivery_route_marker_state` rather than a copy of either, the expect script's
@@ -440,6 +546,12 @@ Hub profile stores is `patch` as well: no kind or field changes, the verdict lin
 fields, and the one new reason, `own-record-ambiguous`, comes under the existing kind `none`; the
 shell's tab-split `read` in `hooks/lib/zensu-linked-session.sh` discards the reason field, and no
 reason value is matched outside the resolver and its suite.
+The reminder's time budget is `patch` on the same walk: no schema field, no strict key set, no hook
+added, removed or renamed, no matcher changed (the registration gains a `timeout`, which is not its
+matcher), the knob is an environment variable rather than a config key, `deferred` is a new answer
+of an in-tree shell function that writes nothing, and the hook still emits only
+`additionalContext`. An older runtime of the same lineage never reads the new library, and a marker
+it finds absent after a deferral it resolves itself.
 
 ## Known bounds
 
@@ -511,7 +623,7 @@ reason value is matched outside the resolver and its suite.
   its policy is the skill-sentence fallback. One renderer for all of them is a separate change.
 - Every prompt without an active chain pays up to two further `node` spawns in the reminder:
   `zensu_default_delivery_route` when the marker does not decide, and the substitution on every
-  emission. Unmeasured, on a hook registered without a `timeout`.
+  emission. Both now run inside the reminder's deadline (§"The reminder's time budget").
 - Windows is unverified for the new suite: it runs only in the weekly Windows Safety structure
   shard, with no blocking PR-shard entry by design.
 - `/zensu:delivery-route` cannot be exercised live from a `--plugin-dir` checkout in a session
@@ -584,7 +696,16 @@ reason value is matched outside the resolver and its suite.
 - The one resolution is a cross-session read: two desktop records, one Session Control record, up
   to two markers of another session, and `git rev-parse` in both roots. Measured on 2026-10-18:
   p95 26 ms in-process, and p95 174 ms through the CLI at a load average of 27, where a bare `node`
-  start alone took p50 81 ms. Later prompts read one marker in bash and start no process.
+  start alone took p50 81 ms. Measured again on 2026-11-24: 1 ms in-process where a Hub profile's
+  store is unreachable, and 31 to 41 ms on the multi-store resolver of PR #648 (eleven store
+  candidates in under 0.5 ms, the two `git rev-parse` calls 24 to 29 ms); as a process at a load
+  average of 90 to 120 the resolver took 1.6 to 2.9 s and the two `git` starts 0.5 to 0.8 s, all of
+  it process start. Later prompts read one marker in bash and start no process.
+- A resolution the lineage budget cut short answers `deferred` and caches nothing, so the next
+  prompt resolves again and inherits. The brief itself gets its route field from the ordinary
+  ladder and no brief note, so a route preference in it can act as the user's own for that one
+  prompt, the behavior from before inheritance. The next prompt is the user's own once the brief's
+  turn completed, so it gets the inherited route and no note.
 - The parent is looked up under its current `cliSessionId` only. A parent whose record lists
   `priorCliSessionIds` and whose marker was written under one of those earlier ids passes nothing
   on.
