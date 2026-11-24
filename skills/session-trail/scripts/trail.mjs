@@ -959,14 +959,15 @@ function mainRootFromGitFile(gitFile) {
 // INFERRED from the usual Electron userData locations and have never been observed;
 // `lineage --diagnose` prints every probe so a wrong guess is visible in one command,
 // and $ZENSU_CCD_STORE overrides the list without a code change.
-function ccdStoreCandidates(ignoreOverride = false) {
+function ccdStoreCandidates(discoveredOnly = false) {
   const out = [];
   // An explicit override is AUTHORITATIVE, not merely first: falling through to a
   // guessed path when the named one is absent would silently attribute sessions to
   // accounts read out of a store the operator did not choose, and the fallback would
   // be invisible in every output except --diagnose.
   const env = process.env.ZENSU_CCD_STORE;
-  if (!ignoreOverride && env && env.trim()) return [{ source: CCD_STORE_OVERRIDE, dir: path.resolve(hostPath(env.trim())) }];
+  if (!discoveredOnly && env && env.trim()) return [{ source: CCD_STORE_OVERRIDE, dir: path.resolve(hostPath(env.trim())) }];
+  if (!discoveredOnly) out.push(...namedStoreCandidates());
   out.push({ source: 'macOS (verified)', dir: path.join(HOME, 'Library', 'Application Support', 'Claude', 'claude-code-sessions') });
   const appData = process.env.APPDATA;
   if (appData && appData.trim()) out.push({ source: 'Windows APPDATA (unverified)', dir: path.join(appData.trim(), 'Claude', 'claude-code-sessions') });
@@ -975,7 +976,44 @@ function ccdStoreCandidates(ignoreOverride = false) {
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg && xdg.trim()) out.push({ source: 'XDG_CONFIG_HOME (unverified)', dir: path.join(xdg.trim(), 'Claude', 'claude-code-sessions') });
   out.push({ source: 'Linux ~/.config (unverified)', dir: path.join(HOME, '.config', 'Claude', 'claude-code-sessions') });
-  return out;
+  for (const folder of hubProfileFolders().folders) out.push({ source: HUB_PROFILE_SOURCE, dir: path.join(folder, DESKTOP_STORE_NAME) });
+  return distinctCandidates(out);
+}
+
+const DESKTOP_STORE_NAME = 'claude-code-sessions';
+const HUB_PROFILE_SOURCE = 'Zensu Session Hub profile (verified)';
+const CCD_EXTRA_STORES = 'ZENSU_CCD_EXTRA_STORES (named)';
+const HUB_PROFILE_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+let HUB_PROFILES = null;
+
+function namedStoreCandidates() {
+  const env = process.env.ZENSU_CCD_EXTRA_STORES;
+  if (!env || !env.trim()) return [];
+  return env.split(path.delimiter).map((entry) => entry.trim()).filter(Boolean).map((entry) => ({ source: CCD_EXTRA_STORES, dir: path.resolve(hostPath(entry)) }));
+}
+
+function hubProfileFolders() {
+  if (HUB_PROFILES) return HUB_PROFILES;
+  const dir = path.join(HOME, 'Library', 'Application Support', 'Zensu Session Hub', 'Claude-Profile');
+  let names = [];
+  let unread = null;
+  try { names = fs.readdirSync(dir); } catch (e) { if (e && e.code !== 'ENOENT' && e.code !== 'ENOTDIR') unread = dir; }
+  HUB_PROFILES = { dir, unread, folders: names.filter((name) => HUB_PROFILE_NAME.test(name)).sort().map((name) => path.join(dir, name)) };
+  return HUB_PROFILES;
+}
+
+function distinctCandidates(candidates) {
+  const seen = new Set();
+  return candidates.filter((candidate) => {
+    const key = path.resolve(candidate.dir);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function realStorePath(dir) {
+  try { return fs.realpathSync.native(dir); } catch { return path.resolve(dir); }
 }
 
 let STORE_READ = null;
@@ -994,6 +1032,10 @@ function storeRead() {
 const STORE_REFUSED_REASON = 'the Claude Desktop session store was refused: another account owns it or can write it, it is a symbolic link or not a directory, or it could not be inspected';
 const RECORD_REFUSED_REASON = 'its Claude Desktop record was refused: another account owns it or can write it, it is not a regular file, it is larger than 8 MiB, or it could not be opened or read';
 const RECORDS_REFUSED_REASON = 'Claude Desktop holds no readable record for this session, and some of its store entries were refused: another account owns them or can write them, they are symbolic links, of the wrong file type or larger than 8 MiB, or they could not be opened or read';
+const PROFILES_UNREAD_REASON = 'Claude Desktop holds no readable record for this session, and the Zensu Session Hub profiles folder could not be listed, so a store in one of its profiles may hold it; `lineage --diagnose` names the folder';
+function ambiguousRecordReason(stores) {
+  return `more than one Claude Desktop session store holds a record of this session (${stores.map((store) => `\`${flatPath(store).replace(/`/g, "'")}\``).join(', ')}), and which one is its own cannot be told, so none of them was read`;
+}
 const CCD_REFUSED = new Set();
 const CCD_UNREAD = new Set();
 function refuseStoreEntry(entry) {
@@ -1009,25 +1051,35 @@ function ccdStoreProbe() {
     const { realDirectory, writableOnlyByCaller } = storeRead();
     return realDirectory(dir, writableOnlyByCaller);
   };
-  const probes = ccdStoreCandidates().map((c) => {
+  const accepted = new Map();
+  const candidates = ccdStoreCandidates();
+  const probes = candidates.map((c) => {
     const exists = dirExists(c.dir);
-    return { ...c, exists, refused: exists && !ownedDirectory(c.dir) };
+    const refused = exists && !ownedDirectory(c.dir);
+    let sameAs = null;
+    if (exists && !refused) {
+      const real = realStorePath(c.dir);
+      if (accepted.has(real)) sameAs = accepted.get(real);
+      else accepted.set(real, c.dir);
+    }
+    return { ...c, exists, refused, sameAs };
   });
-  const won = probes.findIndex((p) => p.exists && !p.refused);
-  for (const p of won === -1 ? probes : probes.slice(0, won)) if (p.refused) refuseStoreEntry(p.dir);
-  CCD_STORE_PROBE = { probes, store: won === -1 ? null : probes[won] };
+  for (const p of probes) if (p.refused) refuseStoreEntry(p.dir);
+  const profiles = candidates.some((c) => c.source === CCD_STORE_OVERRIDE) ? null : hubProfileFolders();
+  if (profiles && profiles.unread) { SKIPPED += 1; CCD_UNREAD.add(profiles.unread); }
+  const stores = probes.filter((p) => p.exists && !p.refused && !p.sameAs);
+  CCD_STORE_PROBE = { probes, stores, store: stores[0] || null, profilesUnread: profiles ? profiles.unread : null };
   return CCD_STORE_PROBE;
 }
 
-function ccdStore() {
-  const { store } = ccdStoreProbe();
-  return store ? { source: store.source, dir: store.dir } : null;
+function ccdStores() {
+  return ccdStoreProbe().stores;
 }
 
 // The store's EXISTENCE as a separate, memoised answer — main hoisted it for the
 // reason its comment gives: it is a process constant and the row literal runs once
 // per session record, and a store that does not exist on this host is NOT the same
-// as one that exists and lacks this session. It is derived from `ccdStore()` rather
+// as one that exists and lacks this session. It is derived from `ccdStores()` rather
 // than from a hardcoded macOS path, so the three-valued worktree advice is correct
 // on Linux and Windows too. A function rather than a module const because resolving
 // the store routes through `hostPath`, which FAILS when the plugin tree is
@@ -1035,7 +1087,7 @@ function ccdStore() {
 // the one that actually needs a store.
 let CCD_STORE_EXISTS_MEMO = null;
 function ccdStoreExists() {
-  if (CCD_STORE_EXISTS_MEMO === null) CCD_STORE_EXISTS_MEMO = Boolean(ccdStore());
+  if (CCD_STORE_EXISTS_MEMO === null) CCD_STORE_EXISTS_MEMO = ccdStores().length > 0;
   return CCD_STORE_EXISTS_MEMO;
 }
 
@@ -1044,6 +1096,7 @@ const CCD_RECORD_PATHS = new Map();
 let CCD_FILES = null;
 let CCD_CANDIDATES = null;
 const CCD_APPS = new Map();
+const CCD_AMBIGUOUS = new Map();
 const CCD_ID_KEY = Buffer.from('"cliSessionId"');
 let READ_SCRATCH = Buffer.alloc(0);
 
@@ -1051,10 +1104,10 @@ function ccdRecordFiles() {
   if (CCD_FILES) return CCD_FILES;
   const files = [];
   CCD_FILES = files;
-  const store = ccdStore();
-  if (!store) return files;
+  const stores = ccdStores();
+  if (!stores.length) return files;
   const { realDirectory, writableOnlyByCaller, ownedRegularFile } = storeRead();
-  const walk = (dir, depth, accountUuid) => {
+  const walk = (store, dir, depth, accountUuid) => {
     if (depth > 3) return;
     let es;
     try { es = fs.readdirSync(dir, { withFileTypes: true }); } catch { SKIPPED += 1; CCD_UNREAD.add(dir); return; }
@@ -1066,16 +1119,16 @@ function ccdRecordFiles() {
       }
       if (e.isDirectory()) {
         if (depth + 1 > 3) continue;
-        if (realDirectory(p, writableOnlyByCaller)) walk(p, depth + 1, accountUuid || e.name);
+        if (realDirectory(p, writableOnlyByCaller)) walk(store, p, depth + 1, accountUuid || e.name);
         else refuseStoreEntry(p);
         continue;
       }
       if (!/^local_.*\.json$/.test(e.name)) continue;
       if (!ownedRegularFile(p)) { refuseStoreEntry(p); continue; }
-      files.push({ path: p, accountUuid: accountUuid || null });
+      files.push({ path: p, accountUuid: accountUuid || null, store });
     }
   };
-  walk(store.dir, 0, null);
+  for (const store of stores) walk(store.dir, store.dir, 0, null);
   return files;
 }
 
@@ -1106,15 +1159,33 @@ function ccdAppEntry(o, accountUuid) {
   };
 }
 
+function settledRecord(sessionId, found) {
+  const stores = [...new Set(found.map((match) => match.file.store))];
+  if (stores.length > 1) {
+    CCD_AMBIGUOUS.set(sessionId, stores);
+    CCD_RECORD_PATHS.delete(sessionId);
+    return undefined;
+  }
+  const last = found[found.length - 1];
+  if (!last) return undefined;
+  CCD_RECORD_PATHS.set(sessionId, last.file.path);
+  return last.entry;
+}
+
 function ccdIndex() {
   if (CCD_CACHE) return CCD_CACHE;
   const map = new Map();
   CCD_CACHE = map;
+  const matches = new Map();
   for (const f of ccdRecordFiles()) {
     const { state, record: o } = storeRecordObject(f.path);
     if (!o || !o.cliSessionId) { if (state === 'unreadable') CCD_UNREAD.add(f.path); continue; }
-    CCD_RECORD_PATHS.set(o.cliSessionId, f.path);
-    map.set(o.cliSessionId, ccdAppEntry(o, f.accountUuid));
+    if (!matches.has(o.cliSessionId)) matches.set(o.cliSessionId, []);
+    matches.get(o.cliSessionId).push({ file: f, entry: ccdAppEntry(o, f.accountUuid) });
+  }
+  for (const [sessionId, found] of matches) {
+    const entry = settledRecord(sessionId, found);
+    if (entry) map.set(sessionId, entry);
   }
   return map;
 }
@@ -1179,15 +1250,15 @@ function ccdApp(sessionId) {
   if (CCD_CACHE) return CCD_CACHE.get(sessionId);
   if (CCD_APPS.has(sessionId)) return CCD_APPS.get(sessionId);
   const files = ccdRecordFiles();
-  let found;
+  const found = [];
   for (const index of ccdCandidates().get(sessionId) || []) {
     const { state, record: o } = storeRecordObject(files[index].path);
     if (!o || !o.cliSessionId || o.cliSessionId !== sessionId) { if (state === 'unreadable') CCD_UNREAD.add(files[index].path); continue; }
-    CCD_RECORD_PATHS.set(sessionId, files[index].path);
-    found = ccdAppEntry(o, files[index].accountUuid);
+    found.push({ file: files[index], entry: ccdAppEntry(o, files[index].accountUuid) });
   }
-  CCD_APPS.set(sessionId, found);
-  return found;
+  const entry = settledRecord(sessionId, found);
+  CCD_APPS.set(sessionId, entry);
+  return entry;
 }
 
 // The desktop instance id, bounded for a FIXED-COLUMN row. `flatPath` strips the
@@ -1645,28 +1716,31 @@ function accountForHostSession(hostSessionId) {
   // always-present path would make one account answer for every session — and
   // that answer is then persisted as provenance.
   if (!isSafeHostSessionId(hostSessionId)) return null;
-  const store = ccdStore();
-  if (!store) return null;
+  const stores = ccdStores();
+  if (!stores.length) return null;
   const want = `${hostSessionId}.json`;
-  let accounts;
-  try { accounts = fs.readdirSync(store.dir, { withFileTypes: true }); } catch { SKIPPED += 1; return null; }
   const { realDirectory, writableOnlyByCaller, ownedRegularFile } = storeRead();
-  for (const a of accounts) {
-    const accountDir = path.join(store.dir, a.name);
-    if (a.isSymbolicLink()) { refuseStoreEntry(accountDir); continue; }
-    if (!a.isDirectory()) continue;
-    if (!realDirectory(accountDir, writableOnlyByCaller)) { refuseStoreEntry(accountDir); continue; }
-    let workspaces;
-    try { workspaces = fs.readdirSync(accountDir, { withFileTypes: true }); } catch { continue; }
-    for (const w of workspaces) {
-      const workspaceDir = path.join(accountDir, w.name);
-      if (w.isSymbolicLink()) { refuseStoreEntry(workspaceDir); continue; }
-      if (!w.isDirectory()) continue;
-      if (!realDirectory(workspaceDir, writableOnlyByCaller)) { refuseStoreEntry(workspaceDir); continue; }
-      if (ownedRegularFile(path.join(workspaceDir, want))) return a.name;
+  const found = [];
+  for (const store of stores) {
+    let accounts;
+    try { accounts = fs.readdirSync(store.dir, { withFileTypes: true }); } catch { SKIPPED += 1; return null; }
+    scan: for (const a of accounts) {
+      const accountDir = path.join(store.dir, a.name);
+      if (a.isSymbolicLink()) { refuseStoreEntry(accountDir); continue; }
+      if (!a.isDirectory()) continue;
+      if (!realDirectory(accountDir, writableOnlyByCaller)) { refuseStoreEntry(accountDir); continue; }
+      let workspaces;
+      try { workspaces = fs.readdirSync(accountDir, { withFileTypes: true }); } catch { continue; }
+      for (const w of workspaces) {
+        const workspaceDir = path.join(accountDir, w.name);
+        if (w.isSymbolicLink()) { refuseStoreEntry(workspaceDir); continue; }
+        if (!w.isDirectory()) continue;
+        if (!realDirectory(workspaceDir, writableOnlyByCaller)) { refuseStoreEntry(workspaceDir); continue; }
+        if (ownedRegularFile(path.join(workspaceDir, want))) { found.push(a.name); break scan; }
+      }
     }
   }
-  return null;
+  return found.length === 1 ? found[0] : null;
 }
 
 function endpointFromRow(row) {
@@ -5186,7 +5260,9 @@ function desktopRecordOf(sessionId) {
   ccdApp(sessionId);
   const file = CCD_RECORD_PATHS.get(sessionId);
   let own;
-  if (!file) {
+  if (CCD_AMBIGUOUS.has(sessionId)) {
+    own = { file: null, record: null, reason: ambiguousRecordReason(CCD_AMBIGUOUS.get(sessionId)), ambiguous: true };
+  } else if (!file) {
     own = { file: null, record: null, reason: missingRecordReason() };
   } else {
     const read = storeRecordObject(file);
@@ -5198,8 +5274,10 @@ function desktopRecordOf(sessionId) {
 }
 
 function missingRecordReason() {
-  if (ccdStoreExists()) return CCD_REFUSED.size > 0 ? RECORDS_REFUSED_REASON : 'Claude Desktop holds no record for this session';
-  return ccdStoreProbe().probes.some((p) => p.refused) ? STORE_REFUSED_REASON : 'no Claude Desktop session store was found on this machine';
+  const probe = ccdStoreProbe();
+  if (ccdStoreExists()) return CCD_REFUSED.size > 0 ? RECORDS_REFUSED_REASON : probe.profilesUnread ? PROFILES_UNREAD_REASON : 'Claude Desktop holds no record for this session';
+  if (probe.probes.some((p) => p.refused)) return STORE_REFUSED_REASON;
+  return probe.profilesUnread ? PROFILES_UNREAD_REASON : 'no Claude Desktop session store was found on this machine';
 }
 
 const REPO_ROOTS = new Map();
@@ -5283,16 +5361,15 @@ function familyRecords(folder) {
   return family;
 }
 
-function accountOf(file) {
-  const hit = ccdRecordFiles().find((f) => f.path === file);
-  return hit ? hit.accountUuid : null;
+function recordFileOf(file) {
+  return ccdRecordFiles().find((f) => f.path === file) || null;
 }
 
 const CCD_STORE_OVERRIDE = 'ZENSU_CCD_STORE (authoritative)';
-let STORE_FOLDER = null;
-function storeFolderVerdict() {
-  if (STORE_FOLDER) return STORE_FOLDER;
-  const store = ccdStore();
+const STORE_FOLDERS = new Map();
+function storeFolderVerdict(storeDir) {
+  if (STORE_FOLDERS.has(storeDir)) return STORE_FOLDERS.get(storeDir);
+  const store = ccdStores().find((candidate) => candidate.dir === storeDir);
   if (!store) return null;
   const dir = path.dirname(store.dir);
   const { realDirectory, writableOnlyByCaller, ownedDirectoryRefusal } = storeRead();
@@ -5306,8 +5383,10 @@ function storeFolderVerdict() {
   }
   const realCause = cause !== 'symlink' ? null : realDir ? ownedDirectoryRefusal(realDir) : 'uninspectable';
   const override = store.source === CCD_STORE_OVERRIDE;
-  STORE_FOLDER = { dir, owned, cause, realDir, realStore, realCause, override, desktopOwn: !override || desktopOwnStore(store.dir) };
-  return STORE_FOLDER;
+  const named = override ? 'ZENSU_CCD_STORE' : store.source === CCD_EXTRA_STORES ? 'ZENSU_CCD_EXTRA_STORES' : null;
+  const verdict = { dir, owned, cause, realDir, realStore, realCause, override, named, desktopOwn: !named || desktopOwnStore(store.dir) };
+  STORE_FOLDERS.set(storeDir, verdict);
+  return verdict;
 }
 
 function desktopOwnStore(dir) {
@@ -5318,16 +5397,29 @@ function desktopOwnStore(dir) {
   });
 }
 
-function storeFolderState(folder, reads) {
-  if (!folder) return { storeFolderRefused: null, storeFolder: null };
-  const { dir, cause, realDir, realStore, realCause, override, desktopOwn } = folder;
-  return { storeFolderRefused: !folder.owned, storeFolder: { dir, cause, realDir, realStore, realCause, override, desktopOwn, remedy: storeFolderRemedy(folder), reads } };
+function storeFolderEntry(folder, reads) {
+  const { dir, cause, realDir, realStore, realCause, override, named, desktopOwn } = folder;
+  return { dir, refused: !folder.owned, cause, realDir, realStore, realCause, override, named, desktopOwn, remedy: storeFolderRemedy(folder), reads };
 }
 
-function savedPresets(accountUuid) {
-  const store = ccdStore();
-  if (!store || !accountUuid) return { presets: null, complete: true, folder: null };
-  const folder = storeFolderVerdict();
+function storeFolderStates(judged) {
+  const merged = [];
+  for (const { folder, read } of judged) {
+    const same = merged.find((entry) => entry.folder.dir === folder.dir);
+    if (!same) merged.push({ folder, reads: [read] });
+    else if (!same.reads.includes(read)) same.reads.push(read);
+  }
+  if (!merged.length) return { storeFolderRefused: null, storeFolder: null, storeFolders: null };
+  const entries = merged.map(({ folder, reads }) => storeFolderEntry(folder, reads));
+  const refused = entries.filter((entry) => entry.refused);
+  return { storeFolderRefused: refused.length > 0, storeFolder: refused[0] || entries[0], storeFolders: entries };
+}
+
+function savedPresets(file) {
+  const hit = recordFileOf(file);
+  const folder = hit && hit.accountUuid ? storeFolderVerdict(hit.store) : null;
+  if (!folder) return { presets: null, complete: true, folder: null };
+  const accountUuid = hit.accountUuid;
   const read = storeRecordObject(path.join(folder.dir, 'ccd-session-presets.json'));
   if (read.state === 'missing') return { presets: null, complete: folder.owned, folder };
   if (read.state !== 'read') return { presets: null, complete: false, folder };
@@ -5337,28 +5429,31 @@ function savedPresets(accountUuid) {
 function hostNamedRecord() {
   const host = (process.env.CLAUDE_CODE_HOST_SESSION_ID || '').trim();
   if (!isSafeHostSessionId(host)) return null;
-  const hit = ccdRecordFiles().find((f) => path.basename(f.path) === `${host}.json`);
-  if (!hit) return null;
-  const read = storeRecordObject(hit.path);
-  return { file: hit.path, record: read.record, reason: read.state === 'read' ? null : read.state };
+  const hits = ccdRecordFiles().filter((f) => path.basename(f.path) === `${host}.json`);
+  if (!hits.length) return null;
+  if (new Set(hits.map((f) => f.store)).size > 1) return { file: null, record: null, reason: 'ambiguous' };
+  const read = storeRecordObject(hits[0].path);
+  return { file: hits[0].path, record: read.record, reason: read.state === 'read' ? null : read.state };
 }
 
 function startedContinuations() {
   const self = selfSessionId();
-  if (!self) return { names: new Set(), complete: true, folder: null };
-  const folder = storeFolderVerdict();
-  const owned = !folder || folder.owned;
+  if (!self) return { names: new Set(), complete: true, folders: [] };
   const found = desktopRecordOf(self);
-  const own = found.file ? found : hostNamedRecord();
-  if (!own) return { names: new Set(), complete: owned && CCD_REFUSED.size === 0 && CCD_UNREAD.size === 0, folder };
-  if (own.reason) return { names: new Set(), complete: false, folder };
+  const own = found.file || found.ambiguous ? found : hostNamedRecord();
+  const listed = own && own.file ? recordFileOf(own.file) : null;
+  const folders = (listed ? [listed.store] : ccdStores().map((store) => store.dir)).map((dir) => storeFolderVerdict(dir)).filter(Boolean);
+  const owned = folders.every((folder) => folder.owned);
+  const hosted = isSafeHostSessionId((process.env.CLAUDE_CODE_HOST_SESSION_ID || '').trim());
+  if (!own) return { names: new Set(), complete: owned && !hosted && CCD_REFUSED.size === 0 && CCD_UNREAD.size === 0, folders };
+  if (own.reason) return { names: new Set(), complete: false, folders };
   const run = runIdOf(own.record && typeof own.record === 'object' ? own.record.sessionId : null);
-  if (!run) return { names: new Set(), complete: owned, folder };
+  if (!run) return { names: new Set(), complete: owned, folders };
   const family = familyRecords(path.dirname(own.file));
-  return { names: continuationsStartedBy(run, family.records), complete: owned && family.listed && family.unreadable === 0, folder };
+  return { names: continuationsStartedBy(run, family.records), complete: owned && family.listed && family.unreadable === 0, folders };
 }
 
-const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, ledgerRefused: null, newerSchemaLedgers: null, storeFolderRefused: null, storeFolder: null, sessions: [] });
+const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, ledgerRefused: null, newerSchemaLedgers: null, storeFolderRefused: null, storeFolder: null, storeFolders: null, sessions: [] });
 
 function linkedSessions(r, verdicts, planned = null) {
   const { sameRepository, oldRepositoryMeasured } = verdicts;
@@ -5372,8 +5467,8 @@ function linkedSessions(r, verdicts, planned = null) {
   const led = walk.open.some((node) => typeof node.record.cliSessionId === 'string') ? ledgerRead() : null;
   const census = led && !led.directoryError ? schemaLedgerCensus(CONFIG_ROOT) : null;
   const newerSchemaLedgers = census ? [...census.ledgers, ...census.unread].filter((ledger) => ledger.relation !== 'older') : null;
-  const started = walk.open.length ? startedContinuations() : { names: new Set(), complete: true, folder: null };
-  const saved = walk.open.some((node) => typeof node.record.startedFromEnvironmentId === 'string') ? savedPresets(accountOf(own.file)) : { presets: null, complete: true, folder: null };
+  const started = walk.open.length ? startedContinuations() : { names: new Set(), complete: true, folders: [] };
+  const saved = walk.open.some((node) => typeof node.record.startedFromEnvironmentId === 'string') ? savedPresets(own.file) : { presets: null, complete: true, folder: null };
   const decided = decideLinked(walk, {
     edges: led ? led.edges : [],
     ledgerComplete: !led || (!led.directoryError && !led.truncated && led.refused === 0 && newerSchemaLedgers.length === 0),
@@ -5394,7 +5489,7 @@ function linkedSessions(r, verdicts, planned = null) {
     oldRepositoryMeasured,
     unreadable: family.unreadable,
     ledgerTruncated: led ? led.truncated : null, ledgerError: led ? led.directoryError : null, schemaNewer: led ? led.schemaNewer : null, ledgerRefused: led ? led.refused : null, newerSchemaLedgers,
-    ...storeFolderState(started.folder || saved.folder, [saved.folder ? 'presets' : null, started.folder ? 'started' : null].filter(Boolean)),
+    ...storeFolderStates([...(saved.folder ? [{ folder: saved.folder, read: 'presets' }] : []), ...started.folders.map((folder) => ({ folder, read: 'started' }))]),
   };
 }
 
@@ -5480,7 +5575,7 @@ function linkedSessionLines(state, when, planPass = false) {
     if (newerUnread.length) detail.push(`${newerUnread.map((ledger) => `\`${briefPath(ledger.dir)}\``).join(', ')} may hold records of a newer schema and could not be inspected`);
     L.push(`_The lineage ledger could not be read completely${detail.length ? ` (${detail.join('; ')})` : ''}, so whether a linked session already continues elsewhere is unknown: each such one starts only when the user names it._`);
   }
-  if (state.storeFolderRefused && state.storeFolder) L.push(storeFolderNote(state.storeFolder, briefPath));
+  for (const folder of state.storeFolders || []) if (folder.refused) L.push(storeFolderNote(folder, briefPath));
   if (unlisted) L.push(`_The plan answer named ${state.plan.unlisted.length} linked session(s) that this brief does not list, so none of them starts: ${unlisted}. Each was archived, detached or removed after the plan, or never was an open linked session of the old session; name each one to the user in one line._`);
   if (!state.sessions.length) {
     L.push('_the session had no open linked sessions_');
@@ -6406,6 +6501,22 @@ function selfAccount() {
   return host ? accountForHostSession(host) : null;
 }
 
+function recordStoreOf(sessionId) {
+  if (!sessionId) return null;
+  ccdApp(sessionId);
+  const file = CCD_RECORD_PATHS.get(sessionId);
+  const listed = file ? recordFileOf(file) : null;
+  return listed ? listed.store : null;
+}
+
+function selfStore() {
+  const own = recordStoreOf(selfSessionId());
+  if (own) return own;
+  const host = hostNamedRecord();
+  const listed = host && host.file ? recordFileOf(host.file) : null;
+  return listed ? listed.store : null;
+}
+
 function releaseArchiveLines(r, subject, v, state, others) {
   const tag = sessionTag(r.sessionId);
   const archived = r.app ? r.app.archived === true : null;
@@ -6439,7 +6550,11 @@ function releaseArchiveLines(r, subject, v, state, others) {
   if (theirs && mine && theirs !== mine) {
     lines.push(`It runs under ${accountLabel(theirs)}, not under this session's account, so do it from a Claude window signed in to that account; the session tools here cannot see it.`);
   } else if (theirs && mine) {
-    lines.push('It runs under the same account as this session, so its entry is in this window\'s session list.');
+    const theirStore = recordStoreOf(r.sessionId);
+    const myStore = selfStore();
+    if (theirStore && theirStore === myStore) lines.push('It runs under the same account as this session, so its entry is in this window\'s session list.');
+    else if (theirStore && myStore) lines.push(`It runs under the same account as this session but keeps its record in another Claude Desktop data folder, ${flatPath(path.dirname(theirStore))}, so do it from the Claude window that uses that folder; this window's session list does not show it.`);
+    else lines.push('It runs under the same account as this session, but which Claude Desktop data folder holds one of the two records could not be told, so look for its entry in this window\'s session list first, and else in the window it ran in.');
   } else if (theirs) {
     lines.push(`It runs under ${accountLabel(theirs)}. This session's own account could not be read, so do it from a Claude window signed in to that account.`);
   } else if (r.app) {
@@ -6691,7 +6806,7 @@ function cmdRelease(opts) {
 const LEDGER_REFUSED_SHOWN = 20;
 
 function lineageDiagnose(opts) {
-  const { probes, store: resolved } = ccdStoreProbe();
+  const { probes, store: resolved, stores, profilesUnread } = ccdStoreProbe();
   const led = ledgerRead();
   const edges = led.edges;
   const refusedShown = led.refusedFiles.slice(0, LEDGER_REFUSED_SHOWN);
@@ -6707,7 +6822,9 @@ function lineageDiagnose(opts) {
       refusedRecords: led.refused,
       refusedFiles: refusedShown.map((r) => ({ file: r.file, reason: r.reason })),
       store: resolved,
+      stores,
       probes,
+      profilesUnread,
       platform: process.platform,
       processStartTimes: processStartTimeHealth(),
       skipped: SKIPPED,
@@ -6727,8 +6844,9 @@ function lineageDiagnose(opts) {
   print(`START TIMES  ${processStartTimeHealth()}`);
   print(`LABELS       ${LABELS_FILE}`);
   print('');
-  print('DESKTOP STORE PROBES (the first one that exists and is not refused wins; only the macOS path is verified):');
-  for (const p of probes) print(`  ${p.refused ? 'REFUSED' : p.exists ? 'FOUND  ' : 'absent '} ${p.source}\n           ${p.dir}`);
+  print('DESKTOP STORE PROBES (every one that exists and is not refused is read, and a session id two of them hold is read from none; the Windows and Linux paths are inferred):');
+  for (const p of probes) print(`  ${p.refused ? 'REFUSED' : p.sameAs ? 'SAME AS' : p.exists ? 'FOUND  ' : 'absent '} ${p.source}${p.sameAs ? ` (the store above at ${p.sameAs})` : ''}\n           ${p.dir}`);
+  if (profilesUnread) print(`  UNREAD  Zensu Session Hub profiles (the folder could not be listed, so a profile store in it may be missing above)\n           ${profilesUnread}`);
   print('');
   if (!resolved) {
     const refused = probes.some((p) => p.refused);

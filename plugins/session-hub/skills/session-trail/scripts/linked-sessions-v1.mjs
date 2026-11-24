@@ -421,13 +421,31 @@ export function presetMap(doc, accountUuid) {
   return presets;
 }
 
+function storeNamedBy(folder) {
+  if (folder.named === 'ZENSU_CCD_STORE' || folder.named === 'ZENSU_CCD_EXTRA_STORES') return folder.named;
+  return folder.override ? 'ZENSU_CCD_STORE' : null;
+}
+
 export function storeFolderRemedy(folder) {
   if (!folder || !folder.cause) return null;
   const cause = folder.cause === 'symlink' ? folder.realCause : folder.cause;
   if (cause === null) return 'real-path';
   if (cause === 'shared-write') return 'chmod';
-  if (cause === 'foreign-owner') return folder.override && folder.desktopOwn === false ? 'move' : 'admin';
+  if (cause === 'foreign-owner') return storeNamedBy(folder) && folder.desktopOwn === false ? 'move' : 'admin';
   return 'inspect';
+}
+
+function realPathStep(folder, value) {
+  const named = storeNamedBy(folder);
+  if (named === 'ZENSU_CCD_STORE') return value ? `set \`ZENSU_CCD_STORE\` to the store's real path, ${value}` : 'set `ZENSU_CCD_STORE` to the store\'s real path';
+  const real = value ? `the store's real path, ${value},` : 'the store\'s real path';
+  return named ? `name ${real} in \`ZENSU_CCD_EXTRA_STORES\` in place of its entry` : `add ${real} to \`ZENSU_CCD_EXTRA_STORES\``;
+}
+
+function realPathJudged(folder, value) {
+  const named = storeNamedBy(folder);
+  if (named === 'ZENSU_CCD_STORE') return `\`ZENSU_CCD_STORE\` set to the store's real path, ${value},`;
+  return named ? `the store's real path, ${value}, named in \`ZENSU_CCD_EXTRA_STORES\` in place of its entry,` : `the store's real path, ${value}, added to \`ZENSU_CCD_EXTRA_STORES\`,`;
 }
 
 const STORE_FOLDER_CAUSE = Object.freeze({
@@ -444,14 +462,15 @@ export function storeFolderNote(folder, shown) {
   const realStore = folder.realStore ? `\`${shown(folder.realStore)}\`` : 'the store\'s real path';
   const subject = linked ? 'That real folder' : 'It';
   const lead = `_The folder that holds the Claude Desktop store, \`${shown(folder.dir)}\`, ${STORE_FOLDER_CAUSE[folder.cause] || STORE_FOLDER_CAUSE.uninspectable}${linked ? ` to \`${shown(folder.realDir)}\`` : ''}, so ${reads} cannot be trusted, and each linked session that depends on them starts only when the user names it.`;
+  const named = storeNamedBy(folder);
   const remedy = {
-    'real-path': `That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, ${realStore}, whose folder is then judged instead.`,
+    'real-path': `That real folder belongs to the user and grants no group or other write, so ${realPathStep(folder, realStore)}, whose folder is then judged instead.`,
     chmod: linked
-      ? `That real folder belongs to the user and grants group or other write, so remove those bits from it, then set \`ZENSU_CCD_STORE\` to the store's real path, ${realStore}.`
+      ? `That real folder belongs to the user and grants group or other write, so remove those bits from it, then ${realPathStep(folder, realStore)}.`
       : 'It belongs to the user, so remove its group and other write bits.',
-    move: `${subject} belongs to another account, and the store, named through \`ZENSU_CCD_STORE\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and point \`ZENSU_CCD_STORE\` there; never change the permissions of a folder another account owns.`,
-    admin: `${subject} belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write${linked ? `, after which \`ZENSU_CCD_STORE\` set to the store's real path, ${realStore}, has it judged` : ''}.`,
-    inspect: `Make it a directory of the user's own with no group or other write bit${folder.cause === 'symlink' ? ', then set `ZENSU_CCD_STORE` to the store\'s real path' : ''}.`,
+    move: `${subject} belongs to another account, and the store, named through \`${named}\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and ${named === 'ZENSU_CCD_STORE' ? 'point `ZENSU_CCD_STORE` there' : 'name it there in `ZENSU_CCD_EXTRA_STORES` in place of its entry'}; never change the permissions of a folder another account owns.`,
+    admin: `${subject} belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write${linked ? `, after which ${realPathJudged(folder, realStore)} has it judged` : ''}.`,
+    inspect: `Make it a directory of the user's own with no group or other write bit${folder.cause === 'symlink' ? `, then ${realPathStep(folder, null)}` : ''}.`,
   }[storeFolderRemedy(folder)];
   return `${lead}${remedy ? ` ${remedy}` : ''}_`;
 }

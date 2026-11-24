@@ -45,11 +45,13 @@ the process ancestry up to the owning `Claude.app` process. Only the macOS path 
 MEASURED; the Windows and Linux candidates are probed and can win — `ccdStoreCandidates`
 tries `$XDG_CONFIG_HOME/Claude` and `~/.config/Claude` there — they are UNVERIFIED, not
 unreachable. Where no candidate exists the account is `null` and the ancestry still
-groups by window. `ZENSU_CCD_STORE` overrides the probe list and is AUTHORITATIVE, and
-`lineage --diagnose` prints every candidate with its verdict. `storeCandidates` in
+groups by window. Beside those defaults the list takes every Zensu Session Hub profile store and
+every store `ZENSU_CCD_EXTRA_STORES` names, and every accepted store is read
+(`.claude/rules/session-trail-targeted-lookup.md`). `ZENSU_CCD_STORE` overrides the probe list and
+is AUTHORITATIVE, and `lineage --diagnose` prints every candidate with its verdict. `storeCandidates` in
 `hooks/lib/linked-session-v1.js`, which resolves a linked session's parent for the delivery route,
-applies the same override rule, so a change to it here moves that function too
-(`.claude/rules/session-delivery-route.md`).
+applies the same override rule and reads the same named and Session Hub profile stores, so a change
+to any of them here moves that function too (`.claude/rules/session-delivery-route.md`).
 
 **Session-trail reads the desktop store under the resolver's owner and mode rule.** On
 every platform it refuses a symbolic link where a folder or a record is expected, a record
@@ -62,9 +64,11 @@ store's account picks the saved presets and the account an edge endpoint records
 account folder the check refuses leaves that endpoint's account `null`. The readers, the
 refusal reasons, the costs and the pins are in
 `.claude/rules/session-trail-targeted-lookup.md`. The resolver answers a refusal its own
-way: a refused store, folder or own record answers `none`, while a refused parent record
-answers `linked` without a parent root (`parent-record-unavailable`), so that session
-stays linked and inherits nothing (`.claude/rules/session-delivery-route.md`).
+way: a refused store or folder skips its candidate, and the session answers `none`
+(`no-session-store`) only when no other store passes; a refused own record answers `none`
+(`own-record-refused`), while a refused parent record answers `linked` without a parent root
+(`parent-record-unavailable`), so that session stays linked and inherits nothing
+(`.claude/rules/session-delivery-route.md`).
 
 **The edge's `repo` comes from the HANDED-OVER work, never from the recording
 process's cwd.** The documented takeover route runs from a window in a different repo,
