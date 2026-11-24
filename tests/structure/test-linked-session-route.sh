@@ -587,14 +587,19 @@ register() {
 }
 desk_record() {
   "$REAL_NODE" -e '
-    const [file, host, cli, parent, turns] = process.argv.slice(1);
+    const [file, host, cli, parent, turns, fork, source] = process.argv.slice(1);
     const record = { sessionId: host, title: "fixture" };
     if (cli) record.cliSessionId = cli;
     if (parent) record.spawnedFrom = { sessionId: parent, taskId: "task_fixture", title: "fixture", sideSession: false, name: "fixture" };
+    if (parent && fork) {
+      record.forkedFromSessionId = source ? JSON.parse(source) : parent;
+      record.spawnedFrom.sideSession = true;
+      record.spawnedFrom.userFork = JSON.parse(fork);
+    }
     if (turns === "null") record.completedTurns = null;
     else if (turns) record.completedTurns = Number(turns);
     require("fs").writeFileSync(file, JSON.stringify(record));
-  ' "$DESK/$1.json" "$1" "$2" "$3" "${4:-}"
+  ' "$DESK/$1.json" "$1" "$2" "$3" "${4:-}" "${5:-}" "${6:-}"
 }
 session() {
   next_id; CLI="$ID"; HOST="local_$ID"
@@ -651,6 +656,11 @@ case "$LEAD" in
   (*"brief another session wrote"*"not the user's own text"*"'/zensu:build'"*"'no tdd'"*"decides nothing"*)
     check "L5 the lead says the prompt is another session's brief and that a route preference in it decides nothing in either direction" PASS ;;
   (*) check "L5 lead wording ($LEAD)" FAIL ;;
+esac
+case "$LEAD" in
+  (*"ask the route question only when it reads ask and this request changes executable code"*"name any route the brief asked for"*)
+    check "L49 the lead asks the route question only while the field reads ask and the request changes executable code, and still asks to name the route the brief asked for" PASS ;;
+  (*) check "L49 lead route-question condition ($LEAD)" FAIL ;;
 esac
 
 echo "== AC-001, AC-004, AC-005, AC-006: a linked session inherits build =="
@@ -1142,5 +1152,51 @@ else
     && check "L44 an own desktop record another account owns answers none, a parent record another account owns leaves the session linked, noted and uninherited, and the parent record back in the caller's hands passes build on again" PASS \
     || check "L44 foreign-owned records (own='$(last_field "$FO_OUT")' linked=$(linked_state "$WT" "$FO_CLI") parent='$(last_field "$FP_OUT")' linked=$(linked_state "$WT" "$FP_CLI") restored='$(last_field "$FR_OUT")')" FAIL
 fi
+
+echo "== FR-007 census: a fork the user starts or continues is linked, but never the brief turn =="
+session "$WT" "$P_HOST" --no-record; UF_CLI="$CLI"; UF_HOST="$HOST"
+desk_record "$UF_HOST" "$UF_CLI" "$P_HOST" "" true
+UF_LINE="$(CLAUDE_CODE_HOST_SESSION_ID="$UF_HOST" CLAUDE_CODE_ACCOUNT_UUID="$ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" \
+  ZENSU_LINKED_SESSION_ID="$UF_CLI" ZENSU_LINKED_PROJECT_ROOT="$WT" "$REAL_NODE" "$RESOLVER" 2>/dev/null)"
+UF_OUT="$(remind "$WT" "$UF_CLI" "$UF_HOST" "no tdd: add a parser to foo.js")"
+{ [ "$(printf '%s' "$UF_LINE" | cut -f1)" = linked ] && [ "$(printf '%s' "$UF_LINE" | cut -f6)" = fork ]; } \
+  && check "L46 the resolver answers a record whose spawnedFrom.userFork is true as linked, with the turn fork rather than first" PASS \
+  || check "L46 user-fork verdict ($(printf '%s' "$UF_LINE" | tr '\t' ' '))" FAIL
+{ [ "$(last_field "$UF_OUT")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$UF_CLI")" = build ] \
+  && [ "$(linked_state "$WT" "$UF_CLI")" = linked ] && [ "$(lead_count "$UF_OUT")" = 0 ]; } \
+  && check "L47 a fork the user starts inherits build on its first prompt and carries no brief note, so its own words keep their rank" PASS \
+  || check "L47 user fork (field='$(last_field "$UF_OUT")' inherited=$(inherited_state "$WT" "$UF_CLI") linked=$(linked_state "$WT" "$UF_CLI") lead=$(lead_count "$UF_OUT"))" FAIL
+L48_BAD=""
+for fork in false '"true"' 1 null; do
+  session "$WT" "$P_HOST" --no-record; NF_CLI="$CLI"; NF_HOST="$HOST"
+  desk_record "$NF_HOST" "$NF_CLI" "$P_HOST" "" "$fork"
+  NF_OUT="$(remind "$WT" "$NF_CLI" "$NF_HOST" "add a function to foo.js")"
+  { opens_with_lead "$NF_OUT" && [ "$(lead_count "$NF_OUT")" = 1 ]; } || L48_BAD="$L48_BAD [userFork=$fork lead=$(lead_count "$NF_OUT")]"
+done
+[ -z "$L48_BAD" ] \
+  && check "L48 a spawnedFrom.userFork other than true (false, a string, a number, null) keeps the first-turn brief note while the record names its own parent as the fork source" PASS \
+  || check "L48 non-true userFork:$L48_BAD" FAIL
+session "$WT" "$P_HOST" --no-record; CF_CLI="$CLI"; CF_HOST="$HOST"
+next_id; CF_SOURCE="local_$ID"
+desk_record "$CF_HOST" "$CF_CLI" "$P_HOST" "" false "\"$CF_SOURCE\""
+CF_LINE="$(CLAUDE_CODE_HOST_SESSION_ID="$CF_HOST" CLAUDE_CODE_ACCOUNT_UUID="$ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" \
+  ZENSU_LINKED_SESSION_ID="$CF_CLI" ZENSU_LINKED_PROJECT_ROOT="$WT" "$REAL_NODE" "$RESOLVER" 2>/dev/null)"
+CF_OUT="$(remind "$WT" "$CF_CLI" "$CF_HOST" "no tdd: add a parser to foo.js")"
+{ [ "$(printf '%s' "$CF_LINE" | cut -f1)" = linked ] && [ "$(printf '%s' "$CF_LINE" | cut -f6)" = fork ] \
+  && [ "$(last_field "$CF_OUT")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$CF_CLI")" = build ] \
+  && [ "$(lead_count "$CF_OUT")" = 0 ]; } \
+  && check "L50 a fork the user continues, whose forkedFromSessionId names a session other than its parent, is linked with the turn fork, inherits build and carries no brief note" PASS \
+  || check "L50 continued fork (line='$(printf '%s' "$CF_LINE" | tr '\t' ' ')' field='$(last_field "$CF_OUT")' inherited=$(inherited_state "$WT" "$CF_CLI") lead=$(lead_count "$CF_OUT"))" FAIL
+L51_BAD=""
+for source in self '"local_x"' 1 null; do
+  session "$WT" "$P_HOST" --no-record; NS_CLI="$CLI"; NS_HOST="$HOST"
+  if [ "$source" = self ]; then src="\"$NS_HOST\""; else src="$source"; fi
+  desk_record "$NS_HOST" "$NS_CLI" "$P_HOST" "" false "$src"
+  NS_OUT="$(remind "$WT" "$NS_CLI" "$NS_HOST" "add a function to foo.js")"
+  { opens_with_lead "$NS_OUT" && [ "$(lead_count "$NS_OUT")" = 1 ]; } || L51_BAD="$L51_BAD [source=$source lead=$(lead_count "$NS_OUT")]"
+done
+[ -z "$L51_BAD" ] \
+  && check "L51 a forkedFromSessionId that names the session itself, is malformed, is a number or is null keeps the first-turn brief note while userFork is not true" PASS \
+  || check "L51 not a fork source:$L51_BAD" FAIL
 
 finish

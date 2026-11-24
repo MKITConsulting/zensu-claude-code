@@ -36,6 +36,7 @@ const REPOSITORY = Object.freeze({
 const TURNS = Object.freeze({
   FIRST: 'first',
   LATER: 'later',
+  FORK: 'fork',
 });
 
 const REASONS = Object.freeze({
@@ -74,6 +75,13 @@ function verdict(kind, reason, extra = {}) {
 function turnOf(record) {
   const completed = record.completedTurns;
   return completed === undefined || completed === null || completed === 0 ? TURNS.FIRST : TURNS.LATER;
+}
+
+function isUserFork(record, spawnedFrom, parentSession) {
+  if (spawnedFrom.userFork === true) return true;
+  const source = record.forkedFromSessionId;
+  return typeof source === 'string' && HOST_SESSION_RE.test(source)
+    && source !== parentSession && source !== record.sessionId;
 }
 
 function storeCandidates(platform, env) {
@@ -243,7 +251,7 @@ function resolveLinkedSession(input = {}) {
   if (typeof parentSession !== 'string' || !HOST_SESSION_RE.test(parentSession) || parentSession === hostSession) {
     return verdict(KINDS.NONE, REASONS.MALFORMED_PARENT);
   }
-  const turn = turnOf(own.record);
+  const turn = isUserFork(own.record, spawnedFrom, parentSession) ? TURNS.FORK : turnOf(own.record);
 
   const parent = readDesktopRecord(directory, parentSession);
   if (parent.state !== 'read' || parent.record.sessionId !== parentSession) {

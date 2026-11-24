@@ -62,6 +62,12 @@ with a reason, and both briefs print it.
 | none | start | a side or task-chip session, the first `LINKED_START_CAP` (8) in creation order |
 | `cap` | later | the rest, started only on a later message the user types |
 
+`linkedKind` decides the `btw`, `fork` and side kinds from `spawnedFrom`. The fork test
+`isUserFork` of `hooks/lib/linked-session-v1.js` reads the same `userFork` marker, so a change to
+that marker moves both (`.claude/rules/session-delivery-route.md` §"Coupled sites"). The resolver
+also counts a `forkedFromSessionId` that names a session other than the parent, which `linkedKind`
+does not read, so a fork in which the user continues another linked session is a side session here.
+
 Cloud and Remote Control sessions have no `local_` record in the store, so they never appear.
 The list is bounded at `LINKED_LIST_MAX` (64) and says how many it leaves out.
 

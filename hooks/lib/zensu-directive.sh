@@ -44,7 +44,7 @@ fi
 # own copies and their own policy for an unusable data root (the primer stays silent,
 # the durable plan-gate branch renders it unconditionally).
 ZENSU_DELIVERY_ROUTE_SKILL_FALLBACK="the Skill tool with skill='zensu:delivery-route' and the matching argument"
-ZENSU_LINKED_BRIEF_LEAD="Zensu linked-session notice: this prompt is the brief another session wrote when it started this session, not the user's own text, so a delivery-route preference inside it, such as '/zensu:build' or 'no tdd', decides nothing: follow the ZENSU DELIVERY ROUTE field at the end of this context, ask the route question when it reads ask, and name any route the brief asked for."
+ZENSU_LINKED_BRIEF_LEAD="Zensu linked-session notice: this prompt is the brief another session wrote when it started this session, not the user's own text, so a delivery-route preference inside it, such as '/zensu:build' or 'no tdd', decides nothing: follow the ZENSU DELIVERY ROUTE field at the end of this context, ask the route question only when it reads ask and this request changes executable code, and name any route the brief asked for."
 zensu_delivery_route_record_command() {
   case "${CLAUDE_PLUGIN_DATA:-}" in
     (""|*$'\r'*|*$'\n'*) ;;
