@@ -30,7 +30,7 @@ const CHECKPOINT_FAILURE = 'The current audit has not completed. Re-run it; its 
 const GIT_FAILURE = 'The latest audit did not complete because git failed. Re-run the audit once git works again; its cumulative scope is preserved.';
 const CLAIM_FAILURE = 'The latest audit did not complete because the claim reader failed. Re-run the audit once node and edit-landing-claims-v1.js work again; its cumulative scope is preserved.';
 const SCOPE_BASELINE_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
-const RECOVERY_GUIDANCE = 'Keep the original --baseline, --session-epoch and --dirty-before inputs or omit them so the persisted scope supplies them, and add --predicates with current literal/hash proofs where a claim is PENDING. Use --inventory for read-only inspection.';
+const RECOVERY_GUIDANCE = 'Keep the original --baseline, --session-epoch and --dirty-before inputs or omit them so the persisted scope supplies them, keep a --work-tree operand the command names, because an audit of another tree starts a new scope, and add --predicates with current literal/hash proofs where a claim is PENDING. A claim whose edit a later claimed step replaced takes a proof whose absent literals name what that claim introduced and whose supersededBy names the replacing step. Use --inventory for read-only inspection.';
 
 class AuditScopeError extends Error {}
 
@@ -463,18 +463,28 @@ function persistedScope(scope) {
   delete value.rerootedFrom;
   delete value.certified;
   delete value.proved;
+  delete value.landedOnce;
+  delete value.superseded;
   return value;
+}
+
+function scopeWorkTree(scope) {
+  if (typeof scope.claimRoot !== 'string' || scope.claimRoot === '') return '';
+  const relative = path.relative(scope.root, scope.claimRoot);
+  if (relative === '' || isOutside(relative)) return '';
+  return relative.split(path.sep).join('/');
 }
 
 function checkpointScope(scope, receiptPath, session, workTree) {
   if (!receiptPath || receiptPath === '-') return;
   const auditScope = persistedScope(scope);
   const claims = auditScope.claims.length;
+  const recorded = workTree || scopeWorkTree(scope);
   writeReceiptAtomically(receiptPath, {
     schema: 'edit-landing-v2',
     session: session || '',
     log: scopeLogValue(scope.root, scope.log),
-    ...(workTree ? { workTree } : {}),
+    ...(recorded ? { workTree: recorded } : {}),
     claims,
     landed: 0,
     notLanded: 0,
@@ -513,8 +523,42 @@ function literalList(value) {
   return value;
 }
 
-function verifyPredicates(root, file, claims, snapshots, observedFiles, baseline) {
-  if (!file) return new Set();
+function supersedingStep(proof) {
+  if (!Object.prototype.hasOwnProperty.call(proof, 'supersededBy')) return null;
+  const by = proof.supersededBy;
+  if (typeof by !== 'string' || by === '' || by.length > 512 || /[\x00-\x1f\x7f]/.test(by)) {
+    auditFail('a supersede proof needs the exact step label of the replacing claim');
+  }
+  if (by === proof.step) auditFail('a supersede proof names its own step as the replacing step; a step never supersedes itself');
+  if (Object.prototype.hasOwnProperty.call(proof, 'present')) {
+    auditFail('a supersede proof carries no present literal; name what the replaced claim introduced under absent');
+  }
+  return by;
+}
+
+function resolveSupersedes(supersedes, claims, proved, landing) {
+  const certified = new Set(landing.certified || []);
+  const landedOnce = new Set(landing.landedOnce || []);
+  const landedNow = (index) => certified.has(index + 1) || proved.has(index + 1);
+  const superseded = new Map();
+  for (const { matches, by, filePath } of supersedes) {
+    if (matches.some(landedNow)) auditFail('a supersede proof names a claim that is landed; a landed claim needs no supersede');
+    if (!matches.every((index) => landedOnce.has(index + 1))) {
+      auditFail('a supersede proof names a claim for which this audit scope records no landing; a claim is superseded only after an audit recorded that it landed');
+    }
+    const last = matches[matches.length - 1];
+    const later = claims.map((claim, index) => (index > last && claim.step === by && claim.path === filePath ? index : -1)).filter((index) => index >= 0);
+    if (later.length === 0) auditFail('a supersede proof names a replacing step with no later claim on that file');
+    if (!later.some(landedNow)) {
+      auditFail('a supersede proof names a replacing claim that is not landed in this audit; prove it in the same document');
+    }
+    for (const index of matches) superseded.set(index + 1, by);
+  }
+  return superseded;
+}
+
+function verifyPredicates(root, file, claims, snapshots, observedFiles, baseline, landing = {}) {
+  if (!file) return { proved: new Set(), superseded: new Map() };
   let loaded;
   try {
     loaded = JSON.parse(boundedFile(file, MAX_RECEIPT_BYTES).toString('utf8'));
@@ -528,6 +572,7 @@ function verifyPredicates(root, file, claims, snapshots, observedFiles, baseline
     auditFail(`the predicate proof document must be {"schema":"${PREDICATE_SCHEMA}","claims":[…]} with 1 to ${LIMITS.claims} entries`);
   }
   const proved = new Set();
+  const supersedes = [];
   for (const proof of loaded.claims) {
     if (!proof || typeof proof !== 'object' || Array.isArray(proof) || typeof proof.step !== 'string'
         || proof.step === '' || proof.step.length > 512) {
@@ -536,9 +581,13 @@ function verifyPredicates(root, file, claims, snapshots, observedFiles, baseline
     const filePath = relativeFile(proof.path);
     const matches = claims.map((claim, index) => (claim.step === proof.step && claim.path === filePath ? index : -1)).filter((index) => index >= 0);
     if (matches.length === 0) auditFail('a predicate proof names no claim of this run log');
+    const by = supersedingStep(proof);
     const current = snapshots[filePath];
     if (proof.missing === true) {
-      if (Object.keys(proof).some((key) => !['step', 'path', 'missing'].includes(key))) auditFail('a deletion proof carries only step, path and missing');
+      const allowed = by === null ? ['step', 'path', 'missing'] : ['step', 'path', 'missing', 'supersededBy'];
+      if (Object.keys(proof).some((key) => !allowed.includes(key))) {
+        auditFail(`a deletion proof carries only ${by === null ? 'step, path and missing' : 'step, path, missing and supersededBy'}`);
+      }
       if (current.exists) auditFail('a deletion proof names a path that still exists');
       if (!observedFiles.has(filePath)) {
         const changes = require('./review-packet-v1.js').collectChanges({ root, baseline: baseline || '' });
@@ -547,13 +596,14 @@ function verifyPredicates(root, file, claims, snapshots, observedFiles, baseline
         }
       }
     } else {
-      if (Object.keys(proof).some((key) => !['step', 'path', 'sha256', 'present', 'absent'].includes(key))) auditFail('a predicate proof carries an unknown field');
+      if (Object.keys(proof).some((key) => !['step', 'path', 'sha256', 'present', 'absent', 'supersededBy'].includes(key))) auditFail('a predicate proof carries an unknown field');
       if (!current.exists || current.kind !== 'file') auditFail('a literal predicate proof needs an existing regular file');
       if (typeof proof.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(proof.sha256) || proof.sha256 !== current.sha256) {
         auditFail('a predicate proof hash is stale or invalid; hash the current file bytes');
       }
       const present = literalList(proof.present);
       const absent = literalList(proof.absent);
+      if (by !== null && absent.length === 0) auditFail('a supersede proof needs at least one absent literal the replaced claim introduced');
       if (present.length === 0 && absent.length === 0) auditFail('a predicate proof needs at least one present or absent literal');
       if (current.bytes > LIMITS.proofFileBytes) {
         auditFail(`a literal predicate proof reads its file whole, and a claimed file exceeds the ${LIMITS.proofFileBytes}-byte limit; withdraw that claim with CLAIM WITHDRAWN instead`);
@@ -565,9 +615,10 @@ function verifyPredicates(root, file, claims, snapshots, observedFiles, baseline
         auditFail('a literal predicate does not hold on the current file');
       }
     }
-    for (const index of matches) proved.add(index + 1);
+    if (by === null) for (const index of matches) proved.add(index + 1);
+    else supersedes.push({ matches, by, filePath });
   }
-  return proved;
+  return { proved, superseded: resolveSupersedes(supersedes, claims, proved, landing) };
 }
 
 function priorClaimsOf(previous, claims) {
@@ -599,24 +650,60 @@ function prepareClaims(scope, manifest, predicates) {
   }
   const dirty = new Set(scope.dirty);
   const certified = [];
+  const landedOnce = [];
+  const superseded = new Map();
   const priorSnapshots = old && old.snapshots && typeof old.snapshots === 'object' ? old.snapshots : {};
   const observedFiles = new Set(old && Array.isArray(old.observedFiles) ? old.observedFiles
     : Object.entries(priorSnapshots).filter(([, value]) => value && value.exists).map(([file]) => file));
   for (const [file, value] of Object.entries(snapshots)) if (value.exists) observedFiles.add(file);
   if (scope.legacyUnresolved) for (const claim of claims) if (claim.path) dirty.add(claim.path);
   if (old) {
+    const firstSeen = new Map();
+    claims.forEach((claim, index) => {
+      if (!claim.path || priors[index]) return;
+      if (!firstSeen.has(claim.path)) firstSeen.set(claim.path, new Set());
+      firstSeen.get(claim.path).add(claim.step);
+    });
     for (let index = 0; index < claims.length; index++) {
       const claim = claims[index];
       const prior = priors[index];
       if (!claim.path) continue;
       const moved = Boolean(prior) && prior.path !== claim.path;
       if (moved) dirty.add(claim.path);
-      if (prior && !moved && prior.certified === true && same(priorSnapshots[claim.path], snapshots[claim.path])) certified.push(index + 1);
-      if (Object.prototype.hasOwnProperty.call(priorSnapshots, claim.path)) dirty.add(claim.path);
+      const known = Object.prototype.hasOwnProperty.call(priorSnapshots, claim.path);
+      const unchanged = same(priorSnapshots[claim.path], snapshots[claim.path]);
+      if (prior && !moved && prior.certified === true && unchanged) certified.push(index + 1);
+      const evidence = prior
+        ? !moved && (prior.certified === true || prior.landedOnce === true)
+        : known && !unchanged && firstSeen.get(claim.path).size === 1;
+      if (evidence) landedOnce.push(index + 1);
+      if (known) dirty.add(claim.path);
     }
+    const landedNow = new Set(certified);
+    claims.forEach((claim, index) => {
+      const prior = priors[index];
+      if (!claim.path || !prior || prior.path !== claim.path || landedNow.has(index + 1)) return;
+      const by = prior.supersededBy;
+      if (typeof by !== 'string' || by === '' || !same(priorSnapshots[claim.path], snapshots[claim.path])) return;
+      const replaced = claims.some((other, position) => position > index && other.step === by && other.path === claim.path
+        && landedNow.has(position + 1));
+      if (replaced) superseded.set(index + 1, by);
+    });
   }
-  const proved = [...verifyPredicates(claimRoot, predicates, claims, snapshots, observedFiles, scope.baseline)];
-  const result = { ...scope, dirty: [...dirty].sort(), claims, snapshots: { ...snapshots }, observedFiles: [...observedFiles].sort(), certified, proved };
+  const proofs = verifyPredicates(claimRoot, predicates, claims, snapshots, observedFiles, scope.baseline, { certified, landedOnce });
+  for (const [index, by] of proofs.superseded) superseded.set(index, by);
+  for (const index of proofs.proved) superseded.delete(index);
+  const result = {
+    ...scope,
+    dirty: [...dirty].sort(),
+    claims,
+    snapshots: { ...snapshots },
+    observedFiles: [...observedFiles].sort(),
+    certified,
+    proved: [...proofs.proved],
+    landedOnce,
+    superseded: [...superseded].sort((left, right) => left[0] - right[0]),
+  };
   delete result.previous;
   delete result.legacyUnresolved;
   return result;
@@ -670,9 +757,19 @@ function finishScope(scope, landedFile, bareWired) {
   if (!same(scope.logPrefix, logPrefix(scope.log))) auditFail('the run log changed while the audit ran');
   const wired = Number(bareWired || 0);
   if (!Number.isSafeInteger(wired) || wired < 0) auditFail('the count of WIRED entries without a files: list is not a count');
+  const superseded = new Map(Array.isArray(scope.superseded) ? scope.superseded : []);
+  const landedOnce = new Set(Array.isArray(scope.landedOnce) ? scope.landedOnce : []);
   const result = {
     ...scope,
-    claims: scope.claims.map((claim, index) => ({ ...claim, certified: landed.has(index + 1) })),
+    claims: scope.claims.map((claim, index) => {
+      const certified = landed.has(index + 1);
+      return {
+        ...claim,
+        certified,
+        ...(!certified && superseded.has(index + 1) ? { supersededBy: superseded.get(index + 1) } : {}),
+        ...(!certified && landedOnce.has(index + 1) ? { landedOnce: true } : {}),
+      };
+    }),
     bareWired: wired,
     tree: measuredTree(claimRoot),
   };
@@ -748,16 +845,33 @@ function receiptFresh(options) {
 const shellQuote = (value) => (/^[A-Za-z0-9_\/.,:=@%+-]+$/.test(String(value)) ? String(value) : `'${String(value).replace(/'/g, "'\\''")}'`);
 const UNSAFE_OPERAND = /[\x00-\x1f\x7f]/;
 
-function auditRecoveryCommand({ helper, projectRoot, sessionKey, log }) {
+const WORK_TREE_PLACEHOLDER = '<work tree>';
+
+function auditRecoveryCommand({ helper, projectRoot, sessionKey, log, workTree }) {
   const operand = (value, placeholder) => (typeof value === 'string' && value !== '' && !UNSAFE_OPERAND.test(value) ? value : placeholder);
-  return ['bash', operand(helper, 'zensu-edit-landing.sh'), '--log', operand(log, '<run log>'),
-    '--project', operand(projectRoot, '<project root>'), '--session', operand(sessionKey, '<session key>')].map(shellQuote).join(' ');
+  const words = ['bash', operand(helper, 'zensu-edit-landing.sh'), '--log', operand(log, '<run log>'),
+    '--project', operand(projectRoot, '<project root>'), '--session', operand(sessionKey, '<session key>')];
+  if (typeof workTree === 'string' && workTree !== '') words.push('--work-tree', operand(workTree, WORK_TREE_PLACEHOLDER));
+  return words.map(shellQuote).join(' ');
 }
 
 function boundLog(root, sessionKey, fallback) {
   const bound = receiptRunLog({ receiptPath: receiptFile(root, sessionKey), projectRoot: root });
   if (bound.status === 'ok') return path.join(root, ...bound.logRel.split('/'));
   return fallback ? canonical(path.resolve(fallback)) : '';
+}
+
+function boundWorkTree(root, sessionKey) {
+  let loaded;
+  try {
+    loaded = readBoundedJson(receiptFile(root, sessionKey), MAX_RECEIPT_BYTES);
+  } catch {
+    return '';
+  }
+  const receipt = loaded.absent || loaded.invalid ? null : loaded.value;
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || receipt.workTree === undefined) return '';
+  const workTree = claimPath(receipt.workTree);
+  return workTree === null ? WORK_TREE_PLACEHOLDER : path.join(root, ...workTree.split('/'));
 }
 
 function sessionGate(options) {
@@ -768,7 +882,8 @@ function sessionGate(options) {
   if (state.status === 'absent' || state.status === 'none') return { mode: 'standalone' };
   if (state.status === 'ok' && !state.active) return { mode: 'standalone' };
   const key = sessionKeyOf(ambient);
-  const command = auditRecoveryCommand({ helper: options.helper, projectRoot: root, sessionKey: key, log: boundLog(root, key, options.log) });
+  const command = auditRecoveryCommand({ helper: options.helper, projectRoot: root, sessionKey: key, log: boundLog(root, key, options.log),
+    workTree: boundWorkTree(root, key) });
   if (state.status === 'invalid') {
     return { mode: 'refuse', reason: `the workflow state of this Claude session (${key}) cannot be trusted: ${state.reason}`, command };
   }
@@ -783,6 +898,8 @@ function writeScopeFlags(dir, scope) {
     const values = scope[field] || [];
     fs.writeFileSync(path.join(dir, field), values.length ? `${values.join('\n')}\n` : '');
   }
+  const superseded = (scope.superseded || []).map(([index, by]) => `${index}\t${by}`);
+  fs.writeFileSync(path.join(dir, 'superseded'), superseded.length ? `${superseded.join('\n')}\n` : '');
 }
 
 function writeScopeState(dir, scope) {
@@ -819,7 +936,7 @@ function freshVerb(env, stdout, stderr) {
       const root = realDirectory(env.ZENSU_ELR_PROJECT_ROOT, 'the project root');
       const key = sessionKeyOf(env.ZENSU_ELR_SESSION);
       command = auditRecoveryCommand({ helper: env.ZENSU_ELR_HELPER || path.join(__dirname, 'zensu-edit-landing.sh'),
-        projectRoot: root, sessionKey: key, log: boundLog(root, key, '') });
+        projectRoot: root, sessionKey: key, log: boundLog(root, key, ''), workTree: boundWorkTree(root, key) });
     } catch { }
     stderr.write(`EDIT LANDING RECEIPT STALE — ${error.message}.\n`);
     if (command) stderr.write(`Run: ${command}\n${RECOVERY_GUIDANCE}\n`);

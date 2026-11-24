@@ -16,7 +16,7 @@ Every status and verdict cell of the chain-end report and of the plugin-opened P
 carries a leading marker — 🟢 good, 🟡 attention, 🔴 bad, ⚪ not applicable. **The marker
 PREFIXES the value and never replaces it**, which is the whole safety property: a
 verbatim-carry literal (`EDIT NOT LANDED`, `UNVERIFIED (no claims logged)`, an unresolved
-`PENDING PREDICATE`, the terminus's `FULL SUITE — …` and `ACCEPTANCE — …` verdicts, `FINDING VERIFICATION DEGRADED`,
+`PENDING PREDICATE`, an `EDIT SUPERSEDED` line, the terminus's `FULL SUITE — …` and `ACCEPTANCE — …` verdicts, `FINDING VERIFICATION DEGRADED`,
 the bypass ledger's `UNREADABLE — …`) keeps its own words after its marker. Reducing one to a bare coloured
 dot deletes the disclosure while keeping the colour, which is worse than having no colour
 at all.
@@ -55,6 +55,10 @@ an escape beside the consented gap stays 🔴. `acceptance-plan-unapproved` and
 lines verbatim, 🟢 only for `pass`, 🟡 for the passing states that verified nothing on this tree,
 for `partial-accepted` and for an advisory `incomplete` that lists only missing criteria, 🔴 for
 everything else including `escaped`; both renderers carry it right after `Full suite`.
+`Edit landing` carries an `EDIT SUPERSEDED` line verbatim and marks it 🟡: a later claimed step
+replaced that edit, the audit accepted a proof for it and counts the claim as landed
+(`.claude/rules/claim-syntax-and-work-tree.md` §"Superseded claims"), while every other line
+that row carries beside its close marker stays 🔴.
 
 **EIGHT CARRIERS, and a census in prose goes stale the next time one is added — so this is
 a GREP, not a list: before rewording the legend or the vocabulary, run

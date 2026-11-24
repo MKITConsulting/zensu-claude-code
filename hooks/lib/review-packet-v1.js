@@ -425,8 +425,9 @@ function receiptLine(mode, receipt) {
   const value = receipt.value;
   const count = (field) => (Number.isSafeInteger(value[field]) && value[field] >= 0 ? value[field] : '?');
   const schema = typeof value.schema === 'string' && /^[A-Za-z0-9._-]{1,40}$/.test(value.schema) ? value.schema : '?';
+  const superseded = Object.prototype.hasOwnProperty.call(value, 'exemptSuperseded') ? ` exempt_superseded=${count('exemptSuperseded')}` : '';
   return `schema=${schema} clean=${value.clean === true} claims=${count('claims')} landed=${count('landed')}`
-    + ` not_landed=${count('notLanded')} unverified=${count('unverified')} pending=${count('pending')} sha256=${receipt.sha256}`
+    + ` not_landed=${count('notLanded')} unverified=${count('unverified')} pending=${count('pending')}${superseded} sha256=${receipt.sha256}`
     + (value.auditFailure ? ' audit=incomplete' : '');
 }
 
