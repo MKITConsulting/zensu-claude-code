@@ -647,7 +647,7 @@ test('a checkpoint records the work tree of its scope as written, and none for a
   for (const claimRoot of [s.base, path.dirname(s.base), path.join(path.dirname(s.base), 'sibling'), '', undefined]) {
     assert.equal('workTree' in checkpoint(claimRoot), false, `the claim root ${JSON.stringify(claimRoot)} records no work tree`);
   }
-  assert.equal(checkpoint(s.base, 'named/by/the/audit').workTree, 'named/by/the/audit', 'a work tree the audit hands over is recorded before the one of the scope');
+  assert.equal(checkpoint(path.join(s.base, 'a', 'b'), 'named/by/the/audit').workTree, 'named/by/the/audit', 'a work tree the audit hands over is recorded before the one of the scope');
 });
 
 test('--check-receipt refuses a missing, pending or interrupted receipt and its own malformed operands', (t) => {
