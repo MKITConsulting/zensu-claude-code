@@ -883,6 +883,7 @@ test('a >& redirection to a file is a redirect, while a descriptor copy, a close
     ['ls > "a\\" b"', '> "a\\" b"'],
     ['sort x > $(rm -rf src)', '> $(rm -rf src)'],
     ['sort x > `rm -rf src`', '> `rm -rf src`'],
+    ['cat <src/cart.js>out.txt', '>out.txt'],
   ];
   for (const [command, part] of written) assert.deepEqual(probe.bashVerdict(command), { decision: 'END', code: 'redirect', part }, command);
   for (const command of ['ls >&2', 'ls >&-', 'ls 1>&2-', 'ls >&/dev/null', 'ls 2>& 1', 'git config user.name 2>& 1']) {
@@ -895,7 +896,8 @@ test('a >& redirection to a file is a redirect, while a descriptor copy, a close
   assert.deepEqual(probe.bashVerdict('cat < "$(rm -rf src)"'), { decision: 'END', code: 'program:rm', part: 'rm -rf src' });
   assert.deepEqual(probe.bashVerdict('cat < "`rm -rf src`"'), { decision: 'END', code: 'program:rm', part: 'rm -rf src' });
   assert.deepEqual(probe.bashVerdict('sort x > "$(rm -rf src)"'), { decision: 'END', code: 'redirect', part: '> "$(rm -rf src)"' });
-  for (const command of ['git config --get user.name 2>&1', 'git config core.hooksPath 2>&1 || echo none', 'ls 2>&"1"', "ls > '/dev/null'", 'ls 2>&1\ty']) assert.equal(probe.bashDecision(command), 'ALLOW', command);
+  assert.deepEqual(probe.bashVerdict('cat <src/cart.js|rm -rf src'), { decision: 'END', code: 'program:rm', part: 'rm -rf src' });
+  for (const command of ['git config --get user.name 2>&1', 'git config core.hooksPath 2>&1 || echo none', 'ls 2>&"1"', "ls > '/dev/null'", 'ls 2>&1\ty', 'ls 2>/dev/null|head', '(cat package.json 2>/dev/null)', 'ls 2>/dev/null&& echo x']) assert.equal(probe.bashDecision(command), 'ALLOW', command);
 });
 
 test('a proven read program keeps no flag that writes a file or loads code', () => {
@@ -925,6 +927,7 @@ test('a proven read program keeps no flag that writes a file or loads code', () 
   }
   assert.deepEqual(probe.bashVerdict('yarn test --watch'), { decision: 'RETRY', code: 'unlisted', part: 'yarn test --watch' });
   assert.deepEqual(probe.bashVerdict('file -b CHANGELOG.md; foo'), { decision: 'RETRY', code: 'unlisted', part: 'foo' });
+  assert.deepEqual(probe.bashVerdict('node --test --test-name-pattern "adds -1"'), { decision: 'RETRY', code: 'unlisted', part: 'node --test --test-name-pattern adds -1' });
 });
 
 test('the probe flattens a question into one bounded line', () => {
@@ -1258,6 +1261,7 @@ test('route-question-complete scores a route question by its labels and disclosu
   assert.deepEqual(route.missing(PER_OPTION_QUESTION, false), []);
   for (const replacement of ['Remembered for this session', 'Remembered for this session — /zensu:delivery-route changes it']) assert.deepEqual(perOptionMissing(replacement), []);
   for (const replacement of ['Not for the rest of this session', '/zensu:delivery-route changes the route for the rest of this session', 'The rest of this session is unchanged', 'Nothing is remembered for this session', 'Does not run /zensu:build for the rest of this session']) assert.deepEqual(perOptionMissing(replacement), ['a Yes is remembered for the session']);
+  for (const replacement of ['Not saved and you are asked again for the rest of this session', 'It is not saved and it applies for the rest of this session', 'Not saved, and you are asked again for the rest of this session', 'For the rest of this session, once Yes is picked Zensu does not keep it']) assert.deepEqual(perOptionMissing(replacement), ['a Yes is remembered for the session'], replacement);
   assert.deepEqual(route.missing(`${ROUTE_QUESTION} | A Yes runs the workflow, later approved plans included, through one Bash call you may be asked to allow. A No decides this request only and is not remembered. /zensu:delivery-route changes the route saved for this session.`, false), ['a Yes is remembered for the session']);
   const liveWording = COMPLETE_ROUTE_QUESTION.replace('A Yes is remembered for the rest of this session, later approved plans included, through one Bash call you may be asked to allow.', 'If you pick Yes, it applies for the rest of this session, including plans you approve later unless the plan-approval question is turned off. Saving that choice takes one Bash call, which you may be asked to allow.');
   assert.notEqual(liveWording, COMPLETE_ROUTE_QUESTION);
@@ -1386,6 +1390,84 @@ test('the session-memory needle reads a rest-of-the-session phrase after a liste
   const disclosed = 'A Yes is remembered for the rest of this session,';
   assert.deepEqual(route.missing(COMPLETE_TWO_OPTION_QUESTION.replace(disclosed, "If you pick Yes, for the rest of this session you won't be prompted again and it applies,"), false), []);
   assert.deepEqual(route.missing(COMPLETE_TWO_OPTION_QUESTION.replace(disclosed, 'Pick Yes, yet for the rest of this session it is not remembered,'), false), ['a Yes is remembered for the session']);
+  for (const words of ['of course', 'in fact', 'by default', 'as before']) {
+    assert.equal(remembered.test(`Your answer, for the rest of this session, ${words}, is not remembered.`), false, words);
+    assert.equal(remembered.test(`Your answer, for the rest of this session, ${words}, is remembered.`), true, words);
+  }
+  for (const comment of ['I think', 'I believe', 'I guess', 'I suppose', 'I hope', 'I mean', 'you know', 'you see', 'we hope', 'it seems', 'it appears', 'it turns out', 'I am sure', "I'm sure", 'I am afraid', "I'm afraid", 'I would say', "I'd say"]) {
+    assert.equal(remembered.test(`Your answer, for the rest of this session, ${comment}, is not remembered.`), false, comment);
+    assert.equal(remembered.test(`Your answer, for the rest of this session, ${comment}, is remembered.`), true, comment);
+  }
+  for (const subject of ['your answer', 'your choice', 'the Yes option', 'your Yes answer', 'the "Yes" choice']) {
+    assert.equal(remembered.test(`For the rest of this session, ${subject}, however, is not remembered.`), false, subject);
+    assert.equal(remembered.test(`For the rest of this session, ${subject}, however, is remembered.`), true, subject);
+  }
+  for (const lead of ['if', 'once', 'when', 'whenever', 'as soon as', 'after', 'before', 'since', 'until']) {
+    assert.equal(remembered.test(`For the rest of this session, ${lead} Yes is picked, it is not remembered.`), false, lead);
+    assert.equal(remembered.test(`For the rest of this session, ${lead} Yes is picked, it is remembered.`), true, lead);
+  }
+  const bounded = [
+    ['Your answer, for the rest of this session, will not be asked again, and nothing else is stored.', true],
+    ['Your choice, for the rest of this session, holds, not merely applies.', true],
+    ['Your choice, for the rest of this session, is reused, but the plan is not saved.', true],
+    ['Your choice applies for the rest of this session, nothing else is stored.', true],
+    ['For the rest of this session, a Yes is remembered and a No is not.', true],
+    ['A Yes is remembered for the rest of this session and a No is not.', true],
+    ['For the rest of this session, a Yes applies and a No does not.', true],
+    ['A Yes is remembered and a No is not.', true],
+    ['For the rest of this session, a Yes is not remembered and a No is.', false],
+    ['If you pick Yes, I will not ask again and it applies for the rest of this session.', true],
+    ['If you pick Yes, I will not ask again and your choice is remembered.', true],
+    ['Pick Yes, then I will not ask again and it applies for the rest of this session.', true],
+    ['Pick Yes and I will not ask again and it applies for the rest of this session.', true],
+    ['Your choice is not remembered for the rest of this session.', false],
+    ['Your choice is not saved, for the rest of this session.', false],
+    ['Your choice, not remembered, applies for the rest of this session.', false],
+    ['Your choice is not saved and it applies for the rest of this session.', false],
+    ['Pick Yes it is not saved and it applies for the rest of this session.', false],
+    ["For the rest of this session, Zensu won't reuse your answer.", false],
+    ['For the rest of this session, it does not use your choice.', false],
+    ['Pick Yes it is not used, and it applies for the rest of this session.', false],
+    ['For the rest of this session, if you pick Yes, it is not remembered.', false],
+    ['For the rest of this session, once you pick Yes, it is not stored.', false],
+    ['Your answer, for the rest of this session, as you know, is not remembered.', false],
+    ['Your choice, for the rest of this session, if you are sure, is not remembered.', false],
+    ['Your choice, for the rest of this session, because you are sure, is not remembered.', false],
+    ['For the rest of this session, if Yes is picked, it is not remembered.', false],
+    ['For the rest of this session, once Yes is chosen, it is not remembered.', false],
+    ['Your choice, for the rest of this session, when Yes is picked Zensu does not keep it.', false],
+    ['Your choice, for the rest of this session, when you pick Yes Zensu does not keep it.', false],
+    ['Your choice, for the rest of this session, when Yes is picked Zensu keeps it.', true],
+    ['For the rest of this session, if Yes is picked, it is remembered.', true],
+    ['For the rest of this session, your answer, however, is not remembered.', false],
+    ['For the rest of this session, your answer, however, is remembered.', true],
+    ['Your answer, for the rest of this session, I think, is not remembered.', false],
+    ['Your answer, for the rest of this session, I think, is remembered.', true],
+    ['Your answer, for the rest of this session, it seems, is not remembered.', false],
+    ["Your answer, for the rest of this session, won't be asked again, and nothing else is stored.", true],
+    ['For the rest of this session, your choice applies and you do not need to confirm it again.', true],
+    ['For the rest of this session, if you pick Yes, it is remembered.', true],
+    ['For the rest of this session, your choice is used for every request, and nothing else is saved.', true],
+    ['Your choice, for the rest of this session, is reused, and nothing else is stored.', true],
+    ['For the rest of this session, Zensu reuses your answer, and nothing else is saved.', true],
+    ['A Yes is remembered for this session and a No decides this request only.', true],
+    ['Pick Yes, it is not saved and it applies for the rest of this session.', false],
+    ['Pick Yes and it is not saved and it applies for the rest of this session.', false],
+    ['If you pick Yes, it is not saved, and you are asked again for the rest of this session.', false],
+    ["If you pick Yes, it isn't saved, so you'll be asked again for the rest of this session.", false],
+    ['It is not saved and it applies for the rest of this session if you pick Yes.', false],
+    ['If you pick Yes, you do not need to confirm it again and it applies for the rest of this session.', true],
+    ['If you pick Yes, a No is not remembered and it applies for the rest of this session.', true],
+    ['If you pick Yes, I will not ask again for the rest of this session.', true],
+    ["For the rest of this session, your choice is remembered and I won't ask again.", true],
+    ['If you pick Yes, Zensu never asks you again for the rest of this session.', true],
+    ['If you pick Yes, your choice is remembered and you do not have to answer again.', true],
+    ['If you pick Yes, you do not have to answer again and your choice is remembered.', true],
+    ['If you pick Yes, your choice is remembered and it is not stored.', false],
+    ["No choice is saved; you'll be asked each time.", false],
+    ['No answer is remembered for this session.', false],
+  ];
+  for (const [text, holds] of bounded) assert.equal(remembered.test(text), holds, text);
 });
 
 test('route-question-ranked requires the recommended option first and the only one marked', () => {
