@@ -244,19 +244,23 @@ id without a row refuses with a remedy that asks for the row, so an answer count
 written.
 
 **A driver fence is a cause of its own, and it changes the question.** A driver fence is a state
-the driver can never show, whoever drives it; today the only one is a service worker under the
-`browser` driver, whose run config blocks them (`.claude/rules/browser-consent-gate.md`). Planning
+the driver can never show, whoever drives it. No driver has one today: the `browser` driver's
+run config allows service workers (`.claude/rules/browser-consent-gate.md`). The category stays,
+so that a driver which fences a state away has a cause to name. Planning
 names it as an observability gap and offers no access option for it, and the ONE question leaves
 out "Provide access now" for a criterion it rules out, whatever else that criterion needs,
 because no login, account, service or driver lifts it. A refusal of the consent gate is NOT a
 driver fence, because the driver could show that state: a denied command, or a remote navigation
-whose URL carries a query or a fragment. The owner file names no such case and no step for the user
+whose URL carries a query or a fragment. An offline scenario is such a refusal too: it fails on
+`network-state-set`, a command the gate denies, so offline behaviour and background sync are
+named as a limit in `docs/verify-feature.md` and nowhere as a cause. The owner file names no such
+case and no step for the user
 around one, on purpose: `skills/verify-feature/rules/browser-verification.md` says a denied call
 is never re-issued under another spelling, another session name or through another program, a
 shape denial being its one exception, which changes how a call is spelled and never what the
 gate refuses; the gate denies page code to the model because it can read authenticated data; and
 a criterion that needs a refused navigation has no cause category of its own. `A0k` fails when
-the owner file names page code or a query. The cause list is spelled at
+the owner file names page code, a query, a service worker or an offline case. The cause list is spelled at
 these sites, which move together: the owner file, Phase 1.5 of
 `skills/build/references/planning.md`, `skills/autopilot/rules/validate.md`, both plan templates,
 `docs/configuration.md`, `docs/gates.md` and `docs/verify-feature.md`; `A0h` and `A0k` to `A0m`
@@ -264,9 +268,9 @@ in `tests/structure/test-acceptance-gate.sh` pin them. `P10o` and `P10p` in
 `tests/structure/test-verify-feature-skill.sh` pin the two rule files a browser run reads,
 section 3 of `skills/verify-feature/rules/drivers.md` and section 1 of
 `skills/verify-feature/rules/browser-verification.md`, and the operator doc. `P10o` also requires
-`scripts/verify-browser-config.js` to write `serviceWorkers: 'block'`, so lifting the block fails
-that check until this text is rewritten; lifting it removes that one instance and leaves the
-category.
+`scripts/verify-browser-config.js` to write `serviceWorkers: 'allow'`, so a change to that value
+fails the check until this text follows it; a driver that gains a fence adds its instance to the
+owner file and to these sites in the same commit.
 
 **The hand-off.** Without a record the Stop enforcer cannot tell "waiting on the user" from
 "stalled", so a refused standalone terminus writes one. `isHandoff` answers true for an `incomplete` or

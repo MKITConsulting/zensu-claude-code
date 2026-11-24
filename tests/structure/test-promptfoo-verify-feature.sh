@@ -93,6 +93,7 @@ fi
 if grep -qF 'ZENSU_PLUGIN_DIR_OVERRIDE' "$RUNNER" \
   && grep -qF 'unset ZENSU_WRAPPER_TEST_MODE ZENSU_WRAPPER_TEST_KILL_WATCHER' "$RUNNER" \
   && grep -qF 'PLAYWRIGHT_MCP_*|PWTEST_*) unset "$ambient"' "$RUNNER" \
+  && grep -qF 'PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK) unset "$ambient"' "$RUNNER" \
   && ! grep -qF 'ZENSU_MCP_' "$RUNNER" \
   && ! grep -qF 'playwright-mcp.sh' "$RUNNER" \
   && grep -qF 'export ZENSU_VERIFY_NAVIGATION_POLICY_V1=' "$RUNNER" \

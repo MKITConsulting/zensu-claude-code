@@ -29,7 +29,7 @@ driver), and Phase 1 validates exactly these rows.
 (Optional. One row per active `AC-###` criterion this run's environment cannot observe, which the
 user accepts as partial when approving this spec: it needs credentials, an account, a
 non-loopback host or a signed build, or its driver cannot run here, or a driver fence rules the
-state out (the `browser` driver blocks service workers). VALIDATE accepts a `partial`
+state out (no driver has one today). VALIDATE accepts a `partial`
 criterion only when this table of the approved spec lists it, because the run asks no question.
 The Consent cell names where and when the consent was given, never a person, an account, an
 email address or an internal hostname. Omit the section when every criterion can be observed.)

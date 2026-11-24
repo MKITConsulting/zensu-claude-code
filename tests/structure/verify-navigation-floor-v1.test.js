@@ -154,6 +154,31 @@ test('one exported exact-host predicate serves classifyOrigin, the policy parser
   assert.equal(FLOOR_REASONS.HOSTNAME_PATTERN.startsWith('an origin must name its host exactly: '), true);
 });
 
+test('a hostname that starts with a dot is refused by the predicate, the classification and the policy parser, and a dot elsewhere stays part of the name', () => {
+  for (const host of ['.example.com', '.com', '.']) {
+    assert.equal(floor.isExactHost(host), false, host);
+  }
+  for (const host of ['app.example.com.', 'a..example.com']) {
+    assert.equal(floor.isExactHost(host), true, host);
+  }
+  assert.equal(FLOOR_REASONS.HOSTNAME_PATTERN.includes('that does not start with "."'), true);
+  for (const url of ['https://.example.com/', 'wss://.example.com/', 'https://.example.com:8443/app']) {
+    assert.equal(classifyOrigin(url).reason, FLOOR_REASONS.HOSTNAME_PATTERN, url);
+  }
+  assert.equal(classifyOrigin('http://.example.com/').reason, FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
+  const trailing = classifyOrigin('https://app.example.com./');
+  assert.equal(trailing.mode, 'remote');
+  assert.equal(trailing.hostname, 'app.example.com.');
+  const origin = 'https://.example.com';
+  assert.deepEqual(parsePolicyTargets(policyOf('remote', [{ ...POLICY_TARGET, origin }])), { ok: false, fault: FLOOR_REASONS.HOSTNAME_PATTERN });
+  for (const mode of ['remote', 'local']) {
+    assert.deepEqual(parsePolicyTargets(networkOnlyPolicyOf(mode, [targetFor(mode)], [origin])),
+      { ok: false, fault: FLOOR_REASONS.HOSTNAME_PATTERN }, mode);
+  }
+  assert.equal(parsePolicyTargets(policyOf('remote', [{ ...POLICY_TARGET, origin: 'https://app.example.com.' }])).ok, true);
+  assert.equal(parsePolicyTargets(networkOnlyPolicyOf('local', [POLICY_TARGET], ['https://app.example.com.'])).ok, true);
+});
+
 test('remote host resolution pins only globally routable answers', async () => {
   assert.deepEqual(await resolveRemoteHost('93.184.216.34', async () => []), ['93.184.216.34']);
   await assert.rejects(resolveRemoteHost('10.0.0.1', async () => []), /not globally routable/);

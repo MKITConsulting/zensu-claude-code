@@ -59,14 +59,15 @@ the evidence boundary is the approved origin, which covers every page on it, and
 longer read.
 
 Propose `validate.networkOnly` only when a tracked file names another origin the application's
-pages request — an API base URL, an OIDC authority or a token endpoint in a tracked environment
-or configuration file — and only for the deployment the recipe selects. Never propose an origin
+pages request — an API base URL, an OIDC authority, a token endpoint or a WebSocket endpoint in
+a tracked environment or configuration file — and only for the deployment the recipe selects. Never propose an origin
 the pages navigate — the application origin, or the origin of a hosted login page even when its
 token endpoint sits there too: that origin stays a target, and an authentication origin belongs in
 `auth.baseUrl`. Each origin gets its own
 evidence line, and an origin no tracked file names stays out: never propose one from a running
 application, a browser's network log, a guess, or a file `git ls-files` does not report.
-Propose it as the bare origin, with no path, and propose `appOrigin` only for a remote recipe,
+Propose it as the bare origin, with no path, a WebSocket endpoint as the `http` or `https`
+origin of its host and port, and propose `appOrigin` only for a remote recipe,
 where it must be the origin of the validated remote base URL.
 
 For a build driver, propose the `validate` block instead of, or beside, the services: the
