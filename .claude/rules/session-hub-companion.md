@@ -105,7 +105,7 @@ When the bind fails it sends the unbound variant instead, which names no reancho
 characters on every other prompt, pin it; N13 holds its command name, the hook's prefilter and
 the receipt entry's to the companion contract's `takeover.prefix`. The notice reaches only a
 prompt that carries the command: a linked session started from a brief, a takeover started
-through the Skill tool and a PLM older than this change get none. So the companion's briefs carry
+through the Skill tool and a PLM without this hook get none. So the companion's briefs carry
 the rule themselves (`plmGateCaution` in `trail.mjs`, the `Commits, when Zensu PLM is installed`
 line), `show` prints it as its `COMMITS` lines (`PLM_GATE_SHOW_LINES`), and
 `references/takeover.md` step 3 tells the model to read `hooks.bashWriteGate` rather than the

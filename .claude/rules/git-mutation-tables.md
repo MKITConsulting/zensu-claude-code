@@ -24,7 +24,7 @@ in turn sits ABOVE the bind, so at the default the no-anchor deny of the two rel
 states does not run either, and a project `.zensu/config.json` opt-in cannot reach it: the
 opt-in is read through `CLAUDE_PROJECT_DIR` ahead of the bind, and that deny runs only when that
 directory is unusable, so only a `~/.zensu/config.json` or `ZENSU_CONFIG` opt-in does. A foreign record is still refused at the default, by the
-all-tool capability gate rather than here. The default flipped
+all-tool capability gate rather than here. The default is off
 on measured evidence: a seeded sample of 156 transcripts from September 2026 held 27 denies in
 11 sessions, none of which stopped a real mistake, while 14 blocked intended work (takeover
 moves, commits in a session's own worktree after the host moved it, multi-repository layouts)
@@ -32,7 +32,7 @@ and 1,085 commands carried a gate-off prefix, which the auto-mode classifier ref
 Every suite that exercises the rules therefore opts the gate in through a fixture of its own
 that sets `{"hooks":{"bashWriteGate":true}}` — `CFG_ON` in the gate suite, `$SBOX/config.json`
 in the bypass-ledger suite, the fixture's `.zensu/config.json` in the live e2e layer, and a
-`gate-on-config.json` elsewhere; a fixture that points at the defaults now tests a gate that
+`gate-on-config.json` elsewhere; a fixture that points at the defaults tests a gate that
 does nothing. In the gate suite W5 and W5b pin the opt-in and the shared note, the W29 family
 the default-off behavior on a bound session, and the `d`-suffixed unbound rows plus W87e2 and
 W87g2 the same order in the relaxed and foreign-record states; `O29a2` and `O29f` in the
@@ -74,7 +74,7 @@ the tables rather than listing them, for the same reason; their VERB CONTENT is 
 pinned. THREE needles in `docs/gates.md` §"Source-Write Gate" ARE pinned, by T29 in
 `tests/structure/test-session-trail-skill.sh` — `cross-worktree takeover`,
 `session-trail` and `does **not** cover a nested worktree`. The last IS the
-containment claim, so rewording it fails the suite. That file is no longer wholly
+containment claim, so rewording it fails the suite. That file is not wholly
 unpinned; see the section below.
 
 **The gate's ANCHOR contract is restated in NINE carriers outside the parser, and
@@ -89,8 +89,7 @@ them state the CONTAINMENT rule.
 
 **`continuationPlan` is the one carrier that ACTS on the rule instead of only
 restating it**, and its three narrowings are the reason it may. It renders and never
-executes, and the reason is APPROVAL rather than gate coverage — a first wording claimed
-the latter and was wrong about the two commands that matter. This script's writes happen
+executes, and the reason is APPROVAL rather than gate coverage. This script's writes happen
 inside node where no PreToolUse gate can see them, so a worktree it created would be
 unseen; but so are two of the four it RENDERS. Only `git apply` and the patch redirect
 are judged: `bash-source-write-parse.js` gates `worktree` for `remove`/`move` only and
@@ -114,16 +113,16 @@ carries none of it, on the same terms as `writes`: a brief is read by a differen
 session than the one measured, where a rendered target path is a confident instruction
 into the wrong tree.
 
-**Windows is UNMEASURED here, not unreachable, and the distinction was got wrong
-once.** `tests/structure/test-session-trail-verdict.sh` is in the `excluded` list of
+**Windows is UNMEASURED here, not unreachable.**
+`tests/structure/test-session-trail-verdict.sh` is in the `excluded` list of
 `tests/profiles/windows-native-structure.v1.json` and absent from
 `tests/profiles/windows-ci.v1.json`, so the BLOCKING PR shards skip it — but it IS in
 `ciStructureTests` in `tests/profiles/promptfoo-local-only.v1.json`, so the weekly
 windows-safety run executes it. The WC block will therefore run on Windows; it simply
 never has yet. It is also the first case in that suite to create a real git repository
 and worktree, which is new platform surface AND new wall clock for a suite whose
-Windows runtime nobody has measured — take the figure from the first weekly run after
-this lands. Both of its preconditions SKIP rather than fail, deliberately: a git that
+Windows runtime nobody has measured — take the figure from the first weekly run that
+executes it. Both of its preconditions SKIP rather than fail, deliberately: a git that
 cannot build the fixture, and a filesystem whose canonical spelling differs from the
 literal one, are environment properties, and failing on either would redden a weekly
 run for a reason unrelated to this feature.
@@ -158,18 +157,16 @@ the bullet carries the hook roster. A change to
 `within()`, to how `project_root` is minted (`claude-session-control-v1.js`
 `projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves every
 carrier enumerated above wrong with both session-trail suites green — they drive `trail.mjs` against its
-own definition and grep the prose for literals. `writeAnchor` no longer holds a hand-copy of
-`within`: the parser now defines it at MODULE scope and EXPORTS it, and
+own definition and grep the prose for literals. `writeAnchor` holds no hand-copy of
+`within`: the parser defines it at MODULE scope and EXPORTS it, and
 `trail.mjs` requires the parser and CALLS it, so the containment rule has one
-implementation and the two cannot drift. (The parser always had an export surface
-— `detectChannels`, `gitTargets`, `msysToDrive` and the frozen tables, consumed by
-`tests/structure/git-repo-escape.test.js`; what it did not export was `within`
-itself. An earlier wording here said the parser "exports nothing", which read as
-the former and was false.) The same require supplies `msysToDrive`, so the
-comparison is now in the gate's namespace on Windows too. A FAILED load is
+implementation and the two cannot drift. (The parser's export surface is
+`detectChannels`, `gitTargets`, `msysToDrive` and the frozen tables, consumed by
+`tests/structure/git-repo-escape.test.js`, plus `within`.) The same require supplies
+`msysToDrive`, so the comparison is in the gate's namespace on Windows too. A FAILED load is
 reported as `rejected:gate-unavailable` and yields `covered: null` — there is
 deliberately no local fallback copy, because answering off a weaker rule than the
-gate's is exactly what taking the seam removed. What remains this feature's OWN
+gate's is exactly what the shared seam rules out. What remains this feature's OWN
 encoding is the canonicalization: `canonicalPair` feeds both operands through
 `msysToDrive` + `path.resolve` + `realpathSync.native` and applies `TRAILING_SEP`
 (platform-selected, guarded by `path.parse(p).root === p`), which is NOT the
@@ -178,12 +175,11 @@ A change to the gate's own canonicalization still has no recorded re-check site;
 treat `canonicalPair` as the one remaining place where this feature encodes what
 it believes the gate does. It canonicalizes both sides TOGETHER: one
 `realpathSync` failure drops BOTH back to the lexical spelling, because
-canonicalizing per operand put them in different namespaces whenever exactly one
-path existed — the `!! MISSING` worktree case, where a symlinked anchor compared
+canonicalizing per operand would put them in different namespaces whenever exactly one
+path exists — the `!! MISSING` worktree case, where a symlinked anchor would compare
 as an escape from its own nested worktree. Do not
-trust an ordinal here — an earlier wording said "sixth" and was already wrong,
-because `hooks/lib/zensu-tdd-phase.sh` carries a further semantically equivalent spelling
-inside a `node -e`. Read the enumeration below, not a count. THREE
+trust an ordinal here: `hooks/lib/zensu-tdd-phase.sh` carries a further semantically
+equivalent spelling inside a `node -e`. Read the enumeration below, not a count. THREE
 narrowings are deliberate and stated at the copy, and they do NOT share a direction:
 only rule (C)'s `isTemp` carve-out errs toward WARNING. The other two err toward
 `allowed`: rule (A) fires on an IN-ANCHOR target — a raw shell overwrite of tracked
@@ -192,8 +188,7 @@ sides while the gate realpaths only its roots and resolves a `cd` operand
 lexically. That asymmetry is the property to re-check before letting the
 hand-copy
 drift. `writeAnchor`'s measured verdict reaches THREE carriers — `show`'s stdout,
-`show --json` and `takeover --json` — and the third was already true before the
-continuation work; an earlier wording here named only the first two and was wrong.
+`show --json` and `takeover --json`.
 What reaches a `~/.claude/handoffs/` brief is `writeAnchorCaution`'s
 STATIC containment sentence, deliberately unmeasured because a brief is read by a
 session it was not measured against. A correction to that WORDING does not reach
@@ -218,8 +213,8 @@ stdin half of that premise**, because everything here rests on it: were stdin ev
 converted too, `msysToDrive` would be normalizing an already-native path, every
 assertion would stay green, and the real defect would have moved out of view. The
 argv half is why the gate suite must hand a raw MSYS spelling to `node` over stdin
-rather than as an argument — W121b silently skipped itself on Windows for exactly
-that reason, reporting "spellings coincide" while testing nothing.
+rather than as an argument, which would make W121b skip itself silently on Windows and
+report "spellings coincide" while testing nothing.
 `hooks/checks/pre-bash-source-write-gate.sh` exempts
 `CLAUDE_ENV_FILE` from that same conversion by hand (`MSYS2_ENV_CONV_EXCL`), which is
 why `controlPathNamespace` exists for that one variable and why it cannot be reused
@@ -266,7 +261,7 @@ CLAUDE_ENV_FILE namespace), and pins that the shared rule stays throw-free.
 Leaving an unconverted token raw changes no verdict: every rooted spelling the throwing
 policy rejects resolves outside the session root, so `within()` reports an escape. Whether
 that escape is DENIED is separate — `/tmp/x` and `/var/folders/x` are default temp members,
-so `isTemp()` allows them by design and always did. Not converting a complete UNC is no gap
+so `isTemp()` allows them by design. Not converting a complete UNC is no gap
 either: `path.resolve` already yields the same spelling.
 
 **The temp list travels with the namespace.** `ZENSU_BSWGATE_TEMP_DIRS` is a LIST, and on
@@ -275,28 +270,28 @@ operator may supply a native `;`-separated one with drive-qualified entries. (Th
 own renderer, `zensu-host-path.sh`, emits drive-qualified FORWARD-slash paths — `D:/a/tmp`
 — and is not wired to this variable; it shows the shape to expect, it does not produce
 this list.) `splitTempList` therefore treats a colon as a separator
-except in drive position — a plain `.split(":")` shredded `D:\a\tmp` into `["D",
-"\\a\\tmp"]`, so the intended root never entered `TEMP` and the rule (B) carve-out
-silently stopped applying. The map that follows also drops any entry that resolves to a
+except in drive position — a plain `.split(":")` would shred `D:\a\tmp` into `["D",
+"\\a\\tmp"]`, so the intended root would never enter `TEMP` and the rule (B) carve-out
+would silently stop applying. The map that follows also drops any entry that resolves to a
 filesystem ROOT: `TEMP_SAFE` rejects only roots that CONTAIN the project, which on win32
 cannot catch `C:\` while the project sits on `D:` — that entry would carve out an entire
-drive with no bypass-ledger entry, and `/c` only became spellable as a drive root once
-`msysToDrive` started normalizing it.
+drive with no bypass-ledger entry, and `/c` is spellable as a drive root only because
+`msysToDrive` normalizes it.
 
 **One accepted gap is NOT fail-closed and is pinned rather than fixed:** drive-relative
 `D:rel` on the project's own drive resolves against the base and lands INSIDE the session
 root, so it is allowed; if the shell's real cwd on that drive is elsewhere the write
-escapes. It predates the normalizer (`D:rel` has no leading slash, so `msysToDrive` never
+escapes. It sits outside the normalizer (`D:rel` has no leading slash, so `msysToDrive` never
 sees it) and `git-repo-escape.test.js` pins the judgment so a change to it is deliberate.
 
 **The harness lies on Windows in four ways, and each one fails SILENTLY on POSIX.**
-Every one of these turned a check green — or red — for a reason unrelated to the
+Every one of these can turn a check green — or red — for a reason unrelated to the
 contract it names, and none is observable from a POSIX host:
 
 - **Grep the DECODED deny reason, never the hook's raw stdout.** The hook emits through
   `JSON.stringify`, which doubles every backslash, so a `D:\a\…` needle can never match a
-  `D:\\a\\…` haystack. This failed W121/W183/W204 on Windows against a message that was
-  already correct, and made W121b — whose whole job is to prove a spelling is ABSENT —
+  `D:\\a\\…` haystack. A raw-stdout needle therefore fails W121/W183/W204 on Windows
+  against a message that is already correct, and makes W121b — whose whole job is to prove a spelling is ABSENT —
   pass without testing anything. `reason()` decodes it; **W3g** pins that every
   `REASON_*` capture is piped through it, and **W3f** makes the encoding itself
   observable on any host. W87e is the deliberate exception: it greps the JSON envelope.
@@ -308,27 +303,26 @@ contract it names, and none is observable from a POSIX host:
   probes reachability first and skips only where the parser could never reach the shim.
 - **`ln -s` exiting 0 is not evidence of a symlink.** Git Bash satisfies it with a copy
   or a shortcut native Node does not follow; the two directories then genuinely differ
-  and DENY is CORRECT, so W167/W168 failed on a premise that did not hold. They confirm
-  the link through `fs.realpathSync.native` — the same primitive `canonical()` uses.
+  and DENY is CORRECT, so a check that trusted the exit status would fail W167/W168 on a
+  premise that does not hold. They confirm the link through `fs.realpathSync.native` — the same primitive `canonical()` uses.
 - **Hand the command to `node` over stdin, never through an environment variable.**
   MSYS rewrites an environment value it takes for a path on its way into a native
-  binary, and a command that starts with a rooted path is such a value. While
-  `payload()` passed the command as `CMD`, W237 (`/usr/bin/ENV …`), W245
-  (`/usr/bin/GIT …`) and W323 (`>/dev/null git …`) allowed on Windows in run
-  41646817779 while the parser was right. W256 starts with `/usr/bin/cd` and stayed
-  green only because its second command denies by rule (A) whatever becomes of its
-  first word. W552 to W554 also start with a redirection to `/dev/null` and stayed
-  green, so a green check of that shape proves nothing about the rewrite. `payload()`
-  now pipes the command into `node`, as the host delivers it, and **W3i** pins that a
-  rooted command arrives verbatim.
+  binary, and a command that starts with a rooted path is such a value. A `payload()`
+  that passes the command as `CMD` makes W237 (`/usr/bin/ENV …`), W245
+  (`/usr/bin/GIT …`) and W323 (`>/dev/null git …`) allow on Windows while the parser is
+  right. W256 starts with `/usr/bin/cd` and stays green regardless only because its second
+  command denies by rule (A) whatever becomes of its first word. W552 to W554 also start
+  with a redirection to `/dev/null` and stay green regardless, so a green check of that
+  shape proves nothing about the rewrite. `payload()` pipes the command into `node`, as
+  the host delivers it, and **W3i** pins that a rooted command arrives verbatim.
 
-**The Windows timeout for this suite is a coverage boundary, not a formality.** At
-`timeoutMs: 300000` in `tests/profiles/windows-ci.v1.json` the shard killed the suite
-after roughly 210 of its checks, always mid-run at W122 — so W224, W233/W234 and
+**The Windows timeout for this suite is a coverage boundary, not a formality.** Measured
+at `timeoutMs: 300000` in `tests/profiles/windows-ci.v1.json`: the shard killed the suite
+after roughly 210 of its checks, always mid-run at W122, so W224, W233/W234 and
 everything after them never executed on Windows at all while the shard still reported.
-It is 600000 now, and run 41646817779 used 528 s of it for 605 checks. Adding checks costs Windows wall
-clock; if the shard starts reporting `TIMED_OUT` again, the tail of the file has gone
-unverified regardless of how many checks passed before it.
+The value is 600000, and run 41646817779 used 528 s of it for 605 checks. Adding checks
+costs Windows wall clock; if the shard starts reporting `TIMED_OUT`, the tail of the file
+has gone unverified regardless of how many checks passed before it.
 
 **Program names are read as a case-insensitive file system resolves them.** `programName(word,
 isWindows)` delegates to `programName(value, platform, fold)` in `hooks/lib/claude-path-v1.js`
@@ -339,7 +333,7 @@ Windows resolve `GIT`, `git.exe` or `ENV` as the lowercase program, and the pars
 file system of each `PATH` directory. `WRAP` matches on it in `detectControlMutation` and in the
 rule loop, and a folded `program` decides `git`, `sed` and `dd`. The tee channel folds only in
 command position (`program === "tee"`); elsewhere in the segment it stays the literal word `tee`,
-because a folded scan of every token made `grep -n TEE src/app.rs` or a `drivers/tee` operand a
+because a folded scan of every token would make `grep -n TEE src/app.rs` or a `drivers/tee` operand a
 tee write. In `detectControlMutation`, `cmd0` keeps the written basename for the builtins
 (`export`, `declare`, `typeset`, `readonly`, `local`, `unset`, `printf`, `read`), because the shell
 runs any other spelling as an external program, which cannot change the shell's variables; an
@@ -350,8 +344,7 @@ and every wrapper skipped before it is exactly `command` or `builtin` (`SHELL_WR
 builtins that keep a builtin in the current shell, or the unquoted `time` keyword at the start of
 the command, and empty otherwise. A quoted `\time` or a `time` after an assignment is the external
 program, so it leaves the cwd. Folding the wrapper skip without that
-rule let `ENV cd /tmp; sed -i … src/app.rs` pass rule (A), and lowercase `env cd`, `sudo cd` and
-`/usr/bin/cd` already moved the tracked cwd on the base. `detectChannels` matches `tee`, `sed -i`
+rule would let `ENV cd /tmp; sed -i … src/app.rs` pass rule (A). `detectChannels` matches `tee`, `sed -i`
 and `dd of=` with the `iu` flags, an optional `.exe` and an optional closing quote, after a
 backslash, a quote, `(` or a backtick as well as the earlier boundaries, and a second pass reads
 each command's program word through `commandWords`, so the always-on
@@ -368,7 +361,7 @@ bash 3.2 decodes (measured: `\u` included, an unknown escape keeps its backslash
 quoted part), and `$"…"` as double quotes. An expansion stays in the value verbatim, so the
 `UNEXPANDED` rules still see it. An unquoted `<` or `>` ends the word and starts an operator token,
 and `splitRedirects` takes the operators and their targets out of the word list, so redirections
-before or between the words no longer hide the command word and `x>file` writes `file`.
+before or between the words do not hide the command word and `x>file` writes `file`.
 `logicalText` builds each logical line in one pass: `scanLine` carries the quote state across
 physical lines, so a newline inside quotes stays in the word and a backslash-newline outside single
 quotes is removed, except after a `#` that starts a word outside quotes, because bash does not
@@ -439,8 +432,8 @@ heredoc body, and in an unquoted body before the line is compared with its delim
 (`keepHeredocs`), so a lookahead, a heredoc delimiter or a delimiter line split by a continuation
 reads as the shell joins it. `heredocWord` ends a delimiter only at a shell blank or operator, so a
 no-break space stays inside it. Each simple command it finds goes through
-`commandWords` and `builtinControlMutation` (`commandFinding`), so the rows this change added,
-`nameref` included, run only on commands found outside quotes, and quoted text that names
+`commandWords` and `builtinControlMutation` (`commandFinding`), so the rows beyond
+`baseControlMutation`, `nameref` included, run only on commands found outside quotes, and quoted text that names
 `declare -n` stays allowed. `builtinControlMutation` is `baseControlMutation` plus the name
 operands of `getopts`, `mapfile`/`readarray`, `wait`, `vared`, `getln`, `set ±A` (attached or
 not), `integer`/`float` and zsh's `read NAME?prompt` (`operandFinding`), the operand of
@@ -593,7 +586,7 @@ W318 the quote-removed path.
 helper. The parser uses it; `commandName` in `subagent-shell-guard-v1.js`, `commandName` in
 `work-order-v1.js` (no fold, no `.exe` strip) and `commandBase` in `powershell-command-v1.js`
 (PowerShell's own resolution, which cuts both separators everywhere and strips module qualifiers
-and more extensions) still carry code of their own. Since #536 the shell guard's copy reads every
+and more extensions) still carry code of their own. The shell guard's copy reads every
 spelling as the helper does, with the policy `"platform"` and with `"always"` under its
 `foldNames` option, so it could call the helper outright; the work-order copy waits for the
 unpushed branch `claude/work-order-name-case`, which rewrites that function. The unit case `the program-name
@@ -605,7 +598,7 @@ cases of `tests/structure/git-repo-escape.test.js`, W235-W266 in
 check refuses calls it let through, which changes the capability set of every session a newer
 installation would serve (`.claude/rules/runtime-lineage.md`).
 
-**Cross-file couplings — stated as a CRITERION, never a count**, because the count was "Three" while the list already held four: every hand-copy of a rule this parser owns, plus every PROSE assertion elsewhere that a message this parser emits says a particular thing. (The MSYS drive rule is deliberately NOT among them: it is
+**Cross-file couplings — stated as a CRITERION, never a count**, because a count drifts from the list: every hand-copy of a rule this parser owns, plus every PROSE assertion elsewhere that a message this parser emits says a particular thing. (The MSYS drive rule is deliberately NOT among them: it is
 shared through `claude-path-v1.js`'s `msysDrivePrefix` rather than hand-copied — see the
 paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
 `program` anchoring depends on — is hand-duplicated as a JS literal in
@@ -621,23 +614,22 @@ readers agree and where they differ (`env -S`, `sudo -h`, the guard's extra wrap
 nested code above), so a change to either table moves a pinned line.
 `within()` is a hand-copy of `isInside` in
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and `contains()` in
-`hooks/lib/zensu-autopilot-state.sh` is a further member this roster omitted while the
-predicate was already anchored: it decides `mayHoldWorkspace`, so an unanchored spelling
-reports `<project>/..bak` as a FREE workspace and lets a standalone `/zensu:build` chain arm
-underneath a live durable run in the same tree. W18b in
+`hooks/lib/zensu-autopilot-state.sh` is a further member: it decides `mayHoldWorkspace`, so an
+unanchored spelling would report `<project>/..bak` as a FREE workspace and let a standalone
+`/zensu:build` chain arm underneath a live durable run in the same tree. W18b in
 `tests/structure/test-autopilot-state-machine.sh` pins both of its anchoring clauses and
-forbids the bare `startsWith("..")` form returning; W18 alone did not, and no fixture
-builds a `..`-prefixed worktree, so the revert was green from both directions — and the same
-predicate exists in `session-control-core-v1.js`, `review-evidence-lease-v1.js` and
+forbids the bare `startsWith("..")` form returning; W18 alone does not, and no fixture
+builds a `..`-prefixed worktree, so a revert is green from both directions without W18b —
+and the same predicate exists in `session-control-core-v1.js`, `review-evidence-lease-v1.js` and
 `hooks/lib/state-path-safety-v1.js` (the path walk that `_tdd_paths_safe` and the tdd-phase
 lease processes load), with an UNANCHORED `startsWith("..")` variant in
-`finding-verify-v1.js` that has the `..bak` defect this gate fixed.
-`skills/session-trail/scripts/trail.mjs` is NO LONGER on that list and was the FIRST
-consumer that proved the seam works; `hooks/lib/plugin-data-guard-v1.js` is the SECOND, which
-raises the stakes of this export list — removing `within` or `msysToDrive` now degrades a
-PreToolUse DENY gate to allow as well as breaking a shipped skill: `within` is now defined at MODULE scope here
-and EXPORTED, and that file requires this parser and CALLS it, so the only copy a
-user ever read as a VERDICT rather than as a deny is gone. Its `W22` pins the
+`finding-verify-v1.js` that has the `..bak` defect which `within()` avoids.
+`skills/session-trail/scripts/trail.mjs` holds no copy and is one of two consumers of the
+seam, the other being `hooks/lib/plugin-data-guard-v1.js`, which raises the stakes of this
+export list — removing `within` or `msysToDrive` degrades a
+PreToolUse DENY gate to allow as well as breaking a shipped skill: `within` is defined at MODULE scope here
+and EXPORTED, and `trail.mjs` requires this parser and CALLS it, so no copy remains that a
+user reads as a VERDICT rather than as a deny. Its `W22` pins the
 export, the specifier and the degrade-on-load-failure behaviour. Removing either
 `within` or `msysToDrive` from the export list therefore breaks a shipped skill,
 not just a test — which is the cost that buys the single implementation. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned

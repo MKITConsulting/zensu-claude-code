@@ -18,22 +18,22 @@ paths:
 
 # Claim Syntax and the Chain's Work Tree (`edit-landing-claims-v1.js` + `--work-tree`)
 
-On 2026-10-29 an Autopilot-bound `/zensu:build` chain in a consuming repository parked as
-`BLOCKED(precondition-decision-required)` at `--tdd-complete` although every edit had landed.
-Two independent gaps led there, and an Autopilot-bound chain had no exit from either: the run log
-is append-only, a new generation needs the outer run at `AWAIT_TDD`, and the only escape was
-`ZENSU_EDIT_LANDING_GATE=off`.
+Two problems would park an Autopilot-bound `/zensu:build` chain as
+`BLOCKED(precondition-decision-required)` at `--tdd-complete` although every edit landed, and
+such a chain has no exit from either: the run log is append-only, a new generation needs the
+outer run at `AWAIT_TDD`, and the only escape is `ZENSU_EDIT_LANDING_GATE=off`.
 
-1. **Ungradeable claims.** The audit split a `files:` list at every comma and graded each piece
-   as a literal path, so `locales/{en,de}/settings.json` became the fragments
-   `locales/{en` and `de}/settings.json`, and `locales/*/ghost.json` was a literal that never
+1. **Ungradeable claims.** A grader that splits a `files:` list at every comma and grades each
+   piece as a literal path turns `locales/{en,de}/settings.json` into the fragments
+   `locales/{en` and `de}/settings.json`, and reads `locales/*/ghost.json` as a literal that never
    exists. A census over 2,640 local run logs found 231 glob tokens, 206 comma brace groups and
    about 5,000 whitespace tokens in 821 of 2,258 claim-bearing logs, no real path holding
    whitespace, and 88 real paths holding brackets (`[...slug].astro`).
-2. **The nested Autopilot workspace.** The run's `workspaceRoot` was
-   `<anchor>/.claude/worktrees/<name>`, a linked worktree of the anchor's own repository. The
-   audit graded the anchor's change set, read relative claims against the anchor, graded claims
-   inside the workspace `UNVERIFIED (foreign root)`, and the review chain enumerated the anchor.
+2. **The nested Autopilot workspace.** A run's `workspaceRoot` can be
+   `<anchor>/.claude/worktrees/<name>`, a linked worktree of the anchor's own repository. An audit
+   rooted in the anchor grades the anchor's change set, reads relative claims against the anchor
+   and grades claims inside the workspace `UNVERIFIED (foreign root)`, and a review chain rooted
+   there enumerates the anchor.
 
 ## The claim grammar has one owner
 
@@ -42,8 +42,8 @@ seven markers, the dash class, `LABEL_TOKEN_BUDGET`, the verdict-head skip list)
 the token classes, brace expansion, glob matching, correction parsing and checking, and the
 `append` pre-check. This is the standing fix `.claude/rules/multi-repo-stage1.md` named. Its CLI
 has two commands, `rows` for the shell grader and `check-append` for the log writer. Consumers:
-the grader and `--inventory` in `zensu-edit-landing.sh` (one `node` call replaced the bash
-extraction loop), `claimOf` in `round-prepare-v1.js`, `review-round-scope-v1.js`, and
+the grader and `--inventory` in `zensu-edit-landing.sh` (through one `node` call), `claimOf` in
+`round-prepare-v1.js`, `review-round-scope-v1.js`, and
 `zensu-log.sh append`.
 
 - **Split.** Commas split only outside `{}` and `()`; nothing after the first ` | ` is part of
@@ -102,7 +102,7 @@ retraction is itself a carried `CLAIM RETRACTED` line; its suggested correction 
 every path-shaped word, so copying it hides nothing. A suggested correction is printed ready to
 copy only when it is exact: a label or an entry the output screen would alter is printed as a
 placeholder naming the run-log line to copy it from, and a prose correction is prefilled only when
-it lists every candidate as the run log spells it (`MC2`, `MC3`). The three new heads sit in the module's skip list, the one list the grader and
+it lists every candidate as the run log spells it (`MC2`, `MC3`). The three heads above sit in the module's skip list, the one list the grader and
 round-prepare both read.
 
 ## Two roots, kept apart
@@ -122,7 +122,7 @@ runner uses (`.claude/rules/evidence-runner.md`). A standalone chain, a legacy r
 `workspaceRoot`, and a bound chain after its terminus answer the anchor's top. An unreadable
 document or run record, an invalid `workspaceRoot` and a refused topology exit non-zero with the
 reason and never fall back.
-No state file was added, so a chain armed by an older installation resolves the same way and a
+It uses no state file, so a chain armed by an older installation resolves the same way and a
 parked run needs no re-arming. The verb refuses a path holding `"`, `$`, a backtick or a
 backslash, like `--project-root`, because the skills paste it into double-quoted shell source.
 
@@ -162,11 +162,9 @@ works in the anchor carries none, so following a remedy cannot loop. A work tree
 cannot answer, and a change count git cannot list in either tree, refuse the verb before either
 gate runs unless both gates are switched off (`WB13` to `WB16`, `WA1`).
 
-**Counts, a deviation from the plan, measured.** The plan put the work tree into every count a
-bound chain's tickets compare through `_zensu_unqualified_change_count`. Reading the call sites
-showed that the unqualified marks and the `zc_` terminus path run only for chains without
-Autopilot link keys, so `--tdd-complete` is the only bound count, and the helper and its other
-call sites stay unchanged.
+**Counts.** The unqualified marks and the `zc_` terminus path, which compare their counts through
+`_zensu_unqualified_change_count`, run only for chains without Autopilot link keys, so
+`--tdd-complete` is the only bound count; the helper and its other call sites take no work tree.
 
 **Fix rounds.** `--round-prepare` uses `WT` for `--change-set`, the audit, `check-ignore`, the
 snapshot and the round diff, and `TOP` for the ledger, the log and the round scope. The packet
@@ -180,11 +178,11 @@ attributed like its unprefixed spelling, and the round scope adds the prefix onl
 does not carry it yet.
 
 **Doctor.** `claimTopologyRow` validates the receipt's `workTree` (`auditedWorkTree`) and passes
-it to the inventory, so a clean work-tree receipt no longer sits beside a foreign-root WARN, and a
+it to the inventory, so a clean work-tree receipt does not sit beside a foreign-root WARN, and a
 `workTree` that is invalid or outside the project root renders its own WARN.
 
 **Skills.** `/zensu:build` Phase 0 step 3 reads `{work_tree}` right after `--tdd-begin` and takes
-`BASELINE_SHA` there, which moved the capture out of step 2 for every chain; step 5b passes
+`BASELINE_SHA` there for every chain, not in step 2; step 5b passes
 `--work-tree`; step 10.2 enumerates with `--change-set --work-tree`, diffs and reads in
 `{work_tree}`, prefixes the packet's `changed_files` and the gate's `CHANGED-FILES`, keeps
 `finding-verify --root "$TOP"`, and skips the external review import when `{work_tree}` is not
@@ -227,18 +225,18 @@ import-layout paragraph of `docs/review-chain.md`, and §5 of `docs/multi-repo-c
 - A file inside a work tree whose name holds whitespace or pattern characters cannot be claimed;
   the census found none.
 - A claim on an ignored path grades `EDIT LANDED (untracked-by-design)` whether or not the file
-  exists, in the anchor and in a work tree alike. The self-review weighed requiring the file to
-  exist and left it out: the behaviour predates this change, and the scrub controls `X10`, `X17`
-  and `X23` of `test-edit-landing-audit.sh` rely on it. The placement above keeps a claim spelled
+  exists, in the anchor and in a work tree alike. Requiring the file to exist is left out,
+  because the scrub controls `X10`, `X17` and `X23` of `test-edit-landing-audit.sh` rely on that
+  behaviour. The placement above keeps a claim spelled
   with the work tree's own prefix out of that exemption.
 - A word with no `/`, no inner `.`, naming no existing or changed path, is no candidate, so a
   correction may leave it out (an extensionless file that was never created).
 - Reviewer reads and `finding-verify` acceptance of a prefixed `.claude/worktrees/...` path follow
   from the source (`protectedAccessViolation` admits any path inside the project root that is not
   under the anchor's `.zensu`; `finding-verify-v1.js` denies only `.git` and `.zensu` segments).
-- PR #485 reconciled with this change when it merged it. The audit scope it adds finds an earlier
-  claim by its step and raw text rather than by position, so a correction or a glob row between
-  two rounds keeps every earlier snapshot; its checkpoint receipt carries `workTree`; and
+- The audit scope finds an earlier claim by its step and raw text rather than by position, so a
+  correction or a glob row between two rounds keeps every earlier snapshot; its checkpoint
+  receipt carries `workTree`; and
   `review-packet-v1.js create` reads the change set of the receipt's `workTree`, spelled with the
   work tree's prefix below the anchor (`.claude/rules/review-packet-gate.md`).
 - Windows is unverified: `workspaceRoot` is stored native-canonical, and the library canonicalizes

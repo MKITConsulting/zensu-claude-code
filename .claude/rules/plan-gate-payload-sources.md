@@ -36,8 +36,8 @@ them populates `tool_input` for ExitPlanMode any more.
 **Why the dead sources are dead.** The harness strips ExitPlanMode fields its schema does not
 declare — a captured payload carries `tool_input == {"_targetMode":"auto"}` — and delivers the
 approved plan in `tool_response`, a structured object (`plan`, `filePath`, `isAgent`,
-`hasTaskTool`). Before this was understood every Autopilot run died at its single planning gate
-with `INVALID_PLAN_PAYLOAD`, unfixable from the model side.
+`hasTaskTool`). A gate that reads only `tool_input` fails every Autopilot run at its single
+planning gate with `INVALID_PLAN_PAYLOAD`, which the model side cannot fix.
 
 **Fields are read BY NAME, never by scanning text.** The rendered response a model sees carries
 a `Your plan has been saved to: <path>` preamble, but the plan body is model-authored: mining
@@ -79,15 +79,14 @@ absence-based principal check, which grants `main-v1` only to the top-level thre
 to make because the harness supplies the field. Two orderings are load-bearing and pinned:
 it runs AFTER the owner and stage checks, so an unauthorized caller still learns nothing about
 the response shape (F45c), and BEFORE the source walk, so no payload-named path is opened for
-a caller who may not approve. F45/F45a are the bites — measured against the pre-change hook,
-which APPROVES both shapes — and F45b is the positive control that the same builder with
-`isAgent: false` still approves. Each of the four owns a separate armed run: sharing one let an
-approval in an earlier case push the run past `PLANNING`, and every later case then failed on
-the transition instead of on what it was about. F45a sends `"false"` and then `null` to its one
+a caller who may not approve. F45/F45a are the bites — a hook without the origin check
+APPROVES both shapes — and F45b is the positive control that the same builder with
+`isAgent: false` still approves. Each of the four owns a separate armed run: sharing one lets an
+approval in an earlier case push the run past `PLANNING`, and every later case then fails on
+the transition instead of on what it is about. F45a sends `"false"` and then `null` to its one
 run, which is safe because a refusal leaves the run unchanged and F45a's digest check holds that.
 
-**Three checks pin behavior this gate already had and never exercised**, so they pass in both
-trees and are coverage, not bites: F47/F47a (a plugin missing the reader module refuses as
+**Three checks are coverage, not bites:** F47/F47a (a plugin missing the reader module refuses as
 `RUNTIME_UNAVAILABLE` — asserted to NOT be `PLAN_EVALUATION_UNAVAILABLE`, which would claim the
 payload was judged — with a restored-module positive control), F48 (the module path reaches
 node through the environment, never argv, matched against a closed allowlist of line forms

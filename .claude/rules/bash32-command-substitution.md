@@ -17,22 +17,22 @@ every `case` pattern with the POSIX-optional leading paren — `(pattern)`.** Th
 `pattern)` form supplies an unbalanced `)` that CLOSES the substitution at that
 character; the paren form balances the scanner and parses identically on bash 5.
 
-**It shipped, and its cost was a whole verdict rather than a cosmetic row.** In 0.20.0
-the `ZDOC_SESSION_PAIR` substitution in `hooks/lib/zensu-doctor.sh` carried the bare form.
-Measured on 3.2.57 against a session that was genuinely bound: the body truncates
+**The cost is a whole wrong verdict rather than a cosmetic row.** Measured on 3.2.57 with
+the bare form in the `ZDOC_SESSION_PAIR` substitution in `hooks/lib/zensu-doctor.sh`,
+against a session that was genuinely bound: the body truncates
 mid-`case`, the subshell dies of a syntax error, the assignment returns 1, the `elif`
 falls to its `else`, neither follow-up question matches, and `/zensu:doctor` renders
 `binding: this session has no valid Session Control record — … start a fresh Claude Code
-session` over a record that is present, readable and already bound. Reproduced in the
-shipped tree and closed by switching that one arm to `(*[[:cntrl:]]*)`.
+session` over a record that is present, readable and already bound. That substitution's
+arm is written `(*[[:cntrl:]]*)`.
 
-**TWO properties made it survive, and both generalize to the next instance.** The failure
+**TWO properties hide this failure, and both generalize to the next instance.** The failure
 is INVISIBLE at build time: bash 3.2 parses a substitution body only when it expands it,
 so `bash -n` over the whole file passes and no lint sees it. And the ORDER hides the
 cause: 3.2 executes the body command by command, so everything above the malformed `case`
-runs and SUCCEEDS first — in the doctor's case the session bind itself. The record was
+runs and SUCCEEDS first — in the doctor's case the session bind itself. The record is
 never the problem, only the reporting of it, which is exactly why every other component
-disagreed with that row. Do not diagnose a contradiction of this shape by re-examining the
+disagrees with that row. Do not diagnose a contradiction of this shape by re-examining the
 state; check whether the reporter parsed.
 
 **The guard is an ORACLE, not a heuristic**, which is what lets it run anywhere.
@@ -45,7 +45,7 @@ scanned-file population (a scanner that walks nothing reports a clean tree), a p
 that must be reported and must not be, and a live-bash premise check. The pair is DERIVED
 by deleting the single `(` from the fixed form rather than written twice — the suite is
 itself a `*.sh` under the scanned root, so a literal bare case arm in a heredoc is a real
-finding, and it failed on its own fixture the first time it ran.
+finding.
 
 **The coupling runs in the UNOBVIOUS direction**, the shape this file already records for
 `ESCAPE_STEMS` and G12: an ordinary edit to ANY shell file in the tree can turn a suite

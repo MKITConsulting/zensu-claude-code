@@ -41,7 +41,7 @@ both real docs rather than stubbing them, so it cannot go green against a parser
 **`MAX_BLOCK` is declared twice, hand-copied once more, and bound by three checks.** The two
 declarations are the hooks; the one hand copy is `tests/structure/test-best-solution-first.sh`
 (a suite variable, bound by B2h). Do not spell the number anywhere else — name the constant.
-The prose copy in `docs/architecture.md` was removed for exactly that reason. H4e in
+`docs/architecture.md` carries no prose copy for exactly that reason. H4e in
 `test-evidence-discipline.sh` (which reads the value out of the SIBLING file rather than
 hand-copying it, and therefore fails if that file is renamed — deliberate: the alternative is a
 third copy of the number), B2h in `test-best-solution-first.sh`, and the cross-carrier equality
@@ -51,19 +51,19 @@ per-file pins grep its declaration without the value.
 **The cross-carrier comparison extracts a RANGE and its boundaries are load-bearing.** It strips
 full-line comments, then selects from `const pre = fs.lstatSync(rulePath);` to the enforcement
 `block.length > MAX_BLOCK`, so it covers the hardened reader, the marker-position parse and the
-bound's use. Two properties keep it from going vacuous, and both were learned by probe:
+bound's use. Two properties keep it from going vacuous, and a probe measures both:
 
 1. **The end address is a substring match**, so a trailing `// … block.length > MAX_BLOCK …` on a
-   code line survives the full-line strip and truncates the range. Added to BOTH carriers it kept
-   the bodies equal and satisfied a bare `grep` for the needle, with both enforcements deleted and
-   the suite fully green. The probe and its numbers live in the comment above the check; do not
+   code line survives the full-line strip and truncates the range. Added to BOTH carriers it keeps
+   the bodies equal and satisfies a bare `grep` for the needle with both enforcements deleted, so
+   a body comparison and a needle grep alone stay green. The probe and its numbers live in the comment above the check; do not
    re-author them here. What closes it: the extracted body's LAST LINE must be the enforcement
    statement, and each literal must occur exactly ONCE per carrier — the count is what removes
    the class rather than the probed spellings, and it also covers a shadowing redeclaration
    between `const rulePath` and `const pre`, which is inside the hook's `try` block.
 2. **Comment TEXT inside the range is deliberately not compared.** That is what lets the two
    carriers carry differently-worded notes on the shared constant; it also means a one-sided edit
-   to an in-range comment no longer fails the check. Stated, not accidental.
+   to an in-range comment does not fail the check. Stated, not accidental.
 
 **The refusal set is prose in EIGHT places and forks easily** — one shared reader, eight
 restatements, and no test pins the wording. It is a hand sweep, so the roster is the control:
@@ -83,9 +83,8 @@ malformed — plus a missing `node`, and for the sibling its config
 library. Every one exits `0` silently. The only branch that REPORTS a cause is a mismatched inherited
 `CLAUDE_PLUGIN_ROOT`, which exits `2` on stderr; the plugin-root RESOLUTION failure a line above
 it also exits `2` but prints nothing, so it is neither silent-zero nor operator-visible. A site that names only the file ceiling sends an operator
-whose rule silently stopped injecting to check the file size and conclude the hook is broken. The
-count above drifted once already (it read SEVEN while listing eight), which is exactly how a site
-gets missed.
+whose rule silently stopped injecting to check the file size and conclude the hook is broken. A
+stated count can drift from the list it counts, which is exactly how a site gets missed.
 
 **A review ceiling, not a ratio.** Each suite carries a `REVIEW_CEILING` below the `MAX_BLOCK`
 fail-safe so the next clause is argued rather than absorbed. The criterion is ABSOLUTE headroom,
@@ -95,20 +94,20 @@ whichever block is bigger and self-erodes as the block grows.
 **`REVIEW_HEADROOM` is enforced ONE-SIDEDLY, in the suite that owns the ceiling.** Each owning
 suite asserts that its remaining slack — `REVIEW_CEILING` minus the measured block — never
 EXCEEDS the declared headroom, and the cross-carrier arm compares the two declared headrooms so
-they cannot drift apart. Both earlier shapes were wrong and are recorded so neither is retried:
-deriving the ceiling from the live block over-constrained it (with both ceilings fixed it reduces
-to a constraint on the two rule TEXTS' length difference that no file states, and a
-one-character edit turned the guards suite red at 88 against 89), while comparing two inert
-literals constrained nothing at all (raising one ceiling from 900 to 1000 left every check green
-while the realized headroom became 189 against 89 — measured, both times). One-sided and
+they cannot drift apart. Two other shapes fail. Deriving the ceiling from the live block
+over-constrains it: with both ceilings fixed it reduces to a constraint on the two rule TEXTS'
+length difference that no file states, and a one-character edit turns the guards suite red
+(measured at 88 against 89). Comparing two inert literals constrains nothing at all: raising
+one ceiling from 900 to 1000 leaves every check green while the realized headroom becomes 189
+against 89 (measured). One-sided and
 per-suite is what avoids both: block growth only shrinks the slack and stays green, and a
 unilateral ceiling raise fails in the suite where the edit was made. Accepted consequence: a
 block that shrinks far below its ceiling also trips it, which is correct — a ceiling that has
 drifted away from its text has stopped being a tripwire.
 
-Provenance of the number, stated because the comments call it "roughly one clause": 89 is the
-remainder of the evidence carrier's pre-existing round ceiling (900 minus 811), retained rather
-than re-derived, and the sibling moved from 1800 to 1741 to match it. It admits the shorter
+Where the number comes from, stated because the comments call it "roughly one clause": 89 is
+the evidence carrier's round ceiling of 900 minus 811, the block length it was taken from,
+kept rather than re-derived, and the sibling's ceiling of 1741 gives the same headroom. It admits the shorter
 sentences of these blocks and not the longer ones. That is a defensible policy but it is not a
 measurement of a clause; re-deriving it from the two blocks' actual sentence lengths is open.
 
@@ -120,9 +119,7 @@ which is the claim tested rather than asserted.
 `test-evidence-discipline.sh` C6 pins the one measured figure in `docs/architecture.md` — the emitted
 character length — against a value it derives. C5 works the other way for the carrier population: it
 FORBIDS restating the total as a literal and requires the prose to name `EXPECTED_AGENTS` and
-`EXPECTED_SKILLS` instead, because a numeral there goes stale on every new skill. Both directions were
-learned the hard way — C5 first pinned the numeral, and the count moved from 32 to 33 in a merge before
-this branch even landed. Stated so the sentence is not read as covering the pair: the SIBLING's figures in
+`EXPECTED_SKILLS` instead, because a numeral there goes stale on every new skill. Stated so the sentence is not read as covering the pair: the SIBLING's figures in
 the same document — its emitted length and the per-turn total derived from it — are NOT pinned. The suite is absent from `tests/profiles/windows-ci.v1.json`, so it never runs on
 the Windows PR shard; it IS in `ciStructureTests`, which the weekly Windows Safety structure
 shards execute.

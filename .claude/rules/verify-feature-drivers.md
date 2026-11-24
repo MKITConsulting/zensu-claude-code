@@ -35,10 +35,11 @@ sits on the shrink-only allowlist of `tests/structure/test-skill-text-budget.sh`
 (`.claude/rules/skill-text-budget.md`). `SKILL.md` keeps only what must run before any rule file
 is read or on every run: the `--driver` row, the in-memory remote refusal of step 0, step 6,
 the matrix's `Driver` column, the Phase 4 teardown and the verdict rules. Everything a
-non-`browser` row does in each phase is in section 8. The Phase 5 report format moved out for the
-same budget, to `rules/report.md` section 5 beside the evidence report verbs (`P11c`). Two browser
-blocks moved out for the same budget, both free of `${CLAUDE_PLUGIN_ROOT}` and of line pins: attach mode to `rules/attach.md`
-(`P10m`), and the consent details to `rules/browser-verification.md` section 1, which a
+non-`browser` row does in each phase is in section 8. For the same budget the Phase 5 report
+format lives in `rules/report.md` section 5 beside the evidence report verbs (`P11c`), and two
+browser blocks live outside `SKILL.md`, both free of `${CLAUDE_PLUGIN_ROOT}` and of line pins:
+attach mode in `rules/attach.md` (`P10m`), and the consent details in
+`rules/browser-verification.md` section 1, which a
 consent-mode run reads before its first browser call (`P10n`). `SKILL.md` keeps the consent
 sentences `P4z` pins and the rule that the consent memory is never written.
 
@@ -164,12 +165,11 @@ with `cp -Rc` into the run directory and passes `-clonedSourcePackagesDirPath` w
   emulator and the helper's emulator checks against a real `adb`, the macOS desktop launch,
   Windows and Linux desktop automation, Maestro, AXe, idb and `tmux`; the rules take their flags
   from each tool's own help at run time and say so.
-- The supervised-start unit case accepts `removed` or `gone`. Before #349 the supervisor's
-  `stop` could fail with `failed to probe owned process group: EPERM` while group members were
-  still exiting (1 of 15 rounds under load on macOS), and the helper then found the supervisor
-  and its group ended and reported `gone`. #349 reads that EPERM as an unsignalable group; the
-  case keeps both answers rather than depend on that timing. The helper's own probe still reads
-  EPERM as alive, so it keeps an entry it cannot prove ended.
+- The supervised-start unit case accepts `removed` or `gone`: while group members are still
+  exiting, the helper can find the supervisor and its group already ended and report `gone`,
+  and the case keeps both answers rather than depend on that timing. The supervisor reads an
+  EPERM from its group probe as an unsignalable group, and the helper's own probe reads EPERM
+  as alive, so it keeps an entry it cannot prove ended.
 - `runKeyFor` keeps a run directory name of at most 24 lowercase letters and digits joined by
   single dashes as the run key. Every other name `RUN_ID_RE` admits (up to 200 characters,
   including the `:` of an Autopilot run id) becomes a 14-character slug, `--` and the first 10

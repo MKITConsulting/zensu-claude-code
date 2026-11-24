@@ -11,14 +11,13 @@ paths:
 
 # Stop Hook Latency (`zensu-stop-deadline.sh` + `stop-idle-probe-v1.js`)
 
-**The measured cause.** On `af46577f` a main-thread Stop for a session with NO armed chain
-spawned **111** `node` children. About thirty of them re-hash the whole plugin runtime tree
-(`readContext` → `computeRuntimeDigest`, ~5 MB) through repeated `zensu_resolve_project_dir`
-calls, and the path takes up to five lock round trips (Autopilot read, deferred-review
-adoption, refusal-note clear, reconcile). Measured on a 16-core Mac: **579 s** at load ~900 and
-**262 s** at load 200–600. Nothing bounded it: the Stop registration carried no `timeout`, so
-the host default of 600 s applied, and base macOS has neither `timeout` nor `gtimeout`. The
-same Stop on the early exit spawns **4** `node` children and took **9–10 s** at load ~800.
+**Why the early exit and the deadline exist.** The full Stop path is expensive even for a
+session with NO armed chain: it re-hashes the whole plugin runtime tree (`readContext` →
+`computeRuntimeDigest`, ~5 MB) through `zensu_resolve_project_dir` calls and takes up to five
+lock round trips (Autopilot read, deferred-review adoption, refusal-note clear, reconcile), so
+under heavy load it runs for minutes. A Stop registration without a `timeout` gets the host
+default of 600 s, and base macOS has neither `timeout` nor `gtimeout`, so nothing else bounds
+it. The same Stop on the early exit spawns **4** `node` children and took **9–10 s** at load ~800.
 A slow Stop hook delays every queued background-task notification of its session.
 
 **Early exit.** After the principal check, the bind and the project-root resolution, one
@@ -64,7 +63,7 @@ the Stop is RELEASED with a stderr notice, and the supervisor writes the same te
 the supervisor kills both groups at once.
 
 - **Neither group is the host's, and that is what keeps the bound.** A hook shares the Claude
-  Code CLI's process group, and the incident ended with the host reaping that group. When the
+  Code CLI's process group, and the host can reap that group. When the
   supervisor dies that way, the watchdog outlives it, kills the worker at the deadline and
   removes the directory. Every kill names a job leader's own group (`kill -- -<leader>`) and
   falls back to the bare pid; nothing here may ever use `kill 0`, which from a shared group
@@ -116,14 +115,11 @@ JSON objects parses neither, so a second object would cost the block decision it
 - **Version: `patch`.** No hook added or re-matched and no `permissionDecision`; the decision a
   Stop emits is unchanged, and only advisory output joins stdout.
 
-**One resolution per run (`zensu_memoize_project_dir` + the canonical-key shortcut).** Measured
-on `dc9f0ff8` with a classifying `node` shim, an armed Stop spawned **96** `node` children: 28
-project-root verifications (`zensu_resolve_project_dir`, each a record read plus a runtime
-digest) and 18 `session-key` calls, 17 of them on a key that was already canonical. After this
-change the same Stop spawns **50**: one verification and no `session-key` call. Other paths:
-implementing 70 → 37, deferred-review adoption 170 → 87, `ZENSU_CHAIN=off` 88 → 37, idle 4 → 4.
-Wall time for the armed Stop fell from about 11 s to about 6 s at load 19–30. On Linux with
-bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer children there.
+**One resolution per run (`zensu_memoize_project_dir` + the canonical-key shortcut).** Every
+project-root verification (`zensu_resolve_project_dir`) is a record read plus a runtime digest
+in a `node` child. Measured with a classifying `node` shim, an armed Stop without the memo and
+the shortcut makes 28 verifications and 18 `session-key` calls, 17 of them on a key that is
+already canonical; with them it makes one verification and no `session-key` call.
 
 - **Session key.** `sessionKey` returns a value matching `^scv1_[a-f0-9]{64}$` unchanged, so
   `zensu_session_key_canonical` answers that one shape in shell and every other input still
@@ -131,30 +127,29 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   `zensu_resolve_session_id`. The pattern lists the hex digits instead of using a range, so no
   collation can widen it. `SESSION_KEY_RE` in `session-control-core-v1.js` owns the shape;
   `L38` and `L42` hold the shell copy to it, so a drift between the two surfaces there as a
-  spawn-count or output failure. The hook passes no raw id any more: the bind already derived
+  spawn-count or output failure. The hook passes no raw id: the bind already derives
   the key from the same payload, so `zensu_resolve_session_id ""` returns the bound key.
 - **One shell spelling of the key shape.** `zensu_session_key_canonical` is public and sits in
   the `export -f` list of the non-Windows arm, and `reviewer_denial_note_path` in the Stop hook
-  calls it instead of keeping a test of its own. That test was the range form `scv1_*[!0-9a-f]*`
-  plus 64 `?`. Measured on macOS `/bin/bash` 3.2.57 under `LC_ALL=en_US.UTF-8`: `[a-f]` matches
-  `B` and `é`, so the range form accepted `scv1_` plus 63 hex digits plus `B`. The doctor's
+  calls it instead of keeping a test of its own, because a range form such as
+  `scv1_*[!0-9a-f]*` plus 64 `?` collates. Measured on macOS `/bin/bash` 3.2.57 under
+  `LC_ALL=en_US.UTF-8`: `[a-f]` matches `B` and `é`, so that range form accepts `scv1_` plus 63
+  hex digits plus `B`. The doctor's
   `^reviewer-spawn-denied-scv1_[a-f0-9]{64}\.json$` in `reviewerDenialRows` and the reaper's
   `NAME` never match such a name, which is the "doctor goes quiet with everything still green"
-  failure the comment in that function names. The private `_zensu_session_key_canonical` was
-  renamed, not wrapped: it never shipped in a release, and a wrapper would add a second name and
-  nothing else. `L42b` runs the predicate under `LC_ALL=en_US.UTF-8` and requires a canonical
+  failure the comment in that function names. `L42b` runs the predicate under `LC_ALL=en_US.UTF-8` and requires a canonical
   control to pass and an upper-case and an accented last character to fail. It discriminates
   only in a shell whose bracket ranges collate under that locale: macOS `/bin/bash` 3.2.57 does,
   the local `bash:5` image (musl) does not, and the check's label says which case ran.
 - **Every shell test of the shape calls it.** `grep -rn 'scv1_' hooks/` is the census
   (`.claude/rules/foreign-chain-row.md`). The receipt fallback in `zensu-edit-landing.sh` calls
   the predicate in a subshell (`.claude/rules/multi-repo-stage1.md` records why, together with
-  the locale measurement of the range it replaced), and the session-pair guard in
+  the locale measurement of a range test), and the session-pair guard in
   `zensu-doctor.sh` calls it in the subshell that already sources this file. The other hits in
   shell files are file-name prefix globs such as `tdd-phase-scv1_*.json` and JavaScript regexes
   inside `node` programs, and neither collates.
 - **Project root.** `zensu_memoize_project_dir` renders the root (`cd -P && pwd -P`), runs the
-  unchanged full verification once, and records `(ZENSU_PROJECT_ROOT, ZENSU_SESSION_CONTEXT,
+  full verification once, and records `(ZENSU_PROJECT_ROOT, ZENSU_SESSION_CONTEXT,
   ZENSU_SESSION_KEY, rendered root)` in the shell ARRAY `_ZENSU_PROJECT_DIR_MEMO` only when the
   verified render is the path it rendered before. An ancestor swapped between the verification
   and its render is therefore never memoized (`L52`). A later `zensu_resolve_project_dir` still
@@ -163,8 +158,8 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   through to the full verification (`L43`–`L46`, `L50`); a record that vanished or became a
   link is refused before the memo is consulted (`L47`, `L48`).
 - **One verification decides.** The Stop hook's first verification IS
-  `zensu_memoize_project_dir`. When it fails, the hook takes its existing failure branch
-  directly (`L51`), so a refusal costs one verification, as before the memo existed, and a Stop
+  `zensu_memoize_project_dir`. When it fails, the hook takes its failure branch
+  directly (`L51`), so a refusal costs one verification, and a Stop
   that proceeds always holds the memo.
 - **Why an array.** An environment variable becomes a scalar, which fills index 0 only, and
   bash never exports an array. The memo is accepted only when index 3 is set, so no environment
@@ -175,7 +170,7 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
 - **Opt-in, three callers.** The Stop hook and `hooks/post-review-tdd-delegate.sh` call
   `zensu_memoize_project_dir`, each right after its only bind, and `_zensu_bound_work_tree_lookup`
   in `zensu-log.sh` calls it first, inside the subshell `_zensu_bound_work_tree` runs it in, so
-  that memo ends with the subshell. Every other entry point verifies on every call, as before, and
+  that memo ends with the subshell. Every other entry point verifies on every call, and
   the rest of `zensu-log.sh` is a candidate, not a caller. A further caller may memoize
   only after its last bind, and only in a process that runs no record writer. The lookup subshell
   meets both: the verb bound before it started, and it only reads the workflow document and the
@@ -193,7 +188,7 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   2026-10-27, three of them after the claim returned: the record retire, the claim-field parse
   and the emit. `BR4b` in `tests/structure/test-background-review.sh`
   pins the single verification (`.claude/rules/background-review-completion.md`).
-- **What a reuse no longer re-checks.** The record file's content and the runtime digest are read
+- **What a reuse does not re-check.** The record file's content and the runtime digest are read
   once per hook run. A record or plugin tree changed WHILE one Stop runs is not seen again. The
   digest was never a defence there, because a changed tree includes the code that checks it.
   Two writers replace the record behind a session. Automatic adoption re-mints it around the
@@ -222,11 +217,10 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   that the resolver refuses. A cache file: poisonable. Memoizing `_tdd_paths_safe`: it is the
   per-operation symlink check and must see every swap.
 
-**Lease checks inside the lock process (`hooks/lib/state-path-safety-v1.js`).** `_tdd_locked_run`
-used to spawn a storage walk before the lease, the acquisition, a token walk, a storage re-walk and
-the release: six `node` children per lease on bash 3.2 and three on bash 4+. The walk now lives in
-`state-path-safety-v1.js` and runs inside the process that takes the lease, before the acquisition
-and again after it. A lease costs two children on bash 3.2 (acquire with checks, release by token)
+**Lease checks inside the lock process (`hooks/lib/state-path-safety-v1.js`).** The storage walk
+of `_tdd_locked_run` lives in `state-path-safety-v1.js` and runs inside the process that takes the
+lease, before the acquisition and again after it, rather than as `node` children of their own
+around the lease. A lease costs two children on bash 3.2 (acquire with checks, release by token)
 and one on bash 4+ (the keeper); `P9` in `tests/structure/test-tdd-no-flock-external-lease.sh`
 pins both counts.
 
@@ -243,13 +237,13 @@ pins both counts.
   of `test-msys-special-plugin-module-boundaries.sh`) and the rendered anchors and operands in
   argv under `MSYS2_ARG_CONV_EXCL='*'`. The module has no CLI and reads neither `process.env` nor
   `process.argv`. The lease processes take the module path in argv beside the control core's,
-  which travelled that way before.
+  which travels the same way.
 - **Exit codes and lines.** The bash 3.2 acquirer exits 64 when a check fails before the
   acquisition (silent return 1), 65 when the storage is unsafe after it and the lease was released
   in-process (silent return 1), and 66 when that release failed (`lock release failed`, return 1).
   The keeper writes `UNSAFE` (nothing held, silent return 1) or `UNSAFE-HELD` (callback skipped,
-  normal `RELEASE`, silent return 1). The keeper still releases in-process, so the win32 holder
-  marker behaves as before.
+  normal `RELEASE`, silent return 1). The keeper releases in-process, so the win32 holder
+  marker is unaffected.
 - **Pins.** `P7` plants a hard-linked `.lock` (link count 2, which only the module refuses) after
   `tests/structure/fixtures/lease-acquire-entry-preload.js` proves the contender is inside
   `acquireExternalProcessLock`; `P8` plants it before any acquisition and requires that the
@@ -267,34 +261,31 @@ it into an adjacent process with no filesystem change in between.
 - `_tdd_atomic_replace_regular` walks its source and target as the first statement of its replace
   process; exit 64 maps to return 1, every other status passes through.
 - The `read-active` worker derives the owner pointer from the digest rule the writers use through
-  `_autopilot_active_path`, so the Stop path no longer spawns a hashing child.
+  `_autopilot_active_path`, so the Stop path spawns no hashing child.
 - `zensu_hook_principal` takes an optional payload field and then prints the principal, a newline
   and that field. The Stop hook decides on the text before the first newline and reads
-  `transcript_path` from the rest, which replaces `read_field`.
+  `transcript_path` from the rest, so no separate `read_field` runs.
 - `tdd_chain_snapshot <file> <session> stop-fields` prints the eight Stop fields from the snapshot
   process. The field order lives in two places, that projection and the two `read` lists in the
   hook. `inner_flags_ok` refuses a line whose four flags are not exactly `true` or `false`, the
-  check the removed `JSON.parse` used to give; a projection fault exits 64, which the adoption site
+  check a `JSON.parse` would give; a projection fault exits 64, which the adoption site
   maps to its own refusal.
 
-Measured with the latency suite's counting shim (`L30`), the armed Stop went from 51 `node`
-children before the lease folding to 35 after it and 29 with these cuts on macOS bash 3.2, and
-from 31 to 26 on Linux bash 5.2 (`node:20-bookworm`). `L30` allows 32 on bash 3.2 and 30 on
-bash 4+, so reverting these cuts fails it on both.
+Measured with the latency suite's counting shim (`L30`), the armed Stop spawns 29 `node`
+children on macOS bash 3.2 and 26 on Linux bash 5.2 (`node:20-bookworm`). `L30` allows 32 on
+bash 3.2 and 30 on bash 4+, so reverting these cuts fails it on both.
 
-**Not taken, and why.** Two hunt candidates duplicated cuts above. Handing the idle probe's chain
-fields to the hook was judged unsound as specified, because it removed the only check that acts on
-a read failure at that site. Merging two Autopilot config reads and computing the terminal-stage
+**Not taken, and why.** Handing the idle probe's chain fields to the hook is unsound as
+specified, because it removes the only check that acts on a read failure at that site. Merging two Autopilot config reads and computing the terminal-stage
 bit in the outer parse save nothing on a measured path. Running the project-root check inside the
 pre-lock storage process and moving the dispatcher's under-lock storage check into the
 `read-active` worker would each save one child on the armed path, but both change the status
 mapping that separates "no run" (which relaxes the guard) from a fault (5) and need their own
 review. Folding the routing re-check after the budget increment (the exact-match comparison and,
 when it fails, the mismatch classifier) into the fresh snapshot process would save one more child.
-Three judges found it sound, because both processes read only their pipe and the hook's own
-expected values, but it turns a parse failure there from a release into a block, a decision change
-that needs its own pin. The deferred-review adoption path keeps its own candidates for a later change, and folds
-inside the stop-budget and handoff critical sections were not fully judged.
+Both processes read only their pipe and the hook's own expected values, but the fold turns a
+parse failure there from a release into a block, a decision change that needs its own pin. The deferred-review adoption path keeps its own candidates for a later change, and folds
+inside the stop-budget and handoff critical sections are not fully judged.
 
 **Known gaps.**
 - A deadline release writes no bypass-ledger entry (the write needs the lease under the load
@@ -312,7 +303,7 @@ inside the stop-budget and handoff critical sections were not fully judged.
   recomputing the runtime digest, before it reads the lease. `L30` drives a standalone chain and
   never reaches that path, so its cost is unmeasured. On base macOS the child has no watchdog of
   its own, only this hook's deadline; where one exists, a child that misses its 5 s under heavy
-  load prints nothing, and that Stop counts against the stage budget as before.
+  load prints nothing, and that Stop counts against the stage budget.
 - The memo and the shortcut were measured on macOS (bash 3.2.57) and on Linux (bash 5.2.15, in a
   container). Git Bash is unverified. The symlink checks `L13`, `L17d`, `L43`, `L48`, `L50`, `L51`
   and `L52` make their links through Node, never with `ln -s`, which Git Bash satisfies with a
@@ -335,8 +326,8 @@ inside the stop-budget and handoff critical sections were not fully judged.
   in `tests/profiles/windows-native-structure.v1.json` and runs in the weekly Windows Safety
   workflow through `ciStructureTests`.
 - The early exit's wall time is dominated by two runtime-digest computations (bind and resolve).
-- Under extreme local load a suite that drives the full Stop path can now FAIL at the deadline
-  where it used to pass slowly; the release notice in its stderr names the cause. Measured at
+- Under extreme local load a suite that drives the full Stop path can FAIL at the deadline
+  instead of passing slowly; the release notice in its stderr names the cause. Measured at
   load ~740: the `hooks.chainEnforcer=false` branch needed more than 45 s.
 - `test-deferred-review-claim.sh` runs EVERY Stop through the worker directly
   (`--zensu-stop-worker`, in its `stop()` helper), because it tests the claim protocol, not the

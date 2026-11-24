@@ -84,9 +84,10 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   `state-directory`), re-reads the copy with `O_NOFOLLOW` and compares its digest with the
   template's (`digest-mismatch`), and sweeps copies of other sessions idle past
   `idleSessionMs`. It prints `stage=ok tree=<id> script=<path>`, the path last because it may
-  hold spaces, or `stage=unavailable reason=<reason>`. The gate is unchanged: the import compares
-  the launch record's and the run record's script digest with `TEMPLATE_FILE`, so the copy is
-  imported because its bytes are the template's, and an edited copy answers `foreign-script`.
+  hold spaces, or `stage=unavailable reason=<reason>`. The copy passes the same gate: the import
+  compares the launch record's and the run record's script digest with `TEMPLATE_FILE`, so the
+  copy is imported because its bytes are the template's, and an edited copy answers
+  `foreign-script`.
 - The template — `templates/workflows/zensu-review-v1.js`, which the main thread launches
   through the Workflow `scriptPath` from the copy `stage` writes. Its finders and refuters run as `zensu:review-aspect` (a
   refuter in the agent's verify mode, with a `VERIFY FINDING` block whose values are
@@ -123,8 +124,8 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   this one. A session that owns a live Autopilot run (`OUTER_PRESENT`), an Autopilot-bound
   chain (`INNER_BOUND_RUN`), a Stop that adopted a deferred review and a project holding a
   deferred claim never wait; all four exclusions sit inside the function. The counter is
-  `waits/<scv1-key>.json` in the store, swept after 24 hours, so no workflow-state field was
-  added.
+  `waits/<scv1-key>.json` in the store, swept after 24 hours, so the wait needs no workflow-state
+  field.
 
 **Decisions.**
 
@@ -141,14 +142,14 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   receive the diff in their prompt.
 - The judge is the gap detector because it already re-reads every changed file fresh. The
   `## Gaps` section exists only with an `external_review` input, so the panel path renders
-  the judge exactly as before. A first judge run that fails falls back to the full panel; the independent second run writes no gaps (`.claude/rules/cross-cutting-review.md`).
+  the judge without it. A first judge run that fails falls back to the full panel; the independent second run writes no gaps (`.claude/rules/cross-cutting-review.md`).
 - An unknown or absent task status gets no wait, so the guard blocks: the status vocabulary
   was never captured, and a wait is the one relaxation of the chain guarantee.
 - The wait bound has no environment override. A release that exits before the claim handoff
   would recreate the crashed-adopter state, hence the adoption and claim exclusions.
-- Only a template result is imported. A model-authored review script counted dead verifiers
-  as rejections and reported 22 of 34 findings as rejected with no vote cast, so the shape
-  gate fails to the panel: an ad-hoc workflow costs a second review, never a silent pass.
+- Only a template result is imported. A model-authored review script can count dead verifiers
+  as rejections and report findings as rejected with no vote cast, so the shape gate fails to
+  the panel: an ad-hoc workflow costs a second review, never a silent pass.
 - The result is read from the run record, never from the output file the main thread names.
   The launch response carries no output path, a named file is whatever the main thread wrote,
   and the run record also holds the script that ran and the arguments it ran with, so the import
@@ -156,8 +157,8 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   file name only selects the launch.
 - A run whose `changedFiles` argument leaves out a changed path answers `unavailable`, not
   `degraded`: it did not review this change, so the panel runs.
-- No script block is printed. Only the template can be imported, so the block always repeated
-  the same file; the judge receives the reviewed lenses instead.
+- No script block is printed. Only the template can be imported, so a script block would always
+  repeat the same file; the judge receives the reviewed lenses instead.
 - The template is launched from a plugin-staged copy inside the working directory. Measured on
   2026-10-14 in a Claude desktop session on 0.26.0 in auto mode: a `scriptPath` into the
   installed plugin root was refused with `scriptPath must be a script path this tool returned,
@@ -186,12 +187,12 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   the one model-typed input that decides what the import measures: freshness stats the change
   set under it and the tree binding fingerprints it, and the import is the chain's only review
   relaxation. So the root must be the tree every other Phase 6 surface measures, `$TOP`: the
-  step-2 change set, `finding-verify-v1.js --root "$TOP"` and the round scope. The first rule,
-  `isInside(root, projectRoot)`, approximated that lexically and admitted every directory above
-  the project root: `/`, a parent folder outside git, or an origin checkout whose ignored
-  `.claude/worktrees/` holds the session's worktree, whose tree never moves while freshness
-  stats the origin's copies of the changed paths. A subdirectory root that still contained the
-  project root fingerprinted only that subtree. The rule asks in the order `runDirectory` in
+  step-2 change set, `finding-verify-v1.js --root "$TOP"` and the round scope. A containment
+  test would admit every directory above the project root: `/`, a parent folder outside git, or
+  an origin checkout whose ignored `.claude/worktrees/` holds the session's worktree, whose tree
+  never moves while freshness stats the origin's copies of the changed paths. A subdirectory root
+  that contains the project root would fingerprint only that subtree. The rule asks in the
+  order `runDirectory` in
   `evidence-run-v1.js` already uses, git's answer first and the path only outside git, but it is
   stricter outside git: it takes the project root itself, where `runDirectory` keeps any
   directory inside it.
@@ -313,9 +314,8 @@ is shifted.
   inside its own (a worktree of another repository, a submodule, an embedded clone) answers
   `layout=nested-work-tree`, and one started in a folder outside git that holds several
   repositories answers `layout=nested-in-folder` for each of them. Their first review costs the
-  aspect panel even when a template workflow already reviewed that work tree. Measured
-  2026-10-13 on 0.26.0, where both answered a bare `reason=root` and the tree id was computed
-  by hand. Stage 2 lets such a chain declare the other work trees as code roots, and its first
+  aspect panel even when a template workflow already reviewed that work tree. Stage 2 lets
+  such a chain declare the other work trees as code roots, and its first
   review then still runs the panel by design, because a multi-root import is out of scope
   (`reason=multi-root`, `docs/multi-repo-chains-spec.md` §6.3 and §11). Until stage 2 ships,
   the session belongs in the work tree it changes.
@@ -338,7 +338,7 @@ is shifted.
   root is the work tree's top level while the copy and the session's state live in the
   subdirectory's `.zensu/`, so `currentTree` hands `computeTree` that path as well
   (`projectStateExclusion`); without it a repository whose `.zensu/*` ignore is anchored at the
-  top saw the copy move the tree and answered `stale reason=tree` on the first import. A
+  top would see the copy move the tree and answer `stale reason=tree` on the first import. A
   consuming repository that does not ignore `.zensu/` sees the copy as an untracked file.
 - Windows is unmeasured: the suite is in `ciStructureTests` and in no blocking Windows shard,
   and no staged copy was launched on Windows.

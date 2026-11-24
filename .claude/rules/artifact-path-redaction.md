@@ -45,10 +45,10 @@ more segments (`-Users-<name>`, `-opt-acme-app`) does not collide with a reposit
 own names. A one-segment spelling (`-root`, `-app`) can, so it is matched only directly
 under one of the three host directories (`ENCODED_HOST_DIRS`), and so is every residual
 encoded rule (`-Users-<seg>`, `-home-<seg>`, `-root` and the drive form
-`C--Users-<seg>`). Anchoring the residual rules on any separator rewrote in-repo names:
-`src/routes/-home-hero/index.tsx` became `src/routes/<home>/index.tsx` in an
-`IMPL completed` claim, the edit-landing audit then graded a path that does not exist,
-and `--tdd-complete` refused the chain with no in-chain remedy. A drive form is matched
+`C--Users-<seg>`). Anchoring the residual rules on any separator would rewrite in-repo names:
+`src/routes/-home-hero/index.tsx` would become `src/routes/<home>/index.tsx` in an
+`IMPL completed` claim, the edit-landing audit would then grade a path that does not exist,
+and `--tdd-complete` would refuse the chain with no in-chain remedy. A drive form is matched
 with either case of its drive letter.
 
 An encoded name holds only ASCII letters, digits and `-`. A run of those that continues
@@ -66,8 +66,8 @@ a change there silently stops both. R82-R85 pin the rules and their bounds.
 **Secret NAMES are never redacted** — a name grants no access and this repo's own
 workflows carry `secrets.GITHUB_TOKEN` in public. Credential VALUES are a different
 problem: they belong to `hooks/pre-write-secret-scan.sh` / `secret-patterns.js`, and
-because moving the log message off the command line removed that gate's incidental
-sight of it, `append` RESTORES the control at the chokepoint — it runs the same
+because that gate has no incidental sight of a message `append` writes, `append`
+RESTORES the control at the chokepoint — it runs the same
 curated rules over the message and REFUSES on a match rather than redacting, since
 rewriting a credential silently would hide it from whoever has to rotate it. It
 honours `ZENSU_SECRET_SCAN=off` and the `zensu-secret-allow` line marker, so a heuristic
@@ -75,22 +75,19 @@ false positive is not a wedge. Its refusal names only the marker, which stays vi
 committed artifact: run-log writes happen inside the review chain, and no text a model reads
 there names an env-var escape (`tests/structure/test-escape-wording.sh`).
 
-**The ledger picture is narrower than "unrecorded", and worth stating precisely
-because a first draft of this paragraph got it wrong.** `pre-write-secret-scan.sh`
+**The ledger picture is narrower than "unrecorded", and worth stating precisely.**
+`pre-write-secret-scan.sh`
 carries TWO ledger sites: it records the AMBIENT `ZENSU_SECRET_SCAN=off` directly,
 before the decider runs at all, and it records the INLINE per-command prefix
-through the decider's `__bypass__` verdict. `append` now carries a ledger site of its
+through the decider's `__bypass__` verdict. `append` carries a ledger site of its
 own, at the log-write chokepoint, best-effort in a subshell so a ledger write can never
-cost a log line. **State its channel by MECHANISM, not by outcome — an earlier revision
-of this paragraph got the outcome exactly backwards.** It tests its own PROCESS
+cost a log line. **State its channel by MECHANISM, not by outcome.** It tests its own PROCESS
 ENVIRONMENT (`[ "${ZENSU_SECRET_SCAN:-}" = "off" ]`), and a shell assignment written in
 front of a command is exported into that command's environment, so the verb cannot tell
 an inline prefix on its own invocation from an exported one and records BOTH. R53 is
 the pin, and it uses the inline spelling. What it never records is a prefix on some
-OTHER command — only the decider sees those, and this verb never consults it. The
-direction of the old error is worth naming: the ledger recorded MORE than the
-documentation claimed, so no rendered entry was ever false. One bound travels with the
-new site and is not cosmetic: the
+OTHER command — only the decider sees those, and this verb never consults it. One bound
+travels with the site and is not cosmetic: the
 identity comes from `zensu_resolve_session_id ""`, which reads `ZENSU_SESSION_KEY`, so
 an `append` run outside a Zensu-started session records nothing. This verb deliberately
 carries no session bind and there is no second source for that identity.
@@ -122,7 +119,7 @@ not a guarantee.
 `>>` names a path and follows what it finds, so the validation and the write name
 different objects — and `[ -L ]` is blind to a HARD link, which
 `resolveArtifactTarget` cannot see either because it canonicalizes only the parent.
-Planting one inside `.zensu/logs/` turned the verb into an append/truncate
+Planting one inside `.zensu/logs/` would turn the verb into an append/truncate
 primitive on any file on the same filesystem. `writeArtifactLine` opens with `O_NOFOLLOW`, judges the descriptor (`isFile`,
 `nlink === 1`, and the expected dev/ino re-derived from the canonical parent, which
 catches the name resolving to a DIFFERENT inode than the one opened — the
@@ -130,10 +127,10 @@ rename/replace race, NOT an intermediate-directory swap: when nothing moved the
 re-derived parent is the lexical parent, so the lstat re-traverses what the open
 traversed and both move together), and never truncates in place. `O_TRUNC`
 stays out of the open flags, because truncating at open would run BEFORE the `nlink`
-check could refuse. The destructive mode publishes by RENAME instead: an earlier
-spelling ran `ftruncate` after those checks, which committed the destroy before the
-new bytes existed and left the artifact empty on a failed write, so `mode: 'replace'`
-now routes to `replaceArtifactFile`, which validates the target through a read-only
+check could refuse. The destructive mode publishes by RENAME instead: an `ftruncate`
+after those checks would commit the destroy before the new bytes exist and leave the
+artifact empty on a failed write, so `mode: 'replace'` routes to
+`replaceArtifactFile`, which validates the target through a read-only
 descriptor, writes an `O_EXCL` temp beside it, `fsync`s, re-checks, and renames. It is
 named for what it can do: `mode: 'replace'` destroys, and it refuses any bucket but
 `logs`, so the log verb cannot reach a committed plan.
@@ -166,22 +163,20 @@ for the same reason the requirements-gate copies are.
 **Coupled sites that move together:** the module's `ARTIFACT_BUCKETS` / `ARTIFACT_DIR`,
 which are module-INTERNAL — the redact check consumes the layout TRANSITIVELY,
 by calling `sweepTargets` and `redactFile` rather than joining
-`.zensu/plans` and `.zensu/logs` itself, and it never imported either constant; an
-earlier revision of this clause said it consumed them directly, and the module header
-now records the same correction. `SWEEP_WINDOW_SECONDS` and `SWEEP_MAX_TARGETS` are
+`.zensu/plans` and `.zensu/logs` itself, and it imports neither constant.
+`SWEEP_WINDOW_SECONDS` and `SWEEP_MAX_TARGETS` are
 imported by nothing — the redact check calls
 `mod.sweepTargets(project)` with no options and the module defaults apply internally —
 so every prose copy of their values is documentation-only and breaks SILENTLY, which is the same trap the
-module header now records in its own words;
+module header records in its own words;
 the `Edit|Write|MultiEdit`
 matcher spelling in FIVE places — `DISPATCHED_CHECKS` (`artifact-redact-write`), `docs/configuration.md`,
 `docs/build-workflow.md`, R0c, and the `writeTool` disjunction in
 `sweepArtifacts` of `hooks/lib/hook-dispatch-v1.js` that actually selects the branch, which is the one
 a `NotebookEdit` added to the matcher would silently miss; the hook
 count in `docs/configuration.md` (header, prose, and the `#hooks-N` anchor in
-`docs/architecture.md` — the anchor was outside H3's file list until the reviewer-spawn
-grant landed, and `test-readme-hook-count-sync.sh` H3 now scans that file too, so all three
-are pinned; H3 remains purely NEGATIVE, forbidding a stray number without asserting that a
+`docs/architecture.md` — `test-readme-hook-count-sync.sh` H3 scans that file too, so all
+three are pinned; H3 remains purely NEGATIVE, forbidding a stray number without asserting that a
 `#hooks-N` reference still exists, so a reworded or deleted cross-link still passes); the
 secure-open inventory in `tests/structure/test-windows-portability-guards.sh`; and
 the `msysSpelling` inverse, which is a HAND-COPY of `claude-path-v1.js`'s rule
@@ -197,8 +192,8 @@ enforced there too; `resolveArtifactTarget`'s returned FIELD NAMES (`ok`, `reaso
 in the case this design calls normal, under exit 0; the reason vocabulary itself — `CLEAN_REASONS`,
 `TRANSIENT_REASONS` AND `NON_ARTIFACT_REASONS` are all exported precisely so no
 consumer re-spells any part of it, because a renamed reason would otherwise make
-the hook shout about every ordinary Write, and an implicit residual class already
-made a routine race report as the worst outcome the hook can produce.
+the hook shout about every ordinary Write, and an implicit residual class would
+make a routine race report as the worst outcome the hook can produce.
 
 **Operator-facing accounts that must move with it:** `docs/build-workflow.md`
 §"Publication safety of the plan and log" (which carries the narrative, including
@@ -238,7 +233,7 @@ regenerates them.
 gets a TypeError in its log writer) plus the
 layout constants and ALL THREE reason sets (`CLEAN_REASONS`, `TRANSIENT_REASONS`,
 `NON_ARTIFACT_REASONS` — an explicit partition, because an implicit residual class
-once made a routine race report as the worst outcome the hook can produce), all in the host-neutral module — together
+would make a routine race report as the worst outcome the hook can produce), all in the host-neutral module — together
 with its ONE sibling `require`, `claude-path-v1.js`'s `msysDrivePrefix`, without
 which the module does not load at all. `sweepTargets` also spawns `git`; a host
 without it gets the unscoped set and a `fallback` reason, never an error. A SIXTH host obligation goes with the log
@@ -260,9 +255,9 @@ included in this change.
 
 **The sweep asks git before it redacts.** A checkout, `git worktree add` included,
 writes every tracked artifact, so an mtime cannot tell a fresh append from a file git
-just restored; unscoped, the first main-thread call redacted the 25 newest committed
-artifacts and left a stray diff that a restore could not cure, because the restore
-refreshed the mtime again. `sweepTargets` therefore drops a candidate only when git
+just restored; unscoped, the first main-thread call would redact the 25 newest committed
+artifacts and leave a stray diff that a restore could not cure, because the restore
+refreshes the mtime again. `sweepTargets` therefore drops a candidate only when git
 POSITIVELY confirms it tracked and unchanged: `git status --porcelain=v1 -z
 --untracked-files=all --no-renames` does not list it AND `git ls-files -z --cached`
 does. Status alone cannot vouch for a file — it lists nothing inside a nested
@@ -299,7 +294,7 @@ verb is unaffected; this is a bound on the net, not on the guarantee's primary
 path, and it is listed here rather than left to be discovered.
 
 **Writer-side only.** Artifacts already committed in consuming repos are
-untouched; this change makes everything written from now on publishable, and no
+untouched; the writers make everything they write publishable, and no
 repository becomes safe to open-source because of it alone.
 
 **Known bounds, stated rather than implied:** the rule is textual, so a path spelled
@@ -327,10 +322,10 @@ the product name (`~-IdeaProjects-<product>-sub`), because the encoded project r
 must fill the whole name; `expectedRoot` binds `append` only when
 `CLAUDE_PROJECT_DIR` is set, so without it the containment is artifact-SHAPE only
 and any project's `.zensu/logs` is an accepted destination — narrow, but not
-nothing, and deliberately NOT gated on that variable: an earlier revision made
-`--truncate` refuse without it and broke the Phase 2 recipe of that time outright,
-because the variable is absent from the model's Bash environment on this host.
-The current recipe renders `{log_file}` from the bound root that
+nothing, and deliberately NOT gated on that variable: it is absent from the model's
+Bash environment on this host, so a `--truncate` that refused without it would break
+any recipe that does not pass it.
+The recipe renders `{log_file}` from the bound root that
 `zensu-log.sh --project-root` prints and passes `CLAUDE_PROJECT_DIR="{project_root}"`
 on its `--truncate` call, so the shipped destructive write IS bound; every other
 caller that omits the variable still is not.

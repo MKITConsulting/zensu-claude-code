@@ -131,7 +131,7 @@ approved plan's `## Manual Acceptance` table lists every partial id, and `consen
 (§"Autopilot run mode"). No segment names an escape. `unresolved` names its remedy in its cause, `unavailable` names none.
 Every consumer acts on the segment: `/zensu:self-review`, the self-review-off `CLOSE_PASS` and
 verify-feature chain mode re-verify only after `run:`, because verifying an unchanged tree again
-cannot turn a `fail`, and a re-verify loop runs to the Stop cap. `partial` left `run:` because
+cannot turn a `fail`, and a re-verify loop runs to the Stop cap. `partial` gets no `run:` because
 the same environment observes it the same way again; only access the user provides, or the
 user's consent, changes it.
 
@@ -193,12 +193,11 @@ runs (`A33`, the fail-closed transport in `.claude/rules/evidence-runner.md`).
 
 ## Standalone consent (`--accept-partial`), the Stop hand-off and the criteria check
 
-Agents kept closing chains by asking the user to set `ZENSU_ACCEPTANCE_GATE=off`, and marked that
-option recommended, because the plugin offered nothing between "every criterion passes" and
-switching the gate off: `partial` (credentials, an account, a non-loopback host, a signed build, a
-delivery fact) blocked like `fail`, its only remedy was `run:`, the remedies and the skills named
-the escape as the hand-off, and a refused terminus kept the Stop blocked until the cap. User
-decision (2026-11-10): such a chain closes only with the user's consent for the named criteria.
+A `partial` criterion (credentials, an account, a non-loopback host, a signed build, a delivery
+fact) is one this environment cannot observe. Without a close between "every criterion passes"
+and switching the gate off, agents ask the user to set `ZENSU_ACCEPTANCE_GATE=off` to close such a
+chain, and mark that option recommended. User decision (2026-11-10): such a chain closes only with
+the user's consent for the named criteria.
 
 **The consented close.** `--chain-done --claimed-review-ticket <t> --accept-partial <ids>` on the
 ticket-bound standalone terminus. `zensu-log.sh` validates the list through the module's
@@ -222,7 +221,7 @@ before the converged transition, because the ledger writer needs an active chain
 through `tdd_add_bypass` and is confirmed with `tdd_bypass_recorded`: a consent the ledger did not
 take, or ids given while the verdict state did not reach the terminus, refuses with exit 1 before
 the transition, so the chain stays open and the same call records the consent on a retry.
-`acceptance-partial` joined `ZENSU_BYPASS_GATE_ALLOWLIST` (shape-legal; an earlier installation's
+`acceptance-partial` is in `ZENSU_BYPASS_GATE_ALLOWLIST` (shape-legal; an earlier installation's
 writer and reader filter it out rather than fail); it renders 🟡 alone and every escape 🔴
 (`status-marker-legend.md`), and `--bypass-note` refuses it, so only the terminus writes it to
 the session ledger, while `--autopilot-validate` writes it to the run's `bypasses` list. Run mode
@@ -324,7 +323,7 @@ with `…, so the plan was NOT judged.` Its wording is the module's; the remedy 
 
 **Escape-free texts.** No refusal, remedy, hand-off or skill text on the chain-closing path names
 `ZENSU_*_GATE`, `ZENSU_CHAIN`, `ZENSU_SECRET_SCAN` or an `evidence.*Gate` value as an option or a
-prohibition, and the same now holds for every runtime file outside the chain.
+prohibition, and the same holds for every runtime file outside the chain.
 `tests/structure/test-escape-wording.sh` walks all of them (`.claude/rules/gate-disable-prefixes.md`
 §"Model-facing text names no escape"); the chain's disclosure lines are its `DISCLOSURES`: the
 `escaped` lines, the `STEM UNCHECKED` lines, the `unresolved` cause naming a used edit-landing
@@ -410,7 +409,8 @@ call: status 3, a run record it cannot parse, and a status outside 0, 3, 4 and 5
 the phase library is loaded, so both name the module through `_zensu_avr_module_path`, which
 renders the plugin's `hooks/lib` with `zensu-host-path.sh` as `--evidence-run` does, never through
 `_tdd_native_path`: the suite sources that library and exports its functions to every child, which
-hid the missing function from every check but `V21` and `I9a`. `--run` and `--log` exclude each other, and
+would hide a missing function from every check but `V21` and `I9a`.
+`--run` and `--log` exclude each other, and
 `--evidence-run --run` takes `--scope acceptance` only. The run record reaches the module as the
 transport file `run.json`; the work tree comes from `{"runId":"<id>"}` handed to
 `_zensu_bound_work_tree` as the given context, so a run whose `workspaceRoot` is a worktree below
@@ -437,8 +437,8 @@ copy through `readApprovedPlan`, which compares the digest with `approvedPlanSha
 the bytes it verified as `planBytes`, which `chainCriteria` hands to `readCriteria`: the lister
 parses a private temporary copy of them, so `record`, `status` and the verdict judge the bytes
 whose digest was checked, never a second read of the file, and a person-approved work-order plan
-travels the same way; a missing copy (a run
-approved before this release) or a changed one is `unresolved`, and the refusal reports the
+travels the same way; a missing copy (a run approved by an earlier installation that stored no
+copy) or a changed one is `unresolved`, and the refusal reports the
 cause and leaves the decision to the user without naming the escape (§"Standalone consent"). A record of a run copy carries
 `plan: .zensu/state/<stem>.md` (`expectedPlanRel`), and the standalone escaped-receipt path skips
 run-copy stems. A work-order run reads `.zensu/plans/<order-id>.md`: when a person approved the
@@ -455,7 +455,7 @@ judge the file refuses with `plan-criteria-unreadable` instead, whose remedy lea
 and names `/zensu:doctor`. A plan that does not parse keeps `plan-criteria-unusable` with a remedy
 of its own, to close the open code fence, and both refusals name the plan project-relative, never by
 the absolute path the lister prints. Without it the run
-reached VALIDATE with no criterion and an `add:` remedy only the user could take. `--plan-approval`
+would reach VALIDATE with no criterion and an `add:` remedy only the user can take. `--plan-approval`
 does not repeat the check, because the protocol reaches it only after `--bind-spec` refused with
 `plan-approval-required`.
 
@@ -470,8 +470,8 @@ gate lifts, while the plan copy is read after the escape. A full-length
 head is compared directly. An abbreviated one goes through `prCommit`: `git rev-parse
 --disambiguate=<prefix>` lists objects and never ref names, and `git cat-file --batch-check` keeps
 the commits among them. `rev-parse <prefix>^{commit}` resolves a branch or tag of the same name
-before the object, so a branch named after the abbreviation made its tip pass as the pull-request
-head (measured, `V17`). An abbreviation several commits begin with, or more than
+before the object, so a branch named after the abbreviation would make its tip pass as the
+pull-request head (measured, `V17`). An abbreviation several commits begin with, or more than
 `LIMITS.headCandidates` objects, refuses with its own cause, which tells the run to block, because
 no checkout settles it, and so does a `--disambiguate` or `cat-file` call that fails. The dirty-tree refusal keeps its prefix, names the first
 `LIMITS.listedChanges` changed paths, counts the rest, and sends a change that belongs to the change
@@ -493,8 +493,8 @@ the project root's own `.zensu` left out (the `excluded` option the external rev
 `runHead` checks `HEAD` and the clean tree there with the same exclusion,
 `--evidence-run --scope acceptance --run` takes the same fingerprint through the transport file
 `tree-mode`, and `fingerprintChanges` lists a changed path relative to the project root
-(`../shared/lib.txt`). A fingerprint of the project root alone let an edit outside it, committed or
-not, leave every record current. A project root that is the repository top keeps
+(`../shared/lib.txt`). A fingerprint of the project root alone would let an edit outside it,
+committed or not, leave every record current. A project root that is the repository top keeps
 `computeTree(projectRoot)`, so its trees do not change.
 
 **States and exits.** A pass is `pass`; `--accept-partial <ids>` turns a verdict whose open rows
@@ -612,7 +612,8 @@ run proves its command's exit code, not that the command checks the criterion; `
 the run record and the plugin store are writable from the session, and a direct library call
 skips the CLI refusal, so this bounds accidents, not intent; every commit after validation,
 `--cover` included, makes every record stale; records are per session key, so a new owner after
-`/zensu:autopilot-adopt` verifies again; a run in flight across this release has no stored copy,
+`/zensu:autopilot-adopt` verifies again; a run approved by an earlier installation that stored no
+copy has none,
 which the resume line names, and needs the user's escape; the `## Manual Acceptance` table that
 carries consent is model-written plan text the user approved, so its consent is only as careful as
 that approval, while the 🟡 row, the evidence and the ledger entry keep the gap visible; a work-order plan the order timeline names under

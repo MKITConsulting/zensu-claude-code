@@ -28,14 +28,11 @@ named for the gauntlet-loop skill red, and the remedy is to edit `ESCAPE_STEMS`,
 file you were working on. The message names both sets so the diagnosis is in the failure
 itself, but nothing points at it from the side that changes.
 
-It is not hypothetical. `ZENSU_REQUIREMENTS_GATE=off` arrived with the
-plan-requirements completion gate and was caught on the next merge, by exactly this arm.
-
 Two properties worth keeping when touching G12: the derivation carries the same quote
 tolerance as the pattern it validates (the gates compare after shell quote removal, so
 `ZENSU_CHAIN='off'` disables one at runtime and a bare `=off` derivation is blind to it),
-and an EMPTY derivation is a FAIL rather than a skip — a swallowed `grep -r` failure used
-to read as agreement while the control block still printed PASS.
+and an EMPTY derivation is a FAIL rather than a skip — a swallowed `grep -r` failure reads
+as agreement while the control block still prints PASS.
 
 **Not every member of this set is a gate.** `ZENSU_SESSION_LINEAGE=off` (`skills/session-trail/scripts/trail.mjs`)
 refuses every session-lineage ledger write and is a PRIVACY control: it disables no gate,
@@ -48,17 +45,17 @@ applies to it exactly as it does to the gates. So membership here says something
 SPELLING, never about what the variable does.
 
 **State the two counts, because they are NOT the same number and the gap is the point.**
-`ESCAPE_STEMS` now holds ELEVEN stems; `ZENSU_BYPASS_GATE_ALLOWLIST` in
+`ESCAPE_STEMS` holds ELEVEN stems; `ZENSU_BYPASS_GATE_ALLOWLIST` in
 `hooks/lib/zensu-tdd-phase.sh` holds TEN escape names plus the consented gap `acceptance-partial`,
 which is no `ZENSU_*=off` spelling and so no stem, and `docs/configuration.md` §"Visible opt-outs"
 stays the authoritative ledger roster. TWO stems are therefore in the set and not in the
-ledger, and `ZENSU_SESSION_LINEAGE` is not the first: `ZENSU_AUTOPILOT` was already one,
-because its escape is recorded as an audited `BLOCKED` transition rather than as a ledger
-entry. Do not "reconcile" the two lists — they answer different questions, and a reader
+ledger: `ZENSU_SESSION_LINEAGE`, and `ZENSU_AUTOPILOT`, whose escape is recorded as an
+audited `BLOCKED` transition rather than as a ledger entry. Do not "reconcile" the two
+lists — they answer different questions, and a reader
 who makes them agree has either ledgered something that escapes no gate or stopped G12
 from covering a spelling a skill must not teach. ONE name runs the other way:
-`ZENSU_TEST_WITNESS` is in the ledger allowlist and not in the set. Its gate was removed
-together with the Bash witness, so no source spells its escape any more and G12a would
+`ZENSU_TEST_WITNESS` is in the ledger allowlist and not in the set. Its gate is gone
+with the Bash witness, so no source spells its escape and G12a would
 fail on a stem nothing derives; the allowlist keeps it because the ledger write path
 filters existing entries through the allowlist, and dropping it would erase it from every
 ledger an older installation wrote. `acceptance-partial` is in the allowlist and not in the
@@ -68,10 +65,10 @@ member needs its own two sentences here, and the counts above updated with it.
 
 ## Model-facing text names no escape (`tests/structure/test-escape-wording.sh`)
 
-Agents kept proposing to switch gates off because text they read named the escape as the
-hand-off. The rule, a user decision applied to the chain-closing path in v0.40.0 and then to every
-runtime file: the remedy stays, and no text the model reads names an escape, as an option, a
-hand-off or a prohibition. A generic prohibition that names none stays ("Do not run it, with or
+Text that names the escape as the hand-off makes agents propose to switch gates off. The
+rule, a user decision that holds for every runtime file: the remedy stays, and no text the
+model reads names an escape, as an option, a hand-off or a prohibition. A generic
+prohibition that names none stays ("Do not run it, with or
 without a prefix", "never offer, set or mention a way to switch the gate off"). Three kinds of text
 keep naming one: a disclosure printed only after the user set the escape, an operator-facing notice
 (stderr of a Stop hook that exits 0, `stop_notice`, `systemMessage`; `B4a` in
@@ -86,8 +83,8 @@ literals in shell, JS and TS (a heredoc body and a template literal's continuati
 and every line of every other file. `docs/` is left out on purpose: the operator rows and the
 escape roster live there (`docs/configuration.md` §"Visible opt-outs"). `W0` requires every tracked
 file under those roots to be read (without git, at least 250 files), every root to contribute, no
-symbolic link, and the anchor list: the former explicit file list and the files this rule was
-applied to. A code line is exempt only through a recognized read: a `${NAME…}` or `$NAME` read (in
+symbolic link, and the anchor list: the files this rule was applied to. A code line is exempt
+only through a recognized read: a `${NAME…}` or `$NAME` read (in
 a shell file outside single quotes and not after a backslash, in JS and TS outside a quoted string,
 where a template literal's `${NAME}` counts and its bare `$NAME` text does not), an `env.NAME` or
 `env['NAME']` read, a property read outside a string literal, a whole-name literal that is compared,

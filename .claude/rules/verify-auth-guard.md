@@ -35,8 +35,8 @@ with a strict reader (`readAuthBlock`: `key: scalar` lines only), runs `auth.log
 `SIGTERM`, `SIGINT` or `SIGHUP` to the helper (`ABORT_SIGNALS`) kills the login's process group
 and removes the artifact directory before the helper exits `128 + n`; the skill gives the helper
 call a Bash timeout of 330000 ms, above the login's own bound, so the host's timeout does not
-fire first. The caller names no login origin: `--auth-origin` was removed, because the login
-runs before any consent prompt and the checked-in recipe is the only approval of where
+fire first. The caller names no login origin (the helper refuses `--auth-origin`), because the
+login runs before any consent prompt and the checked-in recipe is the only approval of where
 credentials go. In remote mode the login goes to the recipe's `auth.baseUrl`, which must be one
 of the `--origin` values, or to `auth.appOrigin` without one; in local mode to the run's first,
 loopback origin. A local recipe may name that origin as `appOrigin` or `baseUrl` and no other, and
@@ -69,8 +69,8 @@ reaches the `finally`. A failed `open` fires no PostToolUse event, so the file t
 Phase 4, which runs the helper's `--discard-state --run-dir <run dir>` before teardown.
 `discardAuthState` removes the run's `auth/` directory once `runDirLayout` accepts the run
 directory and only when `auth` is a plain directory, so a run directory Phase 4 keeps after an
-incomplete teardown no longer keeps the state. Records gain the optional
-`restoredState: true`; no `MEMORY_VERSION` bump, because older readers ignore the field and
+incomplete teardown holds no state. Records carry the optional
+`restoredState: true`; there is no `MEMORY_VERSION` bump, because older readers ignore the field and
 deduplication keys on `(origin, route, restoredState)`.
 
 **The read guard is textual and in-process.** `verify-auth-guard` in `DISPATCHED_CHECKS` runs no
@@ -100,7 +100,7 @@ masked text's shell spellings before quotes, backslashes and backticks are strip
 escape in `$'playwright-cli\x00.json'` still ends the name, as does a backtick substitution in a
 token that also holds an expansion character the rule acts on, and an unquoted `${${:-…}:r}`
 token counts through its `${` opener. The price is a false refusal for an unquoted `${HOME}/…`
-path that names a project folder after the CLI, as at the old substring reading; the quoted
+path that names a project folder after the CLI; the quoted
 `"$HOME"/…` and `~/…` spellings pass.
 `maskedQuotedExpansions` decides "acts on" for Bash text: it hides each such character inside
 single quotes, an ANSI-C string or behind a backslash, and every one but `$` inside double

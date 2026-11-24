@@ -38,13 +38,12 @@ the installed binary and run in Node, settles the edges the documentation leaves
 - Any substitution suppresses the `ARGUMENTS: <value>` line the loader otherwise appends, so a
   stray placeholder also hides the arguments themselves.
 
-**What it cost.** Rendered through that function: `/zensu:self-review` invoked with
-`SELF-REVIEW-TICKET: rt_…` put the ticket where the reviewConvergence probe expected the plugin
-root, the probe printed `off`, and the ticket line was not appended. `/zensu:build` with a spec of two
-or more words put the spec's second word into the judge and finding-verification probes and dropped
-the spec's `ARGUMENTS:` line. `plan-review` and `pr-team-review` broke the same way from the second
-argument on, and `verify-feature` replaced the `"$12"` example of its quoting rule from the
-thirteenth word on.
+**What it costs.** Rendered through that function, a stray placeholder rewrites the snippet
+around it. An argument such as `SELF-REVIEW-TICKET: rt_…` lands where the reviewConvergence probe
+expects the plugin root, so the probe prints `off` and the ticket line is not appended. From the
+second argument on, a spec of two or more words puts its second word into the judge and
+finding-verification probes and drops the spec's `ARGUMENTS:` line. A quoting-rule example such
+as `"$12"` is replaced from the thirteenth word on.
 
 **Where the rule binds.** Only `skills/*/SKILL.md` bodies reach the loader in this plugin, and
 `plugins/*/skills/*/SKILL.md` bodies in a companion plugin such as `session-hub@zensu`, whose
@@ -131,9 +130,8 @@ while looking for matching`), the same parser hazard as
 the Bash secret scan inspects: `detectChannels` reports `redirect` and `heredoc` for both forms
 and nothing for an inline `--content "…"`.
 
-**The file flags.** zensu-cli `d466f49`, "read long free-text flag values from a file or stdin"
-(#52), is the `v0.22.0` tag, and `v0.21.0` has no `internal/cmd/valuefile.go`. It adds
-`--<flag>-file path`, or `-` for stdin, to `features update --description`,
+**The file flags.** zensu-cli `v0.22.0` is the first release with `internal/cmd/valuefile.go`;
+`v0.21.0` has none. It adds `--<flag>-file path`, or `-` for stdin, to `features update --description`,
 `ghost scan --candidates` and `--components`, `journeys create --description`,
 `link docs --content`, `products create --description`, `products vision-create --content`,
 `products bootstrap-apply --result`, `roadmap create` and `roadmap update --description`,
@@ -144,8 +142,8 @@ before the command runs, the CLI refuses a missing or unreadable path, a path th
 regular file (it opens the path `O_NONBLOCK` on unix, so a FIFO cannot block it), an oversized
 file, invalid UTF-8, a NUL byte and an empty or whitespace-only value. It strips a UTF-8 BOM,
 makes each file flag exclusive with its inline flag, and lets only one flag of a call read
-stdin. So a file-flag site needs no shell content check, and its text no longer travels as a
-command-line argument, which takes it out of the operating system's argument-size limits. The
+stdin. So a file-flag site needs no shell content check, and its text does not travel as a
+command-line argument, which keeps it out of the operating system's argument-size limits. The
 skills rely on these flags because the floor is 0.22.0 (`.claude/rules/zensu-cli-floor.md`); an
 older CLI refuses each such call with `unknown flag`. The skills never use the stdin form: one
 call can feed only one flag from stdin, and a file serves both flags of `security review`.
@@ -251,7 +249,7 @@ limits apply there; those flags carry short values, and file flags for them are 
 change. The pairing of a prose site is textual: a sentence that names its flag before its
 command pairs with an earlier command, and `FT8` then fails rather than passes unless that
 command declares the same flag. A file over 256 KiB of text or 4 MiB of JSON is refused by the
-CLI, where the inline form used to pass it up to the argument limit.
+CLI, where the inline form passes a value up to the argument limit.
 
 **Version: `patch`.** Skill text and a structure check: no schema field, key set, hook, matcher,
 config key or attestation moves.
@@ -269,7 +267,7 @@ config key or attestation moves.
   skills are indented the same way.
 - **A refused `--project-root` reads the global config only.** In plan-review and pr-team-review
   the substitution is then empty, `cfg()` skips the overlay and the probe answers from
-  `~/.zensu/config.json` and `ZENSU_CONFIG`, as it did before the probes passed the root, with the
+  `~/.zensu/config.json` and `ZENSU_CONFIG`, with the
   verb's refusal on stderr. The verb refuses when the binding is unavailable, which both skills
   already needed for their review-evidence lease, and for a root holding a double quote, a dollar
   sign, a backtick or a backslash.

@@ -17,16 +17,15 @@ bypass-ledger entry records it — and a model that reads it as a flat prohibiti
 withholds the very spawns the review chain is made of, silently, until the Stop cap
 releases the guard. That is an observed session outcome, not a hypothesis.
 
-**The sentence does NOT rule on that rule's scope, and two rejected drafts are why.**
+**The sentence does NOT rule on that rule's scope.**
 The rule's condition is PROVENANCE — who asked — and a hook cannot observe it:
 `plan-approved-delegate.sh` has a documented fast-path that arms the workflow
 non-interactively with no human present, and the Stop enforcer itself arms an adopted
 deferred-review generation, so on both paths the spawns genuinely ARE unrequested. The
-first draft asserted the user had asked (false on both). The second asserted the rule
-"is about ad-hoc fan-out", which swapped the rule's own criterion for one the plugin
-can always satisfy — the same error one clause over. What ships states the observable
-SHAPE and then ROUTES: withholding is allowed, but not silently, so the user decides.
-Never re-open this by giving the plugin a verdict on a restraint it does not own.
+sentence therefore never asserts that the user asked, which is false on both paths, and
+never swaps the rule's own criterion for one the plugin can always satisfy. It states the
+observable SHAPE and then ROUTES: withholding is allowed, but not silently, so the user
+decides. Never re-open this by giving the plugin a verdict on a restraint it does not own.
 
 **One owner, three render sites, one deliberate non-site.** The owner is
 `hooks/lib/zensu-tdd-phase.sh` under its own `# --- Review-spawn scope sentence (shared directive text)` banner — NOT part of the bypass-ledger section it sits below, whose two message
@@ -40,16 +39,15 @@ as pressure to work around a refusal.
 
 **The render side is a closed ALLOWLIST, and the criterion is "can a refusal be RULED
 OUT" — not "was one observed", and not "did the probe succeed".** The distinction is not
-pedantic: it is the test a maintainer applies when the scanner gains a sixth status, and
-an earlier revision of this paragraph got it wrong in the direction that would misclassify
-one. `reviewer_spawn_denied` is true only for
+pedantic: it is the test a maintainer applies when the scanner gains a sixth status.
+`reviewer_spawn_denied` is true only for
 `status=blocked`, so every other verdict reaches the resume branch, and the enforcer
 records the probe's OWN word in `REVIEWER_DENIAL_RAW` beside the routing status. The
 allowlist is `clear|none|unprobed|unreadable`; everything else withholds.
 
 `errored` is the only RECOGNIZED verdict that withholds — a reviewer result the host
 flagged as an error whose text matched no `DENIAL_MARKERS` prefix. It does NOT establish a
-refusal, and saying so was the error: `reviewer-spawn-denial-v1.js`'s own header lists
+refusal: `reviewer-spawn-denial-v1.js`'s own header lists
 three causes — a reworded host message, a subagent crash, a transport failure — and tells
 callers to treat the verdict as no detection. What it establishes is that a refusal cannot
 be ruled out, and the enforcer diverges from that header for the RENDER decision only,
@@ -62,14 +60,14 @@ output that is not a status line — so an unrecognized verdict withholds by all
 closure rather than by inheriting an initializer. `blocked` never reaches the `case` at
 all; the `elif` above consumes it.
 
-**`unreadable` RENDERS, and an earlier revision of this feature had it backwards.** Its
+**`unreadable` RENDERS.** Its
 usual provenance is the module's `readTail` failure path — a rotated or deleted
 transcript, a FIFO, an EACCES path — which precedes any inspection of a tool result; it
 can also come from the module's outer catch, which does wrap the scan. Either way the
 DIRECTION is what decides: it is the same could-not-look outcome as a probe that timed out
 or an installation with no scanner module, and both of those leave `unprobed`, which
-renders. Withholding on one while rendering on the others put a single evidence class on
-two opposite sides inside one block.
+renders. Withholding on one while rendering on the others would put a single evidence class
+on two opposite sides inside one block.
 
 **Do not "simplify" the allowlist to a `clear`-only gate either.** Measured:
 `reviewer-spawn-denial-v1.js` answers `verdict('none')` when no reviewer result exists at
@@ -91,7 +89,7 @@ PERMISSIVELY through `zensu_hook_enabled` at both render sites — for this key 
 means a sentence renders, so an unreadable config falling back to enabled restores the
 default rather than a capability, which is why it is NOT the strict reader
 `reviewerSpawnAutoAllow` uses. It exists because this is the one piece of model-facing
-prose in the tree whose subject is a HOST-level rule; without it the only lever was
+prose in the tree whose subject is a HOST-level rule; without it the only lever would be
 `hooks.chainEnforcer=false`, which disables the whole guard — and is not ledgered
 either: a config-disabled gate has no decision point, so only the NINE `ZENSU_*` gate escapes
 listed under §"Visible opt-outs" and the consented `acceptance-partial` gap ever produce an
@@ -113,9 +111,9 @@ sentence never reaches it.
 session that withholds the very first fan-out learns this only after one blocked Stop —
 one turn, not a wedge. KNOWN BOUND 2: `hooks/lib/chain-recovery-v1.js`'s `NEXT_COMMAND`
 instructs a reviewer spawn from JS, where a shell constant is structurally unreachable.
-That bound is NOT planned to be closed, and the remedy an earlier wording gave was
-backwards: "the owner MOVES to a shared JS module" inverts the problem, because a JS
-module is exactly as unreachable from `sh` as `sh` is from JS and all three render sites
+That bound is NOT planned to be closed, and moving the owner to a shared JS module would
+not close it: a JS module is exactly as unreachable from `sh` as `sh` is from JS, and all
+three render sites
 are POSIX shell. If a cross-language carrier is ever genuinely needed the shape that
 serves both is `hooks/lib/rule-block-v1.js`'s `readRuleBlock`, which this repo already
 ships for precisely that pattern.
@@ -125,9 +123,9 @@ skill flows order the same review-aspect + code-reviewer fan-out without arming 
 — `cover` states in its own body that it is skill-driven and NOT Stop-hook-gated — so
 bound 1's mitigation does not apply and a withheld fan-out there is permanently silent.
 The sentence says "armed in this session", which puts them outside its scope by
-construction rather than by oversight; that does not make the gap smaller. The first
-enumeration named three files while nine under `skills/` carried the identity, which is
-the census failure this file already records for the sibling identity — so **before
+construction rather than by oversight; that does not make the gap smaller. A census of
+those flows in prose misses carriers, the failure this file records for the sibling
+identity too — so **before
 deciding this bound is closed, run `grep -rn 'zensu:review-aspect' skills/`** and judge
 per file whether it ORDERS a fan-out or merely describes one.
 
@@ -175,5 +173,5 @@ not claim doctor visibility for this key until such a row exists. **Port-relevan
 its harness carries an equivalent rule class at all, and re-spell all three agent
 identities. `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included.
 
-The windowed-`REVIEWER_DENIALS` gap this work uncovered belongs to
+The windowed-`REVIEWER_DENIALS` gap belongs to
 §"Host-Refused Reviewer Spawn" and is recorded in that section's own gap list, not here.

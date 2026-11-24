@@ -12,12 +12,10 @@ paths:
 
 # Fix-Round Bookkeeping (`hooks/lib/round-prepare-v1.js` + `zensu-log.sh --round-prepare`)
 
-One routed fix round of the `/zensu:build` auto-fix loop used to cost about six model-driven
-helper calls, each re-sending the whole context: the edit-landing audit, the round scope, the
-ledger read, hand-written `fixed` ledger lines, aspect activation with its `ASPECT SKIPPED`
-lines and a hand-made round diff. Measured in a PROJEKTPRO session on 2026-10-21 at about 600k
-context tokens per call, and again in this repository's own chain on 2026-10-26. The verb does
-that bookkeeping in one call.
+Done by hand, the bookkeeping of one routed fix round of the `/zensu:build` auto-fix loop costs
+about six model-driven helper calls, each re-sending the whole context: the edit-landing audit,
+the round scope, the ledger read, hand-written `fixed` ledger lines, aspect activation with its
+`ASPECT SKIPPED` lines and a hand-made round diff. The verb does that bookkeeping in one call.
 
 **The verb.** `zensu-log.sh --round-prepare --round <0|N|self-review> --log <run log>
 [--baseline <sha>] [--session-epoch <n>]`. The log must be a regular file directly inside the
@@ -68,10 +66,9 @@ written and the snapshot stays. `RP10` drives it through a `mv` stub that refuse
 receipt, which works where a read-only directory would not: as root and on Windows.
 
 **Why a snapshot.** A fix round runs on an uncommitted tree, so every file it touches was already
-dirty when the round began. Measured in this repository's chain: with the step 5b
-`--dirty-before` list the audit graded all 38 claims `PENDING PREDICATE`, and every `fixed` line
-was hand-written after a manual predicate re-read. A verb that trusted `EDIT LANDED` alone would
-write none in that common case. Every successful numeric round therefore records sha256 digests
+dirty when the round began. With the step 5b `--dirty-before` list the audit grades a claim on
+such a file `PENDING PREDICATE`, so a verb that trusted `EDIT LANDED` alone would write no `fixed`
+line in that common case. Every successful numeric round therefore records sha256 digests
 of the change set in `.zensu/state/round-snapshot-<session key>.json` (`round-snapshot-v1`,
 newest four rounds). The next round compares each claimed file that was dirty at its start with
 that digest: changed means landed in this round, unchanged means not landed. The reviewers in
@@ -127,7 +124,7 @@ names it.
 audit's verdict heads skipped, the earliest of the seven markers, a label of at most
 `LABEL_TOKEN_BUDGET` (5) tokens without `'`, `"` or `|`, `(none)` for an empty label, the files up
 to the first ` | `, and the bare `<step> WIRED` fallback; a file spelled `<project>/…` or `./…`
-is normalized. A one-token label pattern missed every multi-token step the audit grades. A claim
+is normalized. A one-token label pattern would miss every multi-token step the audit grades. A claim
 logged after the round's boundary, the previous round's audit marker or the round-0 line, whose
 label lacks the round's prefix is listed under `unprefixed_claims`, because no `fixed` line can
 name its finding.
@@ -136,7 +133,7 @@ name its finding.
 `hooks/post-review-tdd-delegate.sh` tells the model to name each fix step after its finding id
 and to append a `fixed` line by hand only for an id the verb lists under `unresolved_claims`, or
 for a landed claim when it printed `ROUND LEDGER UNAVAILABLE`, after re-reading that fix. A clause
-that still asked for a hand-written line once a fix lands wrote every `fixed` line twice.
+that also asked for a hand-written line once a fix lands would write every `fixed` line twice.
 
 **Fail-closed.** No usable snapshot: `ROUND LANDING UNAVAILABLE`, every claim of the round stays
 unresolved, and no `fixed` line is written. A ledger the report read answers neither `ok` nor
@@ -168,8 +165,8 @@ untracked file only that file ignores, and the verb hides it from the reviewers,
 audit. A `check-ignore` exit above 1 is an exit-2 stop. `_el_git` and the verb's `check-ignore`
 call also set `core.quotePath=false`, so a non-ASCII path reaches the change set, the ignore
 check, the packet lists and the round diff in the UTF-8 spelling a claim and `collectChanges` use;
-git's quoted form made a changed non-ASCII file grade `EDIT NOT LANDED` and left it out of the
-round diff. A path holding a double quote, a backslash or a control character is still quoted.
+git's quoted form would make a changed non-ASCII file grade `EDIT NOT LANDED` and leave it out of
+the round diff. A path holding a double quote, a backslash or a control character is still quoted.
 
 **Coupled sites.** The module and its unit file; the verb arm in `zensu-log.sh` and
 `tests/structure/test-round-prepare.sh` (`RP0`–`RP15`); the `--change-set` mode and `CS1`–`CS9`
@@ -188,7 +185,7 @@ step 10.2 and the fix-round paragraph of `skills/build/references/review-chain.m
 `I10a`, `I12`–`I14`, `R21b`, `R17-P5`, and the `On routed findings` check of the edit-landing
 suite); the withdrawal sentence of the step 5b audit in `skills/build/references/audit.md`; the
 fixed-line sentence of Phase 3 and the audit paragraph of Phase 4 in
-`skills/self-review/SKILL.md`, whose budget allowlist entry moved to its new size; the unit-file
+`skills/self-review/SKILL.md`, whose budget allowlist entry moves with its size; the unit-file
 entry, the `ciStructureTests` member and the regenerated overview; `docs/review-chain.md` and
 `docs/build-workflow.md`.
 

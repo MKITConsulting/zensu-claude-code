@@ -27,22 +27,22 @@ consumer since it reads `BLOCKED_RECOVERY_COMMAND`, plus `wedged` / `deadEnd` /
 `recoverable` / `nextCommand` / `shape` off the report), `hooks/stop-chain-enforcer.sh`
 (hardcodes the shape literals `wedged-stale-rearm` and `self-review-unbindable`), the `/zensu:doctor` renderer
 (`hooks/lib/zensu-doctor-report.js`, a field-name consumer — and a CONSUMER of the exported
-`INERT_SHAPES`, never a second hardcoder of it. A hand-copy there was tried and was wrong in the
-one direction that matters: it compared against the `NEXT_COMMAND` lookup table, so renaming the
-literal `chainShape` RETURNS while leaving the table key in place kept the copy agreeing while a
-genuinely closed foreign chain rendered as open. A consumer cannot check a producer it does not
-own, which is why the set moved here; `test-doctor.sh` P1ms pins the export and its contents, P1ms1 that the
-renderer keeps no private copy), the ticket issuer, `hooks/lib/zen-anchor-v1.js` (a FIELD-NAME, VALUE-DOMAIN and EXPORT consumer since
-the zen-mode chain anchor landed: it reads `report.shape`, `report.linkage` and
+`INERT_SHAPES`, never a second hardcoder of it. A hand-copy there fails in the one direction
+that matters: checked against the `NEXT_COMMAND` lookup table, it keeps agreeing when a literal
+`chainShape` RETURN is renamed while the table key stays in place, and a genuinely closed
+foreign chain then renders as open. A consumer cannot check a producer it does not own, which
+is why the set lives here; `test-doctor.sh` P1ms pins the export and its contents, P1ms1 that the
+renderer keeps no private copy), the ticket issuer, `hooks/lib/zen-anchor-v1.js` (a FIELD-NAME,
+VALUE-DOMAIN and EXPORT consumer: it reads `report.shape`, `report.linkage` and
 `report.autopilot.outcome`, and it consumes `STUCK_SHAPES` — the module body reads that
 export and no other, it is that export's only consumer under `hooks/`, and removing or
 renaming it makes `anchorToken` THROW for every shape that HAS a position, disabling the
 anchor on every prompt of every zen-mode session, with the disclosure landing on a channel
-this file records as unverified for delivery. Say "that has a position", not "every shape":
-the two inert shapes return `none` before the read is reached. `ALL_SHAPES` is
+this file records as unverified for delivery. The two inert shapes return `none` before the
+read is reached. `ALL_SHAPES` is
 consumed by that module's UNIT CONTRACT and never by the module — its only appearance
 under `hooks/` outside the owner is a comment — so removing it reddens the key-parity
-cases alone. Stated the way the doctor's `INERT_SHAPES` clause six lines above is, and its `OUTCOME_POSITION` allowlist is keyed on `CHAIN_OUTCOMES`
+cases alone. The module's `OUTCOME_POSITION` allowlist is keyed on `CHAIN_OUTCOMES`
 members — a fifth member added there renders no anchor rather than inheriting a mark, which is
 the fail-open direction, but it does mean a new outcome reaches that module silently and needs
 a row there), and the rearm writer
@@ -96,7 +96,7 @@ which does not go through `tdd_mark_review_converged`, takes no count. On a stan
 permissiveness of a freshly completed chain, whose no-ticket forms count the same tree. A prefix
 is a value, not a field: no reader restricts a ticket beyond `[A-Za-z0-9_-]{1,96}`, so this is a
 `patch` under `.claude/rules/runtime-lineage.md`. Bounds: committed changes are not
-counted, and a ticket minted before this shipped carries `rt_` and closes uncounted. Pins:
+counted, and a ticket an older installation minted carries `rt_` and closes uncounted. Pins:
 `G9d`–`G9j`, `G10d`, `G12c`, `G13`, `G13d` and `G13e` in
 `tests/structure/test-chain-terminus-zero-change-gate.sh`.
 
@@ -106,7 +106,7 @@ delegate to — reserve the
 `CHAIN_RECOVERED` phase and the `chain-recovered: ` reason prefix so only the repair can
 mint a provenance entry. Renaming `RECOVERY_HISTORY_PHASE` or `RECOVERY_HISTORY_REASON_PREFIX`
 without updating those guards leaves them reserving a dead name and makes the `recoveries`
-counter forgeable again.
+counter forgeable.
 
 The repair runs under TWO locks, in this order and never the reverse: the external process
 lease `_tdd_locked_run` takes (`external-<sha256(resourcePath)>`) and then the core CAS lock
@@ -122,7 +122,7 @@ enforces that every emitted shape and reason is documented somewhere in the skil
 `tests/structure/chain-recovery-v1.test.js` (node --test) pins the shape lattice and the
 receipt predicate; `tests/structure/test-chain-recover.sh` pins the end-to-end behavior.
 
-**Two invariants the recovery must never break**, both learned the hard way in review:
+**Two invariants the recovery must never break:**
 
 1. `recoverable` requires `reviewTicketConsumed === true`, and the repair NEVER WRITES the
    ticket slot. The repair only touches a bound generation, and writing

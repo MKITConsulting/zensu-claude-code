@@ -15,9 +15,9 @@ _Where this text says "this file" or names `CLAUDE.md`, it means the repository 
 prompts, fixture content, and pattern alternations must be in English.
 
 Runtime `.zensu/plans/*.md` and `.zensu/logs/*.log` are gitignored HERE
-(`.gitignore` ignores `.zensu/*` except `config.json`), but they are **no longer
+(`.gitignore` ignores `.zensu/*` except `config.json`), but they are **not
 exempt from this rule**. Consuming repos commit them as an audit trail and may
-later open-source the repository, so the plugin now writes them to be
+later open-source the repository, so the plugin writes them to be
 publishable: `hooks/lib/zensu-artifact-redact-v1.js` strips absolute developer
 paths at write time, and `templates/zensu-plan.md` plus Phase 2 of
 `skills/build/references/planning.md` instruct the model to author both artifacts in English. A German plan
@@ -49,41 +49,36 @@ the TDD-preference AND delivery-route fast-paths (e.g. `'kein tdd'`, `'mit tdd'`
 and the generic-action literals that are explicitly NOT a preference
 (e.g. `'mach mal'`, `'los gehts'`, `'jetzt umsetzen'`) in
 `plan-approved-delegate.sh` / `user-prompt-tdd-reminder.sh`. They exist to
-recognize what multilingual users actually type, never as prose. Since the delivery-route and TDD
-arms became INTENT-judged, they now ship as EXAMPLES of real user utterances inside an intent rule
-rather than as a closed match set; the permission and the bound are unchanged — they stay quoted
-specimens, never directive prose. Keep these
+recognize what multilingual users actually type, never as prose. The delivery-route and TDD
+arms are INTENT-judged, so these phrases ship as EXAMPLES of real user utterances inside an intent
+rule rather than as a closed match set; they stay quoted specimens, never directive prose. Keep these
 phrase lists in lockstep across every directive variant (strict and vanilla)
 — never edit one variant alone.
 
 **Second carve-out — eval grader alternations matching MODEL output.** The same
 narrow allowance extends to one further SHAPE: an alternation matched against
 model PROSE whose language the product does not control. It is stated as a shape
-rather than as a file-and-grader list because the list was written that way once
-and was wrong in both directions within a single round — it named
-`anchor-failed-step.yaml`'s failure-in-the-prose grader "and nothing else" while
-the German counter-grader arms (`schritt`, `von`, `aus`) sat in that file AND in
-`anchor-multi-step.yaml`, which the list excluded by name. THREE members exist
-today, all under `evals/zen-mode-reaction/scenarios/`: the failure-in-the-prose
+rather than as a file-and-grader list, because a list of files and graders goes
+stale against the scenarios: the German counter-grader arms (`schritt`, `von`,
+`aus`) sit in `anchor-failed-step.yaml` AND in `anchor-multi-step.yaml`. THREE
+members exist today, all under `evals/zen-mode-reaction/scenarios/`: the failure-in-the-prose
 grader (`fehlgeschlag`, `fehlschlag`, `gescheitert`, `rot`, `schlägt fehl`), the
 `Step N of M` counter grader, which appears in both anchor scenarios, and the
 anchor-prefix grader in `contract-compliance.yaml`, whose `/^(Zensu|Run|Ablauf):/`
 alternation admits the German lead-in a correct reply to a German-speaking user
-carries. That third one landed while this census still read "two", which is the
-same drift the paragraph above records — check by grep before relying on the
+carries. The census drifts, so check by grep before relying on the
 count. The reason is the same in kind
 but the source is the other side of the exchange: the zen-mode directive that
 scenario grades says the words around the anchor's marks follow the USER's own
 language, so a correct reply to a German-speaking user is German prose. An
 English-only alternation would report that correct reply as a violation, which
 `evals/zen-mode-reaction/README.md` names as the one outcome an eval must never
-produce. The FIXTURES carry ONE narrow allowance and no more, and stating it
-as none was wrong: a canned reply that exists to EXERCISE a grader alternation
-this carve-out already admits may carry that alternation's own literal, because
-a fixture which cannot reach the arm it grades tests nothing. The one member is
+produce. The FIXTURES carry ONE narrow allowance and no more: a canned reply that
+exists to EXERCISE a grader alternation this carve-out already admits may carry
+that alternation's own literal, because a fixture which cannot reach the arm it
+grades tests nothing. The one member is
 `tests/structure/zen-anchor-assertions.test.js`, and it carries the literal in TWO
-shapes, not one — an earlier wording named only the first, which would have made the
-second read as a violation. The first is the canned replies its anchor-prefix cases
+shapes. The first is the canned replies its anchor-prefix cases
 build from `Zensu:`, `Run:` and `Ablauf:` to drive `contract-compliance.yaml`'s
 `/^(Zensu|Run|Ablauf):/`. The second is a SELECTOR: the same file filters that
 scenario's assertion bodies on `.includes("Ablauf")` to find WHICH grader to bind,
