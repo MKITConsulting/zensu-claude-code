@@ -31,6 +31,14 @@ const PINNED = `npm install -g @playwright/cli@${MEASURED}`;
 const installedAs = (found) => () => ({ version: '', owner: '', ...found });
 const READY = Object.freeze({ pluginRoot: REPO_ROOT, installedVersion: installedAs({ source: 'manifest', version: MEASURED, owner: '@playwright/cli' }) });
 
+function inheritedEnv() {
+  const env = { ...process.env };
+  for (const name of Object.keys(env)) {
+    if (consent.ambientOverride({ [name]: env[name] }) || /^PWTEST_/i.test(name)) delete env[name];
+  }
+  return env;
+}
+
 function pluginRoot(t, manifest) {
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-plugin-root-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -366,7 +374,7 @@ test('the policy check refuses before any verdict unless both consent hooks and 
   assert.equal(await helper.checkPolicy(local, NO_POLICY, resolver, READY), 'consent');
   const empty = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-no-cli-')));
   t.after(() => fs.rmSync(empty, { recursive: true, force: true }));
-  const env = { ...process.env };
+  const env = inheritedEnv();
   delete env.ZENSU_VERIFY_NAVIGATION_POLICY_V1;
   for (const key of Object.keys(env)) if (key.toUpperCase() === 'PATH') delete env[key];
   env.PATH = empty;
@@ -470,7 +478,7 @@ test('the helper names the remedy each version answer needs, and adds the PATH a
     assert.deepEqual(fs.readdirSync(dir), []);
   }
   if (process.platform === 'win32') return;
-  const env = { ...process.env, PATH: `${path.delimiter}${cliOnPath(t, MEASURED)}` };
+  const env = { ...inheritedEnv(), PATH: `${path.delimiter}${cliOnPath(t, MEASURED)}` };
   delete env.ZENSU_VERIFY_NAVIGATION_POLICY_V1;
   const other = runDir(t, 'run-cwd');
   const refused = spawnSync(process.execPath, [HELPER, '--run-dir', other, ...origin], { encoding: 'utf8', env, cwd: path.dirname(other) });
@@ -481,7 +489,7 @@ test('the helper names the remedy each version answer needs, and adds the PATH a
 
 test('the CLI prints the session, the config path and each origin, and exits 1 with a named reason', (t) => {
   const dir = runDir(t);
-  const env = { ...process.env };
+  const env = inheritedEnv();
   delete env.ZENSU_VERIFY_NAVIGATION_POLICY_V1;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
   const basePath = env[pathKey] || '';
@@ -520,7 +528,7 @@ test('the CLI prints one network-only-origin line per network-only origin and ch
   const dir = runDir(t);
   const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
   const env = {
-    ...process.env,
+    ...inheritedEnv(),
     ...networkOnlyEnv('local', [target('http://127.0.0.1:4200')], ['http://127.0.0.1:9090']),
     [pathKey]: `${cliOnPath(t, MEASURED)}${path.delimiter}${process.env[pathKey] || ''}`,
   };
@@ -540,7 +548,7 @@ test('the CLI prints one network-only-origin line per network-only origin and ch
 test('the CLI notes on stderr when a present policy leaves an origin to the permission prompt, and only then', (t) => {
   const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
   const env = {
-    ...process.env,
+    ...inheritedEnv(),
     ZENSU_VERIFY_NAVIGATION_POLICY_V1: JSON.stringify({ version: 1, mode: 'local', targets: [target('http://127.0.0.1:4200')] }),
     [pathKey]: `${cliOnPath(t, MEASURED)}${path.delimiter}${process.env[pathKey] || ''}`,
   };
@@ -811,7 +819,7 @@ test('a remote login run needs the recipe to bind the application origin and dec
 
 test('the CLI prints login=state-restored for a signed-in run and only the failure class when the login fails', (t) => {
   const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
-  const env = { ...process.env, [pathKey]: `${cliOnPath(t, MEASURED)}${path.delimiter}${process.env[pathKey] || ''}` };
+  const env = { ...inheritedEnv(), [pathKey]: `${cliOnPath(t, MEASURED)}${path.delimiter}${process.env[pathKey] || ''}` };
   delete env.ZENSU_VERIFY_NAVIGATION_POLICY_V1;
   const project = loginProject(t);
   const signed = spawnSync(process.execPath, [HELPER, ...loginArgs(project)], { encoding: 'utf8', env });
@@ -860,7 +868,7 @@ test('the discard verb removes a run\'s signed-in material and refuses any other
 
 test('a helper stopped by a signal during the login kills the login and removes the artifact directory', { skip: process.platform === 'win32' ? 'POSIX signals and process groups' : false }, async (t) => {
   const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
-  const env = { ...process.env, [pathKey]: `${cliOnPath(t, MEASURED)}${path.delimiter}${process.env[pathKey] || ''}` };
+  const env = { ...inheritedEnv(), [pathKey]: `${cliOnPath(t, MEASURED)}${path.delimiter}${process.env[pathKey] || ''}` };
   delete env.ZENSU_VERIFY_NAVIGATION_POLICY_V1;
   const project = loginProject(t, { script: ['echo $$ > login.pid', 'touch "$ZENSU_AUTH_ARTIFACT_DIR/started"', 'exec sleep 30'].join('\n') });
   const child = spawn(process.execPath, [HELPER, ...loginArgs(project)], { env, stdio: ['ignore', 'ignore', 'ignore'] });

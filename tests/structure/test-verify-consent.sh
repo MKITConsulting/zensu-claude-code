@@ -46,7 +46,8 @@ command -v node >/dev/null 2>&1 || { echo "SKIP: node unavailable"; exit 0; }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 unset CLAUDE_AGENT_TYPE ZENSU_VERIFY_NAVIGATION_POLICY_V1 ZENSU_VERIFY_CONSENT_MEMORY \
-  ZENSU_VERIFY_PROJECT_ROOT ZENSU_VERIFY_RECIPE_FILE PLAYWRIGHT_CLI_SESSION 2>/dev/null || true
+  ZENSU_VERIFY_PROJECT_ROOT ZENSU_VERIFY_RECIPE_FILE PLAYWRIGHT_CLI_SESSION \
+  PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK 2>/dev/null || true
 for _vc_name in $(env | sed -n 's/^\(PLAYWRIGHT_MCP_[A-Za-z0-9_]*\)=.*/\1/p;s/^\(PWTEST_[A-Za-z0-9_]*\)=.*/\1/p'); do
   unset "$_vc_name"
 done

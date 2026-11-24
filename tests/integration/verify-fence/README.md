@@ -67,8 +67,10 @@ received and does not judge them.
 A gated run writes no net-log: the run config admits exactly the fence arguments, so the
 net-log checks belong to `matrix` and `remote`.
 
-The last line is `fence-probe: PASS`, `fence-probe: FAIL` or `fence-probe: SKIP <reason>`. A
-skip exits 0, so read the line and not only the exit status. The probe skips where
+The last line is `fence-probe: PASS`, `fence-probe: FAIL`, `fence-probe: SKIP <reason>` or, when
+only reference columns ran, `fence-probe: reference columns only, nothing judged`. A skip and a
+run that judged nothing both exit 0, so read the line and not only the exit status, and count a
+measurement only when it ends with `fence-probe: PASS`. The probe skips where
 `playwright-cli` is not on `PATH`, where the browser channel cannot be launched, where
 `example.com` does not resolve, and on Windows, where it has not been run.
 

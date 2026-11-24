@@ -732,7 +732,11 @@ announces a prompt rather than a capability the plugin hands itself.
   env or config channel lands here first. `ambientOverride` names the variable and `ambientDeny`
   words the refusal, so a variable that does something other than override the run config gets a
   text that says what it does; `H11c` and `H11c2` in `tests/structure/test-verify-consent.sh`
-  pin one text each.
+  pin one text each. `checkReadiness` in `scripts/verify-browser-config.js` calls both on the
+  helper's own environment, so the gate reads the environment Claude Code started with and the
+  helper the shell it runs in; the helper's unit case in
+  `tests/structure/verify-browser-config.test.js` pins both texts with the helper's suffix.
+  `ambientOverride` folds the letter case of a name on win32 for both callers.
 - `scripts/` is now in the Session Control digest unconditionally (see §"Runtime Lineage"), because
   the helper lives there.
 - `adopt_hook_expected` in `tests/structure/test-versioned-plugin-upgrade.sh` exempts the pre hook,
@@ -909,7 +913,9 @@ for its `@playwright/cli` install pins.
   `run` (the write). It refuses unless `consentHookRegistered` and `consentRecorderRegistered`
   both answer `registered` and the `@playwright/cli` manifest of the `playwright-cli` on `PATH`
   names exactly `PLAYWRIGHT_CLI_SOURCE_VERSION` — a version the package declares, not a verified
-  binary; the doctor's version row stays a WARN. The check runs only inside the helper: the gate
+  binary; the doctor's version row stays a WARN. It also refuses while its own environment sets
+  `PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK` or a non-empty `PLAYWRIGHT_MCP_*` variable, the test
+  the gate makes at `open`. The version check runs only inside the helper: the gate
   judges `open` by `runConfigShape` and never reads the installed version (from the version module
   it takes only `BINARY_NAMES` and `PACKAGE_NAME`, which build its markers, `binaryNames`,
   `binaryStem` and `holdsCliName`, pure text tests, never `installedVersion`, `probe` or
