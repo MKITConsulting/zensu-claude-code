@@ -192,6 +192,22 @@ proof() {
   printf '%s' "$out"
 }
 
+supersede_proof() {
+  local out="$WORK/supersede-$SID.json"
+  STEP="$1" FILE="$2" GONE="$3" BY="$4" LITERAL="$5" ROOT="$PROJECT" node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const e = process.env;
+    const bytes = fs.readFileSync(path.join(e.ROOT, e.FILE));
+    const sha256 = require("crypto").createHash("sha256").update(bytes).digest("hex");
+    process.stdout.write(JSON.stringify({ schema: "edit-landing-predicates-v1", claims: [
+      { step: e.BY, path: e.FILE, sha256, present: [e.LITERAL] },
+      { step: e.STEP, path: e.FILE, sha256, absent: [e.GONE], supersededBy: e.BY },
+    ] }));
+  ' > "$out"
+  printf '%s' "$out"
+}
+
 chain_done() {
   bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"
 }
@@ -718,6 +734,38 @@ if [ "$SIZE1_RC" -eq 0 ] && node -e '
 else
   check "E13 build the receipt-size fixture (first audit=$SIZE1_RC)" FAIL
   AUDIT_OUT | tail -n 5
+fi
+
+new_project "$WORK/p-superseded"
+if arm "tel-superseded" "$WORK/p-superseded"; then
+  printf 'v2\n' > "$PROJECT/tracked.txt"
+  claim S1 tracked.txt
+  audit; FIRST_RC=$?
+  printf 'v3\n' > "$PROJECT/tracked.txt"
+  claim R1-F1 tracked.txt
+  audit --predicates "$(proof R1-F1 tracked.txt v3)"; ARC=$?
+  chain_done; RC=$?
+  if [ "$FIRST_RC" -eq 0 ] && [ "$ARC" -eq 1 ] && AUDIT_OUT | grep -qF 'PENDING PREDICATE — S1: tracked.txt' \
+    && [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] && grep -qF "$HEAD_LINE$NOT_CLEAN." "$WORK/err"; then
+    check "E14 a claim whose edit a later proven claim replaced keeps the chain open without the supersede proof" PASS
+  else
+    check "E14 replaced claim without the supersede proof (first=$FIRST_RC audit=$ARC rc=$RC done=$(done_flag))" FAIL
+    AUDIT_OUT
+    ERR
+  fi
+  audit --predicates "$(supersede_proof S1 tracked.txt v2 R1-F1 v3)"; ARC=$?
+  chain_done; RC=$?
+  if [ "$ARC" -eq 0 ] && AUDIT_OUT | grep -qxF 'EDIT SUPERSEDED — S1: tracked.txt, replaced by R1-F1' \
+    && grep -qF '"exemptSuperseded":1' "$RECEIPT" && [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] \
+    && ! grep -qF "EDIT LANDING" "$WORK/err"; then
+    check "E14a the supersede proof grades the replaced claim EDIT SUPERSEDED and the chain closes" PASS
+  else
+    check "E14a supersede proof closes (audit=$ARC rc=$RC done=$(done_flag))" FAIL
+    AUDIT_OUT
+    ERR
+  fi
+else
+  check "E14 arm a ticket-bound chain" FAIL
 fi
 
 BOUND_STEM="2026-10-20-0001_build-terminal-bound"

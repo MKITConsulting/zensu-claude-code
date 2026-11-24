@@ -3547,7 +3547,7 @@ case "${1:-}" in
             case "$_tc_receipt_state" in
               unclean)
                 _tc_verdict_text="records a FAILED audit (\`clean: false\`) — a claimed edit did not land, or nothing gradeable was claimed"
-                _tc_remedy_text="The in-chain clearance is to LAND the claimed edit at the path the claim names and re-run the audit — the run log is append-only and a claimed path is never retired, so withdrawing one in prose does not clear this, and re-landing foreign-root work in the anchor does not retire the claim that named the other root. Only an entry the audit reported as a malformed or pattern claim takes the CLAIM CORRECTED line its verdict names."
+                _tc_remedy_text="The in-chain clearance is to LAND the claimed edit at the path the claim names and re-run the audit — the run log is append-only and a claimed path is never retired, so withdrawing one in prose does not clear this, and re-landing foreign-root work in the anchor does not retire the claim that named the other root. Two entries clear another way: one the audit reported as a malformed or pattern claim takes the CLAIM CORRECTED line its verdict names, and a claim an earlier audit saw land, whose edit a later claimed step replaced, takes a --predicates proof whose absent literals name what it introduced and whose supersededBy names that step."
                 ;;
               no-verdict)
                 _tc_verdict_text="records no verdict: its \`clean\` field is absent or is not a boolean, so it proves nothing about the claimed edits"

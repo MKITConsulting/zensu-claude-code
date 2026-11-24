@@ -1043,6 +1043,8 @@ UNVERIFIED=0
 PENDING=0
 EXEMPT_IGNORED=0
 EXEMPT_VERIFIED=0
+EXEMPT_SUPERSEDED=0
+SUPERSEDED_BY=""
 
 emit() { printf '%s\n' "$1"; }
 
@@ -1244,6 +1246,18 @@ record_landed() {
     || die "the landed-claim record could not be written"
 }
 
+superseded_claim() {
+  local index by
+  SUPERSEDED_BY=""
+  [ -n "$SCOPE_DIR" ] && [ -s "$SCOPE_DIR/superseded" ] || return 1
+  while IFS=$'\t' read -r index by; do
+    [ "$index" = "$CLAIM_INDEX" ] || continue
+    SUPERSEDED_BY="$by"
+    return 0
+  done < "$SCOPE_DIR/superseded"
+  return 1
+}
+
 grade_claim() {
   local step="$1" raw="$2" resolved rc
   CLAIM_COUNT=$((CLAIM_COUNT + 1))
@@ -1282,6 +1296,12 @@ grade_claim() {
     LANDED=$((LANDED + 1))
     record_landed
     emit "EDIT LANDED (verified predicate or unchanged prior certification) — $(render_claim_value "${step}"): $(render_claim_value "${resolved}")"
+    return
+  fi
+  if superseded_claim; then
+    LANDED=$((LANDED + 1))
+    EXEMPT_SUPERSEDED=$((EXEMPT_SUPERSEDED + 1))
+    emit "EDIT SUPERSEDED — $(render_claim_value "${step}"): $(render_claim_value "${resolved}"), replaced by $(render_claim_value "${SUPERSEDED_BY}")"
     return
   fi
   if was_dirty_before "$resolved"; then
@@ -1669,8 +1689,10 @@ elif [ "$CLAIM_COUNT" -eq 0 ]; then
   emit "UNVERIFIED (no claims logged) — the run log holds no IMPL/WIRED files: entry, so nothing could be audited"
 fi
 
+SUPERSEDED_TALLY=""
+[ "$EXEMPT_SUPERSEDED" -eq 0 ] || SUPERSEDED_TALLY=" exempt_superseded=${EXEMPT_SUPERSEDED}"
 [ -n "$GIT_FAULT" ] || [ -n "$CLAIM_FAULT" ] \
-  || emit "EDIT LANDING AUDIT — claims=${CLAIM_COUNT} landed=${LANDED} not_landed=${NOT_LANDED} unverified=${UNVERIFIED} pending=${PENDING} exempt_ignored=${EXEMPT_IGNORED} exempt_verified=${EXEMPT_VERIFIED}"
+  || emit "EDIT LANDING AUDIT — claims=${CLAIM_COUNT} landed=${LANDED} not_landed=${NOT_LANDED} unverified=${UNVERIFIED} pending=${PENDING} exempt_ignored=${EXEMPT_IGNORED} exempt_verified=${EXEMPT_VERIFIED}${SUPERSEDED_TALLY}"
 
 # ── Receipt ──────────────────────────────────────────────────────────────────
 if [ "$RECEIPT_EXPLICIT" -eq 1 ] && [ "$RECEIPT_PATH" = "-" ]; then
@@ -1756,7 +1778,7 @@ else
         receipt_rc=0
         ZEL_SESSION="$SESSION_ID" ZEL_LOG="$LOG_ABS" ZEL_WORK_TREE="$WORK_TREE_REL" ZEL_CLAIMS="$CLAIM_COUNT" \
         ZEL_LANDED="$LANDED" ZEL_NOT="$NOT_LANDED" ZEL_UNVERIFIED="$UNVERIFIED" \
-        ZEL_PENDING="$PENDING" ZEL_EXI="$EXEMPT_IGNORED" ZEL_EXV="$EXEMPT_VERIFIED" \
+        ZEL_PENDING="$PENDING" ZEL_EXI="$EXEMPT_IGNORED" ZEL_EXV="$EXEMPT_VERIFIED" ZEL_EXS="$EXEMPT_SUPERSEDED" \
         ZEL_CLEAN="$([ "$CLEAN" -eq 1 ] && echo true || echo false)" ZEL_SCOPE_FILE="$SCOPE_DIR/final.json" \
         ZEL_RECEIPT_LIB="$EL_RECEIPT_LIB" node -e '
           const e = process.env;
@@ -1787,6 +1809,7 @@ else
             pending: Number(e.ZEL_PENDING),
             exemptIgnored: Number(e.ZEL_EXI),
             exemptVerified: Number(e.ZEL_EXV),
+            ...(Number(e.ZEL_EXS) > 0 ? { exemptSuperseded: Number(e.ZEL_EXS) } : {}),
             clean: e.ZEL_CLEAN === "true",
             auditScope: scope,
           }) + "\n";

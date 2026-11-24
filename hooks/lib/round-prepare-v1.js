@@ -39,7 +39,7 @@ const NOT_LANDED_TAIL = ", git shows no change";
 const BARE_WIRED = /^a WIRED entry at run-log line [0-9]+ \(step (.+)\) names no files: list and cannot be graded$/;
 const STATE_DIRECTORY = ".zensu";
 const AUDIT_CLOSE = /^(EDIT LANDING AUDIT — |RECEIPT REFUSED — )/;
-const AUDIT_NOTICE = /^(CLAIM RETRACTED|CLAIM CORRECTION IGNORED|EDIT LANDING AUDIT ROOT) — /;
+const AUDIT_NOTICE = /^(CLAIM RETRACTED|CLAIM CORRECTION IGNORED|EDIT LANDING AUDIT ROOT|EDIT SUPERSEDED) — /;
 const RECEIPT_REFUSED = /^RECEIPT REFUSED — /;
 
 function parseRound(value) {

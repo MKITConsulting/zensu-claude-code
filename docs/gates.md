@@ -8,7 +8,9 @@ chain's own work tree: the anchor's git top level, or the worktree below it that
 bound Autopilot run drives, recorded in the receipt as `workTree` and counted beside
 the anchor's change set (discipline patch 10 in
 [build-workflow.md](build-workflow.md); a claim the audit cannot grade as written is
-settled by the `CLAIM CORRECTED` line its verdict names, never by an escape)
+settled by the `CLAIM CORRECTED` line its verdict names, and a claim that landed and
+that a later claimed step then replaced by the supersede proof described there, never
+by an escape)
 and §Requirements-Table Gate below, which has its own section here — THREE
 terminus refusals at `--chain-done`, §Terminal Edit-Landing Gate, §Full-Suite Gate and
 §Acceptance Verification Gate, and ONE consume-time refusal in the review chain,
@@ -1802,12 +1804,18 @@ receipt still describes the chain that closes. It runs `zensu-edit-landing.sh --
   `WIRED` entry. The audited repository root is unchanged, every claimed file still hashes to what the
   audit saw, and the working tree has the fingerprint the audit measured. Ordinary lines appended
   to the run log after the audit, such as acceptance records, ledger lines and review notes, keep
-  the receipt fresh.
+  the receipt fresh. A claim the audit graded `EDIT SUPERSEDED` counts as landed in a clean
+  receipt, which then carries `exemptSuperseded`: a later claimed step replaced that edit, and
+  the audit accepted a supersede proof for it (discipline patch 10 in
+  [build-workflow.md](build-workflow.md)).
 - **What it prints.** `EDIT LANDING RECEIPT STALE — <cause>.`, then `Run: <audit command>` with
   the bound project root, run log and session key, then the recovery guidance: keep the
   original inputs or omit them, and add `--predicates` with current proofs where a claim is
-  pending. A value the command cannot carry safely is printed as a placeholder. A refusal exits
-  `1` and leaves the chain open.
+  pending, where a claim whose edit a later claimed step replaced takes a proof with `absent`
+  literals and `supersededBy`. For a chain whose receipt records a work tree below the project
+  root, the command also carries `--work-tree <that tree>`: an audit of another tree starts a
+  new scope, which would drop the landing evidence a supersede proof needs. A value the command
+  cannot carry safely is printed as a placeholder. A refusal exits `1` and leaves the chain open.
 - **Where it applies.** The ticket-bound standalone terminus, evaluated together with the
   full-suite and acceptance gates so one call names every refusal; the unqualified terminus when
   the change count is zero or cannot be evaluated; and a bound Autopilot chain that closes with
@@ -1854,7 +1862,8 @@ receipt still describes the chain that closes. It runs `zensu-edit-landing.sh --
   | Working audit scope | 16 MiB | the same |
   | Run log | none | read in 1 MiB chunks, so a long log never refuses |
 
-  The predicate document and the `--dirty-before` list are read up to 4 MiB each. A sealed receipt
+  The predicate document and the `--dirty-before` list are read up to 4 MiB each, and the
+  `absent` list of a supersede proof falls under the literal bound above. A sealed receipt
   over the receipt bound is refused with `RECEIPT REFUSED` before it replaces anything, so the
   nonclean checkpoint the audit wrote at its start stays in place.
 - **Bypass** with `ZENSU_EDIT_LANDING_GATE=off`, the switch that also exempts `--tdd-complete`.
