@@ -53,7 +53,7 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:56`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:2881`) and counts through the shared helper (`:2940`),
+(`hooks/lib/zensu-log.sh:3072`) and counts through the shared helper (`:3131`),
 which runs every `git` call with the discovery and config-injection variables unset
 (`:89`, `:134-135`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
@@ -67,7 +67,7 @@ when it is unset, is an open question (§11).
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:782-826`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:232`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:2870`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:3061`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
@@ -553,7 +553,7 @@ the list from an inherited or a command environment.
 has exactly one `cwd` and one transcript. What degrades is fidelity, and one part
 of it degrades dangerously.
 
-`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2907`) takes a
+`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2981`) takes a
 single path, and that path is the anchor. In this topology the anchor is clean
 while the changed files sit in the code roots, so a `takeover` brief would report
 no uncommitted changes for a session with a dirty tree in two other repositories.
@@ -570,7 +570,7 @@ grouped by label.
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:5098`) already lands there.
+  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:5172`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.

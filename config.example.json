@@ -61,6 +61,12 @@
       "workflow": "",
       "job": ""
     },
-    "acceptanceGate": "required"
+    "acceptanceGate": "required",
+    "report": {
+      "enabled": true,
+      "dir": "",
+      "keep": 30,
+      "maxBytes": 2147483648
+    }
   }
 }

@@ -43,7 +43,7 @@ After `worktree add`:
 
 ## Phase A.1 — Scout Pitfalls
 
-- **`git fetch origin pull/<n>/head:pr-<n>-review` fails with "couldn't find remote ref"** (GitHub): PR is from a fork. Use `gh pr checkout <n>` inside the worktree — but that command checks out into the *current* CWD, so first `cd "$WORKTREE"` then run it. Never run `gh pr checkout` from `$REPO` root. (GitLab's `merge-requests/<iid>/head` ref covers fork MRs natively — no equivalent fallback needed.)
+- **`git fetch origin pull/<n>/head:pr-<n>-review` fails with "couldn't find remote ref"** (GitHub): `origin` is not the repository the PR was opened against, typically because `origin` is a fork and that repository is another remote such as `upstream`. GitHub keeps `pull/<n>/head` in that repository for PRs from forks too. Find its remote with `git -C "$REPO" remote -v` and fetch the same refspec from that remote instead of `origin`. Then re-run the scout with `ZENSU_VCS_REMOTE` set to that remote's URL, and set it again in every later Bash call that runs `$VCS`, because a variable lives only for the call that sets it and `$WORKDIR/.env` does not carry it. It decides two things: the `repo=` that `--detect` reports, which every verb given `--repo-id "$REPOID"` then reads, and the host every GitHub verb pins. It does not pick the repository of a repo-context verb (`--scout-pr`, `--pr-state`): those take only the host from it and leave the base repository to gh, which `gh repo set-default` fixes for a checkout with several remotes. Never check the PR out into `$REPO` itself. (GitLab's `merge-requests/<iid>/head` ref covers fork MRs natively — no equivalent fallback needed.)
 - **Head SHA changes between scout and publish**: Re-fetch SHA right before the publish step. The reviews API rejects stale SHAs with HTTP 422.
 - **Wrong base branch**: PR JSON `baseRefName` is authoritative. Don't assume `main`/`dev` — read it.
 - **Large PR (> 50 files)**: Cap `--stat` output and use `git diff --name-only` for routing only. Partition the prepared evidence by reviewer role and affected area (for example API contracts, persistence, frontend, or tests), and give each worker only the shards its role needs. Keep the complete diff main-thread-only and do not force every worker to consume one monolithic full-diff artifact. Above 200 files, also truncate routing summaries aggressively and rely on the shard index.
@@ -236,7 +236,7 @@ Default 25. Strategy when consolidated findings exceed cap:
 
 **No tables in inline comments either.** Inline comments suffer the same column compression. Use code fences, bullet lists, bold prefixes only. The coverage-table carve-out is **body-only** — inline comments never contain a table.
 
-**Anchor validation (mandatory, before the preview):** validate every inline
+**Anchor validation (mandatory on GitHub, before the preview; on GitLab the driver's `--post-review` anchor preflight does it, `rules/gitlab-publish.md`):** validate every inline
 comment's `(path, line, side)` against the PR diff with
 `node "<absolute-plugin-root>/hooks/lib/valid-diff-lines.js" '<path>' '<line>' '<side>' < "$WORKDIR/_pr.diff"`
 where `<absolute-plugin-root>` is replaced with the concrete `ROOT` already
@@ -259,13 +259,13 @@ validated anchors — this eliminates the 422 line-out-of-diff round-trip.
 
 ## Failure Modes
 
-- **`gh api` POST 422 line out-of-diff**: should not occur — anchors are pre-validated in Phase D. If it still fires: re-fetch the diff, re-validate every anchor, retry; last resort drop the offending comment (fold it into the body) and retry with the reduced `comments[]` array.
-- **`gh api` POST 401**: tell user to `gh auth refresh`.
+- **`--post-review` fails with a 422 line out-of-diff**: should not occur — anchors are pre-validated in Phase D. If it still fires: re-fetch the diff, re-validate every anchor, retry; last resort drop the offending comment (fold it into the body) and retry with the reduced `comments[]` array.
+- **`--post-review` fails with a 401**: tell user to run `gh auth refresh --hostname <host>` for the PR's host.
 - **Reviewer agent dies or returns invalid JSON**: collect fails closed. Close the lease, create a fresh generation, and rerun the complete worker batch so all results share one evidence snapshot.
 - **All reviewers report APPROVE**: still post the review with `event=COMMENT` — a `tip` banner, the Test Coverage section, and the What is solid block — user values the audit trail.
-- **PR closed/merged while review runs**: detect via `gh pr view --json state`; abort gracefully, save artifacts.
+- **PR closed/merged while review runs**: detect via `(cd "$REPO" && bash "$VCS" --pr-state --provider "$PROVIDER" <n>)`; abort gracefully, save artifacts.
 - **Worktree / branch-checkout collisions** (path already exists, branch already checked out, orphaned dir): no longer occur — each run gets a fresh `mktemp -d` workspace and the worktree is DETACHED at the head SHA (it never checks out the `pr-<n>-review` branch). After a crash the worktree just lingers under its random `$WORKDIR`; `git -C "$REPO" worktree prune` clears the stale bookkeeping and the next run is unaffected.
-- **Disk full while creating worktree**: detect via `df -h /tmp`; warn user and offer `--worktree-path=<custom>` (later enhancement) or proceed without worktree (degraded: read diff via `gh pr diff` only, no file-level reads).
+- **Disk full while creating worktree**: detect via `df -h /tmp`; warn user and offer `--worktree-path=<custom>` (later enhancement) or proceed without worktree (degraded: read diff via `--pr-diff` only, no file-level reads).
 
 ## Performance
 

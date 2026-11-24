@@ -247,7 +247,33 @@ terminal-UI rows, take a screenshot or pane capture, and the accessibility hiera
 tool provides one, after every meaningful interaction, and read both before choosing the next
 action. A parallel lane with `mobile` rows also needs its own device.
 
-**Phase 5.** The report adds these lines:
+**Report captures.** Each capture enters the evidence report through `rules/report.md`
+section 2, right after you inspected it, and only as a file beneath `$RUN_DIR`: a screenshot that
+a host tool (the simulator, emulator or computer-use tool) returns only to the conversation cannot
+enter the report. So take the file capture beside it, into `$RUN_DIR/shots/`, which you create once
+before the first capture with `mkdir -p "$RUN_DIR/shots"`:
+
+- `mobile`: `xcrun simctl io <UDID> screenshot "$RUN_DIR/shots/<row>-<step>.png"` or
+  `adb -s <serial> exec-out screencap -p > "$RUN_DIR/shots/<row>-<step>.png"`, added with
+  `--report-add --report <id> --kind image --file "$RUN_DIR/shots/<row>-<step>.png"`, without
+  `--viewport`, because a device screenshot is in pixels.
+- `desktop`: on macOS `screencapture -x -o -l<window id> "$RUN_DIR/shots/<row>-<step>.png"` of a
+  window the run's process owns, added as `--kind image`. Elsewhere the app-scoped screenshot
+  leaves no file, so such a row links no image, and render's `criterion.no-image` rule
+  (`rules/report.md` section 4) applies to a criterion that passes through it.
+- terminal UI: `tmux -L <prefix>-tui capture-pane -p -t main > "$RUN_DIR/shots/<row>-<step>.txt"`,
+  added with `--report-add --report <id> --kind text --plane visual --file "$RUN_DIR/shots/<row>-<step>.txt"`.
+- `api`: `--report-add --report <id> --kind request --method <METHOD> --path '<path>' --status <code>`
+  for every request the row asserts, the path single-quoted as `rules/report.md` section 2 says; a
+  header or a body never enters.
+- `cli`, `library`, `async`, `iac` and `custom`: the bounded output a row asserts, written to a
+  file beneath `$RUN_DIR` and added as `--kind text`; a log signal only as
+  `--report-add --report <id> --kind signal --source log --class '<class>'` with a sanitized
+  message on stdin.
+- chain mode: an observed check as `--report-add --report <id> --kind run --evidence-run er1_…`,
+  the id `--evidence-run --scope acceptance` printed.
+
+**Phase 5.** The report to the user adds these lines:
 
 - **Target:** for every build driver, the build command and the artifact path.
 - **Drivers:** each row's driver with the file and signal that chose it, and the tools that

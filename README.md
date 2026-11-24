@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.41.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.42.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -280,7 +280,7 @@ make no `zensu` call at all.
 
 | Skill | What it does | Needs |
 |-------|--------------|-------|
-| `/zensu:verify-feature` | Exercise the running feature and report what actually happened, for a web UI, an API, a CLI, a library, a worker, infrastructure code, an iOS or Android app, or a desktop app. Report-only. Inside a Zensu workflow chain its `--chain` mode verifies every acceptance criterion before the chain can close. [How to run it standalone](docs/verify-feature.md) | `playwright-cli` for a web UI |
+| `/zensu:verify-feature` | Exercise the running feature and report what actually happened, for a web UI, an API, a CLI, a library, a worker, infrastructure code, an iOS or Android app, or a desktop app. Report-only, and a run keeps a local [evidence report](docs/verify-feature.md#7-the-evidence-report) with the captures behind its verdict once git ignores its run directory. Inside a Zensu workflow chain its `--chain` mode verifies every acceptance criterion before the chain can close. [How to run it standalone](docs/verify-feature.md) | `playwright-cli` for a web UI |
 | `/zensu:full-suite` | Run full test suites in the verified CI pull-request pipeline instead of locally, for this repository or this session; affected tests stay local | A GitHub.com repository and `gh` |
 
 #### Session switches
@@ -546,7 +546,7 @@ findings or JSON to Zensu fail.
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
 | [Build workflow](docs/build-workflow.md) | The full per-step reference for the implementation workflow |
-| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: the driver for every kind of application and what each needs, consent mode with no setup at all, local and remote, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for sessions that cannot show the prompt |
+| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: the driver for every kind of application and what each needs, consent mode with no setup at all, local and remote, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for sessions that cannot show the prompt, the evidence report every run writes |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
 | [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, how to continue in a nested worktree when it happened anyway, and how `release` lifts the marker after a takeover |
 | [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |

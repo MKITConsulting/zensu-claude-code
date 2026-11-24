@@ -4270,17 +4270,31 @@ if grep -qF 'zensu-vcs.sh' "$HELPER" && grep -qF -- '--detect' "$HELPER"; then
 else
   check "P4c wrapper resolves the forge through the driver's public --detect seam" FAIL
 fi
-GL="$(ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
+DOC_SSH="$(mktemp -d -t doctor-ssh-XXXXXX)"; mkdir -p "$DOC_SSH/bin"
+cat > "$DOC_SSH/bin/ssh" <<STUB
+#!/bin/sh
+printf '%s\n' "\$*" >> "$DOC_SSH/ssh.log"
+for a in "\$@"; do h="\$a"; done
+printf 'user git\nhostname %s\nport 22\n' "\$h"
+STUB
+chmod +x "$DOC_SSH/bin/ssh"
+GL="$(PATH="$DOC_SSH/bin:$PATH" ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$SBOX" \
   ZENSU_VCS_REMOTE='git@gitlab.com:acme/app.git' ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \
   bash "$HELPER" 2>/dev/null)"
 case "$GL" in *'GitLab CLI (glab): installed and authenticated'*) check "P4g wrapper detects a gitlab remote -> GitLab glab line" PASS ;; *) check "P4g wrapper gitlab detect (got: $GL)" FAIL ;; esac
 case "$GL" in *GitHub*) check "P4h gitlab repo NOT warned about GitHub/gh (the false scare this feature removes)" FAIL ;; *) check "P4h gitlab repo NOT warned about GitHub/gh" PASS ;; esac
-GHUB="$(ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
+GHUB="$(PATH="$DOC_SSH/bin:$PATH" ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$SBOX" \
   ZENSU_VCS_REMOTE='git@github.com:acme/app.git' ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \
   bash "$HELPER" 2>/dev/null)"
 case "$GHUB" in *'GitHub CLI (gh): installed and authenticated'*) check "P4e wrapper detects a github remote -> GitHub gh line" PASS ;; *) check "P4e wrapper github detect (got: $GHUB)" FAIL ;; esac
+DOC_SSH_LOG="$(cat "$DOC_SSH/ssh.log" 2>/dev/null)"
+case "$DOC_SSH_LOG" in
+  *"-G -- gitlab.com"*"-G -- github.com"*) check "P4i the wrapper's SSH remotes reach the suite's identity ssh, never the machine's ssh configuration" PASS ;;
+  *) check "P4i the wrapper's SSH remotes reach the suite's identity ssh, never the machine's ssh configuration (ssh='$DOC_SSH_LOG')" FAIL ;;
+esac
+rm -rf "$DOC_SSH"
 UNK="$(ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$SBOX" \
   ZENSU_VCS_REMOTE= ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \

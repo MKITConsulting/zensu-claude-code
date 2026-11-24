@@ -12,7 +12,7 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 68, "skips": {"win32": 2},
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 69, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
       "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, retention, the Autopilot run mode that reads its criteria from the verified bytes of the approved plan copy and resolves the pull-request head among commits only, and the standalone consent close, the hand-off record and the plan-criteria check."
     },
@@ -62,6 +62,11 @@
       "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal."
     },
     {
+      "path": "tests/structure/evidence-report-v1.test.js", "registered": 84, "skips": {"win32": 4},
+      "runs": [{ "driver": "tests/structure/test-evidence-report.sh" }],
+      "summary": "Verify-feature evidence reports: ids, the strict manifest schema, the conformance corpus, deterministic rendering, containment, the secret screen and redaction, retention, the store placement, chain and matrix coverage, and the transport."
+    },
+    {
       "path": "tests/structure/evidence-run-v1.test.js", "registered": 96, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
@@ -109,7 +114,7 @@
         "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"
       ],
       "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
-      "summary": "The session-trail linked-session reader: the family walk and its open-below counts, the kinds, the start decisions and calls, the plan names a takeover carries into its run after the yes, the saved presets, the unread reports and the task-chip proposals."
+      "summary": "The session-trail linked-session reader: the family walk and its open-below counts, the kinds, the start decisions and calls, the plan names a takeover carries into its run after the yes, the saved presets, the unread reports, the task-chip proposals and the store-folder note with the remedy each store's source calls for."
     },
     {
       "path": "tests/structure/owned-process.test.js", "registered": 7, "skips": {"win32": 7},
@@ -336,9 +341,9 @@
       "summary": "Windows CI manifest invariants: the shards, their deadlines, the command catalog and the workflow job."
     },
     {
-      "path": "tests/structure/windows-observation.test.js", "registered": 11,
+      "path": "tests/structure/windows-observation.test.js", "registered": 12,
       "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
-      "summary": "The Windows observation summarizer."
+      "summary": "The Windows observation summarizer, including the shard summary that judges every profile by its newest run attempt."
     },
     {
       "path": "tests/structure/windows-profile-contract.test.js", "registered": 4,

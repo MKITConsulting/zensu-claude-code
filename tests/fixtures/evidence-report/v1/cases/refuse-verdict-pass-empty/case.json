@@ -1,0 +1,12 @@
+{
+  "description": "Verdict PASS with no criterion and no step.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "verdict.empty",
+        "at": "verdict"
+      }
+    ]
+  }
+}

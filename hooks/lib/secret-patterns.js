@@ -114,5 +114,5 @@ if (require.main === module) {
     process.stdout.write(JSON.stringify(scan(input)));
   });
 } else {
-  module.exports = { scan, ALLOW_MARKER };
+  module.exports = { scan, ALLOW_MARKER, PLACEHOLDER };
 }

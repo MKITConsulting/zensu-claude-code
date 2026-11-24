@@ -23,6 +23,16 @@ bash -n "$LIB" 2>/dev/null && check "V2 bash -n syntax check passes" PASS || che
 
 field() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 
+SSH_STUB="$(mktemp -d -t vcsdetect-ssh-XXXXXX)"; mkdir -p "$SSH_STUB/bin"
+cat > "$SSH_STUB/bin/ssh" <<STUB
+#!/bin/sh
+printf '%s\n' "\$*" >> "$SSH_STUB/ssh.log"
+for a in "\$@"; do h="\$a"; done
+printf 'user git\nhostname %s\nport 22\n' "\$h"
+STUB
+chmod +x "$SSH_STUB/bin/ssh"
+PATH="$SSH_STUB/bin:$PATH"; export PATH
+
 det() {
   local remote="$1" probe="${2:-}" prov="${3:-}" apibase="${4:-}" repodir="${5:-}"
   local a="--detect"
@@ -48,6 +58,10 @@ expect "D1 github ssh"   "$O" provider github
 expect "D1 github ssh"   "$O" edition  cloud
 expect "D1 github ssh"   "$O" apiBase  "https://api.github.com"
 expect "D1 github ssh"   "$O" repo     owner/repo
+case "$(cat "$SSH_STUB/ssh.log" 2>/dev/null)" in
+  *"-G -- github.com"*) check "D1b an SSH remote reaches the suite's identity ssh, never the machine's ssh configuration" PASS ;;
+  *) check "D1b an SSH remote reaches the suite's identity ssh, never the machine's ssh configuration" FAIL ;;
+esac
 
 O="$(det 'https://github.com/owner/repo.git')"
 expect "D2 github https" "$O" provider github
@@ -144,6 +158,17 @@ BASH_ABS="$(command -v bash)"
 O="$(env -i PATH=/dev/null ZENSU_VCS_REMOTE='git@github.com:o/r.git' "$BASH_ABS" "$LIB" --detect 2>/dev/null)"
 expect "D18 no-node degrade -> unknown" "$O" provider unknown
 expect "D18 no-node degrade -> empty repo" "$O" repo     ""
+
+TMP="$(mktemp -d -t vcsdetect-XXXXXX)"; mkdir -p "$TMP/.github/workflows"
+O="$(det 'file:///srv/git/widget.git' none '' '' "$TMP")"
+expect "D18b a file:// remote names no host, whatever the repo markers say" "$O" provider unknown
+expect "D18b a file:// remote names no host, whatever the repo markers say" "$O" apiBase  ""
+expect "D18b a file:// remote names no host, whatever the repo markers say" "$O" repo     ""
+O="$(det 'C:\repos\widget.git' none '' '' "$TMP")"
+expect "D18c a drive-letter path names no host, whatever the repo markers say" "$O" provider unknown
+expect "D18c a drive-letter path names no host, whatever the repo markers say" "$O" apiBase  ""
+expect "D18c a drive-letter path names no host, whatever the repo markers say" "$O" repo     ""
+rm -rf "$TMP"
 
 ML="$(mktemp -d -t vcsdetect-ssrf-XXXXXX)"
 for badhost in 127.0.0.1 169.254.169.254 10.0.0.5 192.168.1.1; do
@@ -411,9 +436,13 @@ printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
 [ "${1:-}" = -G ] || exit 255
 shift
 [ "${1:-}" = -- ] && shift
+[ -z "${FAKE_SSH_HOSTNAME:-}" ] || { printf 'user git\nhostname %s\nport 22\n' "$FAKE_SSH_HOSTNAME"; exit 0; }
 case "${1:-}" in
   gh-work|gh_work) printf 'user git\nhostname GitHub.com\nport 22\n' ;;
   gh-bad) printf 'user git\nhostname bad_host.example\nport 22\n' ;;
+  gh-meta) printf 'user git\nhostname meta.example.test\nport 22\n' ;;
+  gh-corp) printf 'user git\nhostname git.corp.io\nport 22\n' ;;
+  gitlab.com) printf 'user git\nhostname altssh.gitlab.com\nport 443\n' ;;
   *) printf 'user git\nhostname %s\nport 22\n' "${1:-}" ;;
 esac
 FAKE
@@ -552,6 +581,28 @@ hd_run /srv/git/widget.git
 hd_refused "HD29 a remote URL that yields no host is refused instead of read as github.com" "names no GitHub host"
 { [ "$HD_RC" -ne 0 ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ]; } && check "HD29b the hostless remote reaches neither ssh nor gh" PASS \
   || check "HD29b the hostless remote reaches neither ssh nor gh (ssh='$HD_SSH' config='$HD_CONFIG')" FAIL
+case "$HD_ERR" in
+  *"set ZENSU_VCS_REMOTE to the URL of the GitHub remote for a verb given --repo-id"*"git branch --set-upstream-to <remote>/<branch>"*"ssh://<alias>/<path>"*)
+    check "HD29j the no-host refusal names its routes: ZENSU_VCS_REMOTE, git branch --set-upstream-to and the ssh:// spelling of an alias" PASS ;;
+  *) check "HD29j the no-host refusal names its routes: ZENSU_VCS_REMOTE, git branch --set-upstream-to and the ssh:// spelling of an alias (err='$HD_ERR')" FAIL ;;
+esac
+hd_hostless() {
+  local label="$1" remote="$2" artifact="$3"
+  hd_run "$remote" FAKE_GH_LOGINS="$artifact"
+  if [ "$HD_RC" -ne 0 ] && [ -z "$HD_OUT" ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ]; then
+    case "$HD_ERR" in *"names no GitHub host"*) check "$label" PASS ;; *) check "$label (err='$HD_ERR')" FAIL ;; esac
+  else check "$label (rc=$HD_RC out='$HD_OUT' ssh='$HD_SSH' config='$HD_CONFIG')" FAIL; fi
+}
+hd_hostless "HD29c a file:// remote names no GitHub host, even while gh holds a login for file" file:///srv/git/widget.git file
+hd_hostless "HD29d a file:// remote with a host part names no GitHub host either" file://localhost/srv/git/widget.git localhost
+hd_hostless "HD29e a drive-letter path with backslashes names no GitHub host" 'C:\repos\widget.git' c
+hd_hostless "HD29f a drive-letter path with forward slashes names no GitHub host" C:/repos/widget.git c
+hd_hostless "HD29h a file:// scheme spelled in capitals names no GitHub host" FILE:///srv/git/widget.git file
+hd_hostless "HD29i a lowercase drive letter names no GitHub host" c:/repos/widget.git c
+hd_run g:acme/widget.git FAKE_GH_LOGINS=g
+{ [ "$HD_RC" -eq 0 ] && [ "$HD_OUT" = g ] && [ "$HD_SSH" = "-G -- g" ] && [ "$HD_CONFIG" = g ]; } \
+  && check "HD29g a one-letter SSH alias before a relative path stays an SSH remote" PASS \
+  || check "HD29g a one-letter SSH alias before a relative path stays an SSH remote (rc=$HD_RC out='$HD_OUT' ssh='$HD_SSH' config='$HD_CONFIG' err='$HD_ERR')" FAIL
 hd_run "git@$(printf '%0254d' 0 | tr 0 a):acme/widget.git"
 hd_refused "HD30 an SSH alias longer than 253 characters is refused" "not a valid host name"
 [ -z "$HD_SSH" ] && check "HD30b the overlong alias reaches no ssh" PASS \
@@ -560,18 +611,75 @@ hd_run 'git@-gh-work:acme/widget.git'
 hd_refused "HD31 an SSH alias that starts with a hyphen is refused" "not a valid host name"
 [ -z "$HD_SSH" ] && check "HD31b the hyphen-led alias reaches no ssh" PASS \
   || check "HD31b the hyphen-led alias reaches no ssh (ssh='$HD_SSH')" FAIL
+hd_repo "$HD/ghe-only" && git -C "$HD/ghe-only" remote add upstream https://ghe.example.com/acme/widget.git
+hd_run_in "$HD/ghe-only" FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD32 a branch without an upstream in a work tree whose only remote is not origin reads the host of that remote" ghe.example.com
 hd_repo "$HD/github-only" && git -C "$HD/github-only" remote add github https://github.com/acme/widget.git
 hd_run_in "$HD/github-only"
-hd_host "HD32 a branch without an upstream in a work tree whose only remote is not origin reads the host of that remote" github.com
+hd_host "HD32b a sole remote not named origin on github.com reads as github.com" github.com
 hd_repo "$HD/agree" && git -C "$HD/agree" remote add upstream https://ghe.example.com/acme/widget.git \
   && git -C "$HD/agree" remote add fork git@ghe.example.com:me/widget.git
 hd_run_in "$HD/agree" FAKE_GH_LOGINS=ghe.example.com
 hd_host "HD33 remotes that all name one host pin that host when the branch tracks none of them" ghe.example.com
+printf '[remote "origin"]\n\tprune = true\n' > "$HD/global-origin.cfg"
+hd_repo "$HD/global-only" && git -C "$HD/global-only" remote add upstream file:///srv/git/widget.git
+hd_run_in "$HD/global-only" GIT_CONFIG_GLOBAL="$HD/global-origin.cfg"
+hd_refused "HD33b a remote only the global git config names takes no part, so a sole file:// remote beside it is refused" "names no GitHub host"
+hd_repo "$HD/global-none"
+hd_run_in "$HD/global-none" GIT_CONFIG_GLOBAL="$HD/global-origin.cfg"
+hd_host "HD33c a remote only the global git config names is no remote, so the work tree reads as github.com" github.com
 hd_repo "$HD/unreadable" && printf '[remote "origin"\n\turl = https://ghe.example.com/acme/widget.git\n' >> "$HD/unreadable/.git/config"
-hd_run_in "$HD/unreadable" FAKE_GH_LOGINS=ghe.example.com
+mkdir -p "$HD/locale-bin"
+{ cat <<'SHIM'
+#!/bin/sh
+case " $* " in
+  *" remote "*) [ "${LC_ALL:-}" = C ] || printf 'zensu-test: git ran outside the C locale\n' >&2 ;;
+esac
+SHIM
+printf 'exec "%s" "$@"\n' "$(command -v git)"; } > "$HD/locale-bin/git" && chmod +x "$HD/locale-bin/git"
+HD_MARK="$(cd "$HD/unreadable" && LC_ALL=POSIX "$HD/locale-bin/git" -C . remote 2>&1 >/dev/null | head -n 1)"
+[ "$HD_MARK" = "zensu-test: git ran outside the C locale" ] \
+  && check "HD34i the locale shim marks a git remote call made outside the C locale" PASS \
+  || check "HD34i the locale shim marks a git remote call made outside the C locale (got='$HD_MARK')" FAIL
+hd_run_in "$HD/unreadable" FAKE_GH_LOGINS=ghe.example.com LC_ALL=POSIX PATH="$HD/locale-bin:$HD/bin:$PATH"
 hd_refused "HD34 a work tree whose remotes git cannot read is refused instead of read as github.com" "git cannot read the remotes"
 { [ "$HD_RC" -ne 0 ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ]; } && check "HD34b the unreadable work tree reaches neither ssh nor gh" PASS \
   || check "HD34b the unreadable work tree reaches neither ssh nor gh (ssh='$HD_SSH' config='$HD_CONFIG')" FAIL
+HD_REMEDIES=1
+for hd_needle in "repair its git configuration" "set ZENSU_VCS_REMOTE for a verb given --repo-id" \
+  "git config --global --add safe.directory <path>" "is for the user to decide, not for an agent"; do
+  case "$HD_ERR" in *"$hd_needle"*) ;; *) HD_REMEDIES=0 ;; esac
+done
+[ "$HD_REMEDIES" = 1 ] \
+  && check "HD34c that refusal names its remedies and leaves a safe.directory exception to the user" PASS \
+  || check "HD34c that refusal names its remedies and leaves a safe.directory exception to the user (err='$HD_ERR')" FAIL
+HD_GITDIAG="$(cd "$HD/unreadable" && LC_ALL=C git -C . remote 2>&1 >/dev/null | head -n 1)"
+{ [ -n "$HD_GITDIAG" ] && case "$HD_ERR" in *"outside the C locale"*) false ;; *"($HD_GITDIAG)"*) true ;; *) false ;; esac; } \
+  && check "HD34d that refusal relays the first line of the untranslated git diagnostic, also for a caller outside the C locale" PASS \
+  || check "HD34d that refusal relays the first line of the untranslated git diagnostic, also for a caller outside the C locale (git='$HD_GITDIAG' err='$HD_ERR')" FAIL
+mkdir -p "$HD/nogit-bin" && printf '#!/bin/sh\nexec "%s" "$@"\n' "$(command -v node)" > "$HD/nogit-bin/node" && chmod +x "$HD/nogit-bin/node"
+HD_OUT="$(cd "$HD/agree" && env -i PATH="$HD/nogit-bin" HOME="$HOME" "$BASH_ABS" -c 'source "$1" && _zensu_vcs_gh_host' _ "$LIB" 2>"$HD/err")"
+HD_RC=$?; HD_ERR="$(cat "$HD/err")"
+hd_refused "HD34e without git a work tree is refused, and the refusal names installing git" "git is not installed"
+case "$HD_ERR" in
+  *safe.directory*|*"repair its git configuration"*) check "HD34f the missing-git refusal names no git configuration remedy (err='$HD_ERR')" FAIL ;;
+  *) check "HD34f the missing-git refusal names no git configuration remedy" PASS ;;
+esac
+mkdir -p "$HD/foreign-home"
+hd_repo "$HD/foreign" && git -C "$HD/foreign" remote add origin https://ghe.example.com/acme/widget.git
+HD_FOREIGN=(HOME="$HD/foreign-home" XDG_CONFIG_HOME="$HD/foreign-home/.config" GIT_CONFIG_NOSYSTEM=1 GIT_TEST_ASSUME_DIFFERENT_OWNER=1)
+HD_GITDIAG="$(cd "$HD/foreign" && env "${HD_FOREIGN[@]}" LC_ALL=C git -C . remote 2>&1 >/dev/null)"
+HD_FIRST="$(printf '%s\n' "$HD_GITDIAG" | head -n 1)"
+HD_EXC="$(printf '%s\n' "$HD_GITDIAG" | grep . | tail -n 1 | sed 's/^[[:space:]]*//')"
+{ [ "$(printf '%s\n' "$HD_GITDIAG" | grep -c .)" -ge 2 ] && case "$HD_FIRST" in *"detected dubious ownership"*) true ;; *) false ;; esac \
+  && case "$HD_EXC" in "git config --global --add safe.directory "?*) true ;; *) false ;; esac; } \
+  && check "HD34g git refuses a work tree it treats as owned by another account with a diagnostic of more than one line that ends in the exception command" PASS \
+  || check "HD34g git refuses a work tree it treats as owned by another account with a diagnostic of more than one line that ends in the exception command (git='$HD_GITDIAG')" FAIL
+hd_run_in "$HD/foreign" "${HD_FOREIGN[@]}" FAKE_GH_LOGINS=ghe.example.com
+{ [ "$HD_RC" -ne 0 ] && [ -z "$HD_OUT" ] && [ -n "$HD_FIRST" ] && [ -n "$HD_EXC" ] && [ "$(printf '%s\n' "$HD_ERR" | grep -c .)" = 1 ] \
+  && case "$HD_ERR" in *"To add an exception"*|*"$HD_EXC"*) false ;; *"git cannot read the remotes of this work tree ($HD_FIRST)"*) true ;; *) false ;; esac; } \
+  && check "HD34h that work tree is refused with only the first line of the diagnostic, never the exception command git prints after it" PASS \
+  || check "HD34h that work tree is refused with only the first line of the diagnostic, never the exception command git prints after it (rc=$HD_RC err='$HD_ERR')" FAIL
 hd_repo "$HD/ceiling" && mkdir -p "$HD/ceiling/sub" && git -C "$HD/ceiling" remote add origin https://ghe.example.com/acme/widget.git
 hd_run_in "$HD/ceiling/sub" GIT_CEILING_DIRECTORIES="$HD/ceiling"
 hd_host "HD35 a directory GIT_CEILING_DIRECTORIES keeps out of the repository above it reads as github.com" github.com
@@ -606,7 +714,172 @@ hd_repo "$HD/tracking" && git -C "$HD/tracking" remote add upstream https://ghe.
   && git -C "$HD/tracking" branch --set-upstream-to upstream/main >/dev/null
 hd_run_in "$HD/tracking" FAKE_GH_LOGINS=ghe.example.com
 hd_host "HD43 the remote the current branch tracks pins its host beside origin on another host" ghe.example.com
-rm -rf "$HD"
+hd_repo "$HD/alias-pair" && git -C "$HD/alias-pair" remote add work git@gh-work:acme/widget.git \
+  && git -C "$HD/alias-pair" remote add github https://github.com/acme/widget.git
+hd_run_in "$HD/alias-pair"
+hd_host "HD44 an SSH alias for github.com beside an https github.com remote pins github.com when the branch tracks neither" github.com
+case "$HD_SSH" in
+  *"-G -- gh-work"*) check "HD44b the remotes are compared after the alias went through ssh -G" PASS ;;
+  *) check "HD44b the remotes are compared after the alias went through ssh -G (ssh='$HD_SSH')" FAIL ;;
+esac
+hd_repo "$HD/www-pair" && git -C "$HD/www-pair" remote add www https://www.github.com/acme/widget.git \
+  && git -C "$HD/www-pair" remote add github https://github.com/acme/widget.git
+hd_run_in "$HD/www-pair"
+hd_host "HD45 a www.github.com remote beside a github.com remote pins github.com" github.com
+hd_repo "$HD/port443-pair" && git -C "$HD/port443-pair" remote add port443 ssh://git@ssh.github.com:443/acme/widget.git \
+  && git -C "$HD/port443-pair" remote add github https://github.com/acme/widget.git
+hd_run_in "$HD/port443-pair"
+hd_host "HD46 an ssh.github.com remote beside a github.com remote pins github.com" github.com
+hd_repo "$HD/local-pair" && git -C "$HD/local-pair" remote add local /srv/git/widget.git \
+  && git -C "$HD/local-pair" remote add upstream https://ghe.example.com/acme/widget.git
+hd_run_in "$HD/local-pair" FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD47 a remote that yields no host is left out, so the remote beside it pins its host" ghe.example.com
+hd_repo "$HD/file-pair" && git -C "$HD/file-pair" remote add mirror file:///srv/git/widget.git \
+  && git -C "$HD/file-pair" remote add upstream https://ghe.example.com/acme/widget.git
+hd_run_in "$HD/file-pair" FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD47b a file:// remote yields no host and is left out, so the remote beside it pins its host" ghe.example.com
+hd_repo "$HD/drive-pair" && git -C "$HD/drive-pair" remote add mirror 'C:\repos\widget.git' \
+  && git -C "$HD/drive-pair" remote add upstream https://ghe.example.com/acme/widget.git
+hd_run_in "$HD/drive-pair" FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD47c a drive-letter path yields no host and is left out, so the remote beside it pins its host" ghe.example.com
+hd_repo "$HD/local-only" && git -C "$HD/local-only" remote add local /srv/git/widget.git
+hd_run_in "$HD/local-only"
+hd_refused "HD48 a work tree whose only remote yields no host is still refused" "names no GitHub host"
+hd_repo "$HD/bad-pair" && git -C "$HD/bad-pair" remote add bad git@gh-bad:acme/widget.git \
+  && git -C "$HD/bad-pair" remote add github https://github.com/acme/widget.git
+hd_run_in "$HD/bad-pair"
+hd_refused "HD49 a remote whose host the pin refuses never agrees with a pinned host" "name different hosts"
+cat > "$HD/bin/curl" <<'FAKE'
+#!/bin/bash
+printf '%s\n' "$*" >> "$FAKE_CURL_LOG"
+case "$*" in
+  *" ${FAKE_CURL_ANSWER:-no answer}") printf '401'; exit 0 ;;
+esac
+exit 1
+FAKE
+chmod +x "$HD/bin/curl"
+hd_detect() {
+  local remote="$1" repo="$2" prov="$3"; shift 3
+  local a=(--detect --repo "$repo")
+  [ -z "$prov" ] || a+=(--provider "$prov")
+  : > "$HD/ssh.log"; : > "$HD/curl.log"
+  HD_OUT="$(env PATH="$HD/bin:$PATH" FAKE_SSH_LOG="$HD/ssh.log" FAKE_CURL_LOG="$HD/curl.log" \
+    ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready ZENSU_VCS_REMOTE="$remote" "$@" \
+    bash "$LIB" "${a[@]}" 2>"$HD/err")"
+  HD_RC=$?
+  HD_ERR="$(cat "$HD/err")"; HD_SSH="$(cat "$HD/ssh.log")"; HD_CURL="$(cat "$HD/curl.log")"
+}
+hd_fields() {
+  local label="$1" pair key want got bad=""; shift
+  for pair in "$@"; do
+    key="${pair%%=*}"; want="${pair#*=}"
+    got="$(field "$HD_OUT" "$key")"
+    [ "$got" = "$want" ] || bad="$bad $key='$got'"
+  done
+  if [ "$HD_RC" -eq 0 ] && [ -z "$bad" ]; then check "$label" PASS
+  else check "$label (rc=$HD_RC got:$bad)" FAIL; fi
+}
+hd_detect git@gh-work:acme/widget.git "$HD/nogit" '' ZENSU_VCS_NO_PROBE=1
+hd_fields "HD50 --detect classifies an SSH alias by the github.com host ssh -G translates it to" \
+  provider=github edition=cloud apiBase=https://api.github.com repo=acme/widget
+hd_detect https://www.github.com/acme/widget.git "$HD/nogit" '' ZENSU_VCS_NO_PROBE=1
+hd_fields "HD51 --detect classifies a www.github.com remote as github.com" \
+  provider=github edition=cloud apiBase=https://api.github.com repo=acme/widget
+hd_detect ssh://git@ssh.github.com:443/acme/widget.git "$HD/nogit" '' ZENSU_VCS_NO_PROBE=1
+hd_fields "HD52 --detect classifies an ssh.github.com remote as github.com" \
+  provider=github edition=cloud apiBase=https://api.github.com repo=acme/widget
+hd_detect https://WWW.GitHub.com/acme/widget.git "$HD/nogit" github ZENSU_VCS_NO_PROBE=1
+hd_fields "HD53 --detect --provider github reports the cloud edition for a WWW.GitHub.com remote" \
+  provider=github edition=cloud apiBase=https://api.github.com repo=acme/widget
+hd_detect '' "$HD/agree" '' ZENSU_VCS_PROBE_RESULT=github-enterprise
+hd_fields "HD54 --detect reads no remote when the remotes agree on a host but name different repositories, such as a fork beside its upstream" \
+  provider=unknown edition= apiBase= repo=
+hd_repo "$HD/agree-one" && git -C "$HD/agree-one" remote add upstream https://ghe.example.com/acme/widget.git \
+  && git -C "$HD/agree-one" remote add mirror git@ghe.example.com:acme/widget.git
+hd_detect '' "$HD/agree-one" '' ZENSU_VCS_PROBE_RESULT=github-enterprise
+hd_fields "HD54b --detect reads the remotes that agree on a host and a repository when the branch tracks none and no origin exists" \
+  provider=github edition=enterprise apiBase=https://ghe.example.com/api/v3 repo=acme/widget
+hd_detect '' "$HD/alias-pair" '' ZENSU_VCS_NO_PROBE=1
+hd_fields "HD55 --detect classifies the host an SSH alias and an https remote of one repository agree on" \
+  provider=github edition=cloud apiBase=https://api.github.com repo=acme/widget
+hd_detect '' "$HD/disagree" '' ZENSU_VCS_NO_PROBE=1
+hd_fields "HD56 --detect reads no remote when the remotes name different hosts, as the verbs refuse them" \
+  provider=unknown edition= apiBase= repo=
+hd_detect '' "$HD/file-pair" '' ZENSU_VCS_PROBE_RESULT=github-enterprise
+hd_fields "HD56b --detect leaves a file:// remote out of the fallback, so it reads the remote beside it" \
+  provider=github edition=enterprise apiBase=https://ghe.example.com/api/v3 repo=acme/widget
+hd_detect git@gitlab.com:group/proj.git "$HD/nogit" '' ZENSU_VCS_NO_PROBE=1
+hd_fields "HD57 --detect classifies a gitlab.com remote that ssh -G translates to altssh.gitlab.com as gitlab.com" \
+  provider=gitlab edition=cloud apiBase=https://gitlab.com/api/v4 repo=group%2Fproj
+hd_detect git@gitlab.com:group/proj.git "$HD/nogit" gitlab ZENSU_VCS_NO_PROBE=1
+hd_fields "HD57b --detect --provider gitlab keeps the cloud edition under that translation" \
+  provider=gitlab edition=cloud apiBase=https://gitlab.com/api/v4
+hd_detect https://git_lab.example/g/p.git "$HD/nogit" '' ZENSU_VCS_PROBE_RESULT=gitlab
+hd_fields "HD58 --detect classifies a host the pin refuses as spelled" \
+  provider=gitlab edition=selfhosted apiBase=https://git_lab.example/api/v4 repo=g%2Fp
+hd_detect git@gh-meta:acme/widget.git "$HD/nogit" '' ZENSU_VCS_FAKE_RESOLVE='meta.example.test=169.254.169.254'
+{ [ "$HD_RC" -eq 0 ] && [ "$HD_SSH" = "-G -- gh-meta" ] && [ -z "$HD_CURL" ]; } \
+  && check "HD59 a host ssh -G translates an alias to is never fetched when it resolves to a private address" PASS \
+  || check "HD59 a host ssh -G translates an alias to is never fetched when it resolves to a private address (rc=$HD_RC ssh='$HD_SSH' curl='$HD_CURL')" FAIL
+hd_detect git@gh-corp:acme/widget.git "$HD/nogit" '' ZENSU_VCS_FAKE_RESOLVE='git.corp.io=93.184.216.34'
+case "$HD_CURL" in
+  *"--resolve git.corp.io:443:93.184.216.34 https://git.corp.io/api/v4/version"*) check "HD59b a public host ssh -G translates an alias to is probed, pinned to its checked address" PASS ;;
+  *) check "HD59b a public host ssh -G translates an alias to is probed, pinned to its checked address (curl='$HD_CURL')" FAIL ;;
+esac
+hd_detect git@gitlab.corp.io:group/proj.git "$HD/nogit" '' FAKE_SSH_HOSTNAME=203.0.113.7 \
+  ZENSU_VCS_FAKE_RESOLVE='gitlab.corp.io=93.184.216.34' FAKE_CURL_ANSWER=https://gitlab.corp.io/api/v4/version
+hd_fields "HD60 --detect probes the spelled host when ssh -G translates it to an IP address, which is never probed" \
+  provider=gitlab edition=selfhosted apiBase=https://gitlab.corp.io/api/v4 repo=group%2Fproj
+hd_detect git@gitlab.corp.io:group/proj.git "$HD/nogit" '' FAKE_SSH_HOSTNAME=203.0.113.7 \
+  ZENSU_VCS_FAKE_RESOLVE='gitlab.corp.io=10.0.0.5' FAKE_CURL_ANSWER=https://gitlab.corp.io/api/v4/version
+{ [ "$HD_RC" -eq 0 ] && [ -z "$HD_CURL" ] && [ "$(field "$HD_OUT" provider)" = unknown ]; } \
+  && check "HD60b a spelled host that resolves to a private address is never fetched" PASS \
+  || check "HD60b a spelled host that resolves to a private address is never fetched (rc=$HD_RC out='$HD_OUT' curl='$HD_CURL')" FAIL
+hd_detect git@github.com:acme/widget.git "$HD/nogit" '' FAKE_SSH_HOSTNAME=ghe.corp.io ZENSU_VCS_PROBE_RESULT=github-enterprise
+hd_fields "HD61 --detect classifies the host ssh -G translates github.com to, as the verbs pin it" \
+  provider=github edition=enterprise apiBase=https://ghe.corp.io/api/v3 repo=acme/widget
+hd_detect git@github.com:acme/widget.git "$HD/nogit" '' FAKE_SSH_HOSTNAME=203.0.113.9 ZENSU_VCS_FAKE_RESOLVE='github.com=93.184.216.34'
+{ [ "$HD_RC" -eq 0 ] && [ -z "$HD_CURL" ] && [ "$(field "$HD_OUT" provider)" = unknown ]; } \
+  && check "HD61b a cloud host ssh -G moves elsewhere is neither classified by its name nor probed" PASS \
+  || check "HD61b a cloud host ssh -G moves elsewhere is neither classified by its name nor probed (rc=$HD_RC out='$HD_OUT' curl='$HD_CURL')" FAIL
+hd_repo "$HD/gitlab-pair" && git -C "$HD/gitlab-pair" remote add alt git@gitlab.com:group/proj.git \
+  && git -C "$HD/gitlab-pair" remote add web https://gitlab.com/group/proj.git
+hd_detect '' "$HD/gitlab-pair" '' ZENSU_VCS_NO_PROBE=1
+hd_fields "HD62 a gitlab.com SSH remote that ssh -G translates to altssh.gitlab.com agrees with its https remote" \
+  provider=gitlab edition=cloud apiBase=https://gitlab.com/api/v4 repo=group%2Fproj
+hd_repo "$HD/case-pair" && git -C "$HD/case-pair" remote add fork git@github.com:acme/widget.git \
+  && git -C "$HD/case-pair" remote add upstream https://github.com/Acme/Widget.git/
+hd_detect '' "$HD/case-pair" '' ZENSU_VCS_NO_PROBE=1
+hd_fields "HD63 remotes that spell one repository with other letter case, slashes or .git name one repository" \
+  provider=github edition=cloud apiBase=https://api.github.com repo=acme/widget
+hd_repo "$HD/lead-pair" && git -C "$HD/lead-pair" remote add fork https://github.com/acme/widget.git \
+  && git -C "$HD/lead-pair" remote add upstream git@github.com:/acme/widget.git
+hd_detect '' "$HD/lead-pair" '' ZENSU_VCS_NO_PROBE=1
+hd_fields "HD63b remotes of one repository, one spelled with a leading slash, name one repository" \
+  provider=github edition=cloud apiBase=https://api.github.com repo=acme/widget
+hd_detect git@gitlab.corp.io:group/proj.git "$HD/nogit" '' FAKE_SSH_HOSTNAME=git.corp.io \
+  ZENSU_VCS_FAKE_RESOLVE='git.corp.io=93.184.216.34;gitlab.corp.io=93.184.216.35' FAKE_CURL_ANSWER=https://git.corp.io/api/v4/version
+hd_fields "HD64 a pinned host whose probe answers keeps its classification beside a probeable spelled name" \
+  provider=gitlab edition=selfhosted apiBase=https://git.corp.io/api/v4 repo=group%2Fproj
+case "$HD_CURL" in
+  *gitlab.corp.io*) check "HD64b the spelled name is never fetched once the pinned host answered (curl='$HD_CURL')" FAIL ;;
+  *) check "HD64b the spelled name is never fetched once the pinned host answered" PASS ;;
+esac
+mkdir -p "$HD/gl-marker" && : > "$HD/gl-marker/.gitlab-ci.yml"
+hd_detect git@gitlab.corp.io:group/proj.git "$HD/gl-marker" '' FAKE_SSH_HOSTNAME=203.0.113.7 \
+  ZENSU_VCS_FAKE_RESOLVE='gitlab.corp.io=93.184.216.34'
+hd_fields "HD65 a spelled host whose probe answers none leaves apiBase on the pinned host at the marker tiebreak" \
+  provider=gitlab edition=selfhosted apiBase=https://203.0.113.7/api/v4 repo=group%2Fproj
+hd_detect https://git.corp.io/g/p.git "$HD/nogit" '' ZENSU_VCS_FAKE_RESOLVE='git.corp.io=93.184.216.34'
+HD_CURL_CALLS="$(printf '%s\n' "$HD_CURL" | grep -c .)"
+{ [ "$HD_RC" -eq 0 ] && [ "$HD_CURL_CALLS" -eq 2 ]; } \
+  && check "HD66 a spelled host equal to the pinned one is probed once, not again as the spelled host" PASS \
+  || check "HD66 a spelled host equal to the pinned one is probed once, not again as the spelled host (rc=$HD_RC calls=$HD_CURL_CALLS curl='$HD_CURL')" FAIL
+hd_detect git@WWW.GitLab.Corp.io:group/proj.git "$HD/nogit" '' FAKE_SSH_HOSTNAME=203.0.113.7 \
+  ZENSU_VCS_FAKE_RESOLVE='gitlab.corp.io=93.184.216.34' FAKE_CURL_ANSWER=https://gitlab.corp.io/api/v4/version
+hd_fields "HD66b the spelled host is probed lowercased and without a leading www." \
+  provider=gitlab edition=selfhosted apiBase=https://gitlab.corp.io/api/v4 repo=group%2Fproj
+rm -rf "$HD" "$SSH_STUB"
 
 echo "----"
 echo "test-vcs-detect: $PASS PASS / $FAIL FAIL"

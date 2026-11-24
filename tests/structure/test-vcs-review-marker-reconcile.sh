@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
+export GH_GRAPHQL_MODEL="$PLUGIN_DIR/tests/structure/lib-fake-gh-graphql.js"
 PASS=0; FAIL=0
 check() {
   local label="$1" cond="$2"
@@ -403,11 +404,10 @@ if [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
     : > "$FAKE_DIR/drift-before-write"
   fi
   if [ -f "$FAKE_DIR/body" ]; then
-    BODY_FILE="$FAKE_DIR/body" node -e 'var fs=require("fs"),b=fs.readFileSync(process.env.BODY_FILE,"utf8");process.stdout.write(JSON.stringify([{data:{repository:{pullRequest:{reviews:{nodes:[{id:"r1",url:"https://github.test/acme/widget/pull/42#pullrequestreview-1",body:b}],pageInfo:{hasNextPage:false,endCursor:null}}}}}}]));'
-  else
-    printf '%s' '[{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}]'
+    FAKE_PAGES=graphql-page.json exec node "$GH_GRAPHQL_MODEL" "$FAKE_DIR" "$@"
   fi
-  exit 0
+  printf '%s' '{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}' > "$FAKE_DIR/graphql-empty.json"
+  FAKE_PAGES=graphql-empty.json exec node "$GH_GRAPHQL_MODEL" "$FAKE_DIR" "$@"
 fi
 if [ "${1:-}" = api ] && [ "${2:-}" = 'repos/acme/widget/pulls/42' ]; then
   if [ "${FAKE_MUTATE_PRIVATE_PAYLOAD:-0}" = 1 ] && [ ! -f "$FAKE_DIR/private-payload-mutated" ]; then
@@ -439,6 +439,7 @@ if [ "${1:-}" = api ] && [ "${2:-}" = -X ] && [ "${3:-}" = POST ]; then
       var j;try{j=JSON.parse(raw);}catch(_){process.exit(2);}
       fs.writeFileSync(process.env.FAKE_DIR+"/post.json",raw);
       fs.writeFileSync(process.env.FAKE_DIR+"/body",j.body);
+      fs.writeFileSync(process.env.FAKE_DIR+"/graphql-page.json",JSON.stringify({data:{repository:{pullRequest:{reviews:{nodes:[{id:"r1",url:"https://github.test/acme/widget/pull/42#pullrequestreview-1",body:j.body}],pageInfo:{hasNextPage:false,endCursor:null}}}}}}));
     });'
   printf '%s' '{"html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-1"}'
   exit 0
@@ -534,6 +535,12 @@ hr_reached() {
     check "$label (hosts='$hosts')" FAIL
   fi
 }
+hr_tokens() {
+  local env_log
+  env_log="$(cat "$WORK/env" 2>/dev/null)"
+  if [ "$2" = PASS ] && gh_host_fake_env_all "$env_log" ghe.example.com; then check "$1" PASS
+  else check "$1 (env='$env_log')" FAIL; fi
+}
 rm -f "$WORK/state/body" "$WORK/state/calls" "$WORK/state/post.json" "$WORK/hosts"
 HR_RESULT="$(export GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hosts"; run_gh)"
 HR_OK=FAIL; [ "$(printf '%s' "$HR_RESULT" | jfield status)" = posted ] && HR_OK=PASS
@@ -548,23 +555,20 @@ HR_RESULT="$(export GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hosts" FAKE
   FAKE_GH_LOGINS=ghe.example.com ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git; run_gh)"
 HR_OK=FAIL; [ "$(printf '%s' "$HR_RESULT" | jfield status)" = posted ] && HR_OK=PASS
 hr_reached "HR3 --reconcile-review reaches the GitHub Enterprise host of the remote on every call while GH_HOST names another host" "$HR_OK" ghe.example.com
-: > "$WORK/hosts"; : > "$WORK/state/calls"
-HR_MARKERS="$(export GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hosts" FAKE_GH_PR_HOST=ghe.example.com \
-  FAKE_GH_LOGINS=ghe.example.com ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git; FAKE_DIR="$WORK/state" PATH="$WORK/bin:$PATH" \
+: > "$WORK/hosts"; : > "$WORK/state/calls"; : > "$WORK/env"
+HR_MARKERS="$(export GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hosts" FAKE_GH_ENV_LOG="$WORK/env" FAKE_GH_PR_HOST=ghe.example.com \
+  FAKE_GH_LOGINS=ghe.example.com ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git \
+  "${GH_HOST_FAKE_TOKENS[@]}"; FAKE_DIR="$WORK/state" PATH="$WORK/bin:$PATH" \
   bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 2>/dev/null)"
 HR_OK=FAIL; [ "$HR_MARKERS" = "$MARKER" ] && HR_OK=PASS
 hr_reached "HR4 --review-markers lists the posted marker from the GitHub Enterprise host of the remote" "$HR_OK" ghe.example.com
+hr_tokens "HR4b --review-markers reads a host accepted for its stored login without the environment tokens" "$HR_OK"
 rm -f "$WORK/state/body" "$WORK/state/calls" "$WORK/state/post.json" "$WORK/hosts" "$WORK/env"
 HR_RESULT="$(export GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hosts" FAKE_GH_ENV_LOG="$WORK/env" FAKE_GH_PR_HOST=ghe.example.com \
   FAKE_GH_LOGINS=ghe.example.com ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git \
-  GH_TOKEN=t1 GITHUB_TOKEN=t2 GH_ENTERPRISE_TOKEN=t3 GITHUB_ENTERPRISE_TOKEN=t4; run_gh)"
-HR_ENV_LINES="$(grep -c . "$WORK/env" 2>/dev/null)"
-HR_ENV_BAD="$(grep -v -x -F -e ghe.example.com "$WORK/env" 2>/dev/null | grep -c .)"
-if [ "$(printf '%s' "$HR_RESULT" | jfield status)" = posted ] && [ "${HR_ENV_LINES:-0}" -ge 1 ] && [ "$HR_ENV_BAD" = 0 ]; then
-  check "HR5 --reconcile-review reads and posts on a host accepted for its stored login without the environment tokens" PASS
-else
-  check "HR5 --reconcile-review reads and posts on a host accepted for its stored login without the environment tokens (env='$(cat "$WORK/env" 2>/dev/null)')" FAIL
-fi
+  "${GH_HOST_FAKE_TOKENS[@]}"; run_gh)"
+HR_OK=FAIL; [ "$(printf '%s' "$HR_RESULT" | jfield status)" = posted ] && HR_OK=PASS
+hr_tokens "HR5 --reconcile-review reads and posts on a host accepted for its stored login without the environment tokens" "$HR_OK"
 
 # GitLab uses one summary note plus one discussion per inline finding. A partial
 # exact set is completed, while duplicate/conflicting/malformed marker sets stop.

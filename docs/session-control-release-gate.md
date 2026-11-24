@@ -271,8 +271,9 @@ fail-closed contract.
 
 ## Automated release ordering
 
-GitHub Actions never invokes Promptfoo or a live model. The `Release` workflow
-has two deterministic exact-SHA gates:
+No release gate invokes Promptfoo or a live model; the one workflow that does is
+the scheduled, advisory `live-evals.yml` (`tests/README.md` §"Scheduled live
+evals"). The `Release` workflow has two deterministic exact-SHA gates:
 
 1. A non-dry prepare run bumps the plugin version and production marketplace
    source ref together and creates the release commit locally
