@@ -315,7 +315,13 @@ in the anchor prints the command as before. A git fault keeps the record. The au
 `prepareScope` keeps the scope on its claim root. `checkpointScope` therefore records the work
 tree that scope is bound to (`scopeWorkTree`, the claim root's path below the project root)
 whenever the audit names none. A checkpoint without the key would make the command printed after
-git recovers audit the anchor and re-root the scope.
+git recovers audit the anchor and re-root the scope. `scopeWorkTree` hands that path on without
+the reader's path check, as the shell hands `WORK_TREE_REL` to the ordinary checkpoint and to the
+sealed receipt, so the three writers agree and the readers in `edit-landing-receipt-v1.js` decide
+alone, each through `claimPath`: `boundWorkTree` for the recovery command, `gradedRoot` for the
+freshness check behind `--check-receipt`, and the `check-context` verb. A path `claimPath`
+rejects therefore reads back as the placeholder in the recovery command, never as a chain that
+works in the anchor.
 
 **Verdict and counts.** The grader prints
 `EDIT SUPERSEDED — <step>: <path>, replaced by <step2>` through `render_claim_value`, and the
@@ -347,8 +353,12 @@ discipline patch 10, the marker paragraph and the `## What I built` row of
 `docs/build-workflow.md`, the lead-in, the `## Terminal Edit-Landing Gate` section and its
 "What it prints" bullet in `docs/gates.md`, and the `ZENSU_EDIT_LANDING_GATE` row of
 `docs/configuration.md`.
-Pins: the supersede cases and the two work-tree recovery cases (a stale receipt, a git fault) of
-`tests/structure/edit-landing-scope-v1.test.js`, `E14` and `E14a` in
+Pins: the supersede cases, the four work-tree recovery cases (a stale receipt, a git fault, a
+recorded work tree no reader can use, and a git fault on a path `claimPath` rejects, which skips
+on win32), the pure checkpoint case, which holds both halves of `scopeWorkTree` on every host (a
+rejected path below the project root is recorded as written, and a claim root at or outside the
+project root records none), and the anchor fault case, which requires a checkpoint without the
+key, of `tests/structure/edit-landing-scope-v1.test.js`, `E14` and `E14a` in
 `test-terminal-edit-landing-gate.sh`, `S4`, `S4a` and `X29b` in `test-edit-landing-audit.sh`,
 `D10c` in `test-tdd-complete-receipt-gate.sh`, one case each in the claims, round-prepare and
 review-packet unit files, and both literal loops of
@@ -392,6 +402,18 @@ the four `edit_landing_evidence` sites or in step 9.
   first audit of a work-tree chain that stops on a git fault records none, and loses nothing,
   because no certification exists yet. A checkpoint an installation without `scopeWorkTree` wrote
   stays without the key, so the command printed for it audits the anchor.
+- The topology rule refuses a tab or a line break in a work tree's name and no other character
+  `claimPath` rejects. A work tree whose project-relative path holds a backslash, or a control
+  character other than those, is therefore audited, and every receipt of it, checkpoint and
+  sealed alike, records a path that `claimPath` in `edit-landing-receipt-v1.js` and
+  `workTreeRelative` in `review-packet-v1.js` reject. Two other readers of the key,
+  `_tc_receipt_verdict` of `--tdd-complete` and `auditedWorkTree` of the doctor row, screen out a
+  control character and accept a backslash. `--check-receipt`, the check the terminus runs,
+  refuses the sealed receipt with
+  `the receipt names a work tree that is not a path inside the project` and a checkpoint, like
+  every checkpoint, with `the latest audit did not complete; re-run it`, and both refusals print
+  the recovery command with the placeholder. Refusing the tree up front belongs in `--work-tree`
+  and `--work-tree-check`, which would change what both accept.
 - A bound chain whose terminus refuses for a cause that no edit or proof removes, such as a claim
   that never landed, still has no exit other than the gate variable.
 - Windows is unmeasured, and the ports were not included.

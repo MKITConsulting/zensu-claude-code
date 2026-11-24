@@ -343,7 +343,10 @@ test('a git fault keeps the dirty scope and invalidates an earlier clean receipt
   f.audit(['--predicates', f.putProof()]);
   f.check(0);
   f.audit([], 2, failing);
-  assert.match(f.check(1).stderr, /did not complete/);
+  assert.equal('workTree' in f.load(), false, 'a fault checkpoint of a chain that works in the project root records no work tree');
+  const refused = f.check(1);
+  assert.match(refused.stderr, /did not complete/);
+  assert.deepEqual(recoveryOf(refused.stderr).words, ['bash', AUDIT, '--log', f.log, '--project', f.root, '--session', f.key]);
   f.audit();
   f.check(0);
 });
@@ -507,6 +510,14 @@ test('the recovery command quotes every unsafe operand and withholds a control-c
   assert.match(unsafeTree, /--work-tree '<work tree>'$/);
 });
 
+function recoveryOf(stderr) {
+  const line = stderr.split('\n').find((entry) => entry.startsWith('Run: '));
+  assert.ok(line, stderr);
+  const parsed = spawnSync('bash', ['-c', `set -- ${line.slice(5)}; printf '%s\\0' "$@"`], { encoding: 'utf8' });
+  assert.equal(parsed.status, 0, parsed.stderr);
+  return { command: line.slice(5), words: parsed.stdout.split('\0').slice(0, -1) };
+}
+
 test('a chain that works in a worktree below the project gets a recovery command that names that tree and keeps its scope', (t) => {
   const f = fixture(t);
   const tree = path.join(f.root, '.claude', 'worktrees', 'wt');
@@ -516,13 +527,6 @@ test('a chain that works in a worktree below the project gets a recovery command
   assert.match(first.stdout, /^EDIT LANDED — T01: a\.js$/m);
   assert.equal(f.load().workTree, '.claude/worktrees/wt');
   fs.writeFileSync(path.join(tree, 'a.js'), 'later\n');
-  const recoveryOf = (stderr) => {
-    const line = stderr.split('\n').find((entry) => entry.startsWith('Run: '));
-    assert.ok(line, stderr);
-    const parsed = spawnSync('bash', ['-c', `set -- ${line.slice(5)}; printf '%s\\0' "$@"`], { encoding: 'utf8' });
-    assert.equal(parsed.status, 0, parsed.stderr);
-    return { command: line.slice(5), words: parsed.stdout.split('\0').slice(0, -1) };
-  };
   const stale = f.check(1);
   assert.match(stale.stderr, /a claimed file changed after the receipt/);
   const recovery = recoveryOf(stale.stderr);
@@ -566,6 +570,84 @@ test('a git fault during an audit of a worktree chain keeps the recorded work tr
   assert.match(recovered.stdout, /^PENDING PREDICATE — T01: a\.js /m);
   assert.equal(f.load().workTree, '.claude/worktrees/wt');
   assert.equal(f.load().auditScope.claims[0].landedOnce, true, 'the retry continued the scope of the work tree, so the claim keeps its landing evidence');
+});
+
+test('a receipt whose recorded work tree no reader can use prints the placeholder in its recovery command, which fails as written', (t) => {
+  const f = fixture(t);
+  const tree = path.join(f.root, '.claude', 'worktrees', 'wt');
+  f.git('worktree', 'add', '-q', '-b', 'wt', tree);
+  fs.writeFileSync(path.join(tree, 'a.js'), 'after\n');
+  f.audit(['--work-tree', tree]);
+  fs.writeFileSync(f.receipt, JSON.stringify({ ...f.load(), workTree: '../elsewhere' }));
+  const unusable = fs.readFileSync(f.receipt, 'utf8');
+  const refused = f.check(1);
+  assert.match(refused.stderr, /EDIT LANDING RECEIPT STALE — the receipt names a work tree that is not a path inside the project/);
+  const recovery = recoveryOf(refused.stderr);
+  assert.deepEqual(recovery.words, ['bash', AUDIT, '--log', f.log, '--project', f.root, '--session', f.key, '--work-tree', '<work tree>']);
+  const asWritten = spawnSync('bash', ['-c', recovery.command], { env: f.env, cwd: f.root, encoding: 'utf8' });
+  assert.equal(asWritten.status, 2, asWritten.stdout + asWritten.stderr);
+  assert.match(asWritten.stderr, /work tree not found/);
+  assert.equal(fs.readFileSync(f.receipt, 'utf8'), unusable, 'the command as written grades nothing and leaves the receipt alone');
+  writeWorkflow(f.root, f.session);
+  const gated = f.run(['--log', f.log, '--project', f.root], { status: 2, extraEnv: { CLAUDE_CODE_SESSION_ID: f.session } });
+  assert.match(gated.stderr, /AUDIT SESSION REQUIRED/);
+  assert.deepEqual(recoveryOf(gated.stderr).words.slice(-2), ['--work-tree', '<work tree>']);
+});
+
+test('a git fault on a work tree whose path claimPath rejects still records it, so the recovery command asks for the tree', (t) => {
+  if (process.platform === 'win32') {
+    t.skip('a backslash separates path segments on Windows, so no directory name can hold one');
+    return;
+  }
+  const f = fixture(t);
+  const tree = path.join(f.root, '.claude', 'worktrees', 'w\\t');
+  f.git('worktree', 'add', '-q', '-b', 'odd', tree);
+  fs.writeFileSync(path.join(tree, 'a.js'), 'after\n');
+  f.audit(['--work-tree', tree]);
+  assert.equal(f.load().workTree, '.claude/worktrees/w\\t', 'the sealed receipt records the path as the audit was given it');
+  assert.equal(f.load().auditScope.claims[0].certified, true);
+  const sealed = f.check(1);
+  assert.match(sealed.stderr, /the receipt names a work tree that is not a path inside the project/);
+  assert.deepEqual(recoveryOf(sealed.stderr).words.slice(-2), ['--work-tree', '<work tree>'], 'the sealed receipt prints the placeholder too');
+  fs.writeFileSync(path.join(tree, 'a.js'), 'later\n');
+  const bin = path.join(f.base, 'failing-bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'git'), '#!/bin/sh\necho "fatal: synthetic git failure" >&2\nexit 128\n', { mode: 0o755 });
+  const faulted = f.audit(['--work-tree', tree], 2, { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+  assert.match(faulted.stdout, /EDIT LANDING AUDIT FAULT — .*synthetic git failure/);
+  assert.match(f.load().auditFailure, /git failed/);
+  assert.equal(f.load().auditScope.claimRoot, tree, 'the fault keeps the scope on the work tree');
+  assert.equal(f.load().workTree, '.claude/worktrees/w\\t', 'the fault checkpoint records the work tree its scope is bound to, as the sealed receipt did');
+  const refused = f.check(1);
+  assert.match(refused.stderr, /did not complete/);
+  const recovery = recoveryOf(refused.stderr);
+  assert.deepEqual(recovery.words, ['bash', AUDIT, '--log', f.log, '--project', f.root, '--session', f.key, '--work-tree', '<work tree>']);
+  const asWritten = spawnSync('bash', ['-c', recovery.command], { env: f.env, cwd: f.root, encoding: 'utf8' });
+  assert.equal(asWritten.status, 2, asWritten.stdout + asWritten.stderr);
+  assert.match(asWritten.stderr, /work tree not found/);
+  assert.equal(f.load().auditScope.claimRoot, tree, 'the command as written did not audit the anchor, so the scope stays on the work tree');
+  const retried = f.audit(['--work-tree', tree], 1);
+  assert.match(retried.stdout, /^PENDING PREDICATE — T01: a\.js /m);
+  assert.equal(f.load().auditScope.claims[0].landedOnce, true, 'the retry with the real tree continued the scope, so the claim keeps its landing evidence');
+});
+
+test('a checkpoint records the work tree of its scope as written, and none for a claim root at or outside the project root', (t) => {
+  const s = scratch(t, 'landing-checkpoint-');
+  const log = s.write('.zensu/logs/run.log', 'T01 IMPL completed — files: a.js\n');
+  const receiptPath = helper.receiptFile(s.base, `scv1_${'b'.repeat(64)}`);
+  const checkpoint = (claimRoot, workTree) => {
+    helper.checkpointScope({ schema: helper.SCOPE_SCHEMA, root: s.base, claimRoot, log, dirty: [], baseline: '', claims: [] }, receiptPath, 'x', workTree);
+    return JSON.parse(fs.readFileSync(receiptPath, 'utf8'));
+  };
+  assert.equal(checkpoint(path.join(s.base, 'a', 'b')).workTree, 'a/b');
+  for (const name of ['w\x7ft', '.git']) {
+    refuses(() => helper.relativeFile(`nested/${name}`), /normalized repository-relative path/);
+    assert.equal(checkpoint(path.join(s.base, 'nested', name)).workTree, `nested/${name}`, 'a path claimPath rejects is recorded as it is');
+  }
+  for (const claimRoot of [s.base, path.dirname(s.base), path.join(path.dirname(s.base), 'sibling'), '', undefined]) {
+    assert.equal('workTree' in checkpoint(claimRoot), false, `the claim root ${JSON.stringify(claimRoot)} records no work tree`);
+  }
+  assert.equal(checkpoint(s.base, 'named/by/the/audit').workTree, 'named/by/the/audit', 'a work tree the audit hands over is recorded before the one of the scope');
 });
 
 test('--check-receipt refuses a missing, pending or interrupted receipt and its own malformed operands', (t) => {

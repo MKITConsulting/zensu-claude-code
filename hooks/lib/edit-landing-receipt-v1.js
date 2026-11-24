@@ -472,7 +472,7 @@ function scopeWorkTree(scope) {
   if (typeof scope.claimRoot !== 'string' || scope.claimRoot === '') return '';
   const relative = path.relative(scope.root, scope.claimRoot);
   if (relative === '' || isOutside(relative)) return '';
-  return claimPath(relative.split(path.sep).join('/')) || '';
+  return relative.split(path.sep).join('/');
 }
 
 function checkpointScope(scope, receiptPath, session, workTree) {
