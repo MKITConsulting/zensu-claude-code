@@ -409,11 +409,12 @@ the four `edit_landing_evidence` sites or in step 9.
   `workTreeRelative` in `review-packet-v1.js` reject. Two other readers of the key,
   `_tc_receipt_verdict` of `--tdd-complete` and `auditedWorkTree` of the doctor row, screen out a
   control character and accept a backslash. `--check-receipt`, the check the terminus runs,
-  refuses the sealed receipt with
-  `the receipt names a work tree that is not a path inside the project` and a checkpoint, like
-  every checkpoint, with `the latest audit did not complete; re-run it`, and both refusals print
-  the recovery command with the placeholder. Refusing the tree up front belongs in `--work-tree`
-  and `--work-tree-check`, which would change what both accept.
+  never accepts a receipt of such a tree: it refuses a sealed receipt that is current and clean
+  with `the receipt names a work tree that is not a path inside the project`, an unclean one as
+  not clean before it reaches that check, and a checkpoint, like every checkpoint, with
+  `the latest audit did not complete; re-run it`. Each refusal prints the recovery command with
+  the placeholder. Refusing the tree up front belongs in `--work-tree` and `--work-tree-check`,
+  which would change what both accept.
 - A bound chain whose terminus refuses for a cause that no edit or proof removes, such as a claim
   that never landed, still has no exit other than the gate variable.
 - Windows is unmeasured, and the ports were not included.
