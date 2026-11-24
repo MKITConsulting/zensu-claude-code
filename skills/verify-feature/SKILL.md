@@ -264,8 +264,8 @@ report and never written, edited or deleted: a record placed there skips the hum
 that origin.
 
 **Redirects are not filtered by the browser.** `network.allowedOrigins` blocks a direct
-navigation and every HTTP(S) subresource request outside the run config, but the browser
-follows a server redirect to another origin. After every call that can navigate — `open`,
+navigation and HTTP(S) requests outside the run config, except a followed server redirect, a
+WebSocket and a shared worker's fetch. After every call that can navigate — `open`,
 `goto`, `go-back`, `go-forward`, `reload`, `tab-new`, `tab-select`, `tab-close`, and any click or
 key press that follows a link or submits a form — read the `Page URL` line `playwright-cli`
 prints. A page can also navigate itself onto a network-only origin: the browser knows one class
@@ -313,6 +313,9 @@ For either mode, create a collision-safe per-run directory beneath the physical 
 root, `$GIT_ROOT/.zensu/verify-feature-runs/<random>`, and register cleanup immediately. Reject
 a symlinked `.zensu` or `verify-feature-runs` boundary. Remove only the unique leaf on cleanup.
 This common `$RUN_DIR` must exist before runtime or authentication preparation.
+Right after it exists, begin the run's evidence report as `rules/report.md` section 1 says; in
+that file `<absolute-plugin-root>` is `${CLAUDE_PLUGIN_ROOT}` and `<absolute-plugin-data>` is
+`${CLAUDE_PLUGIN_DATA}`.
 
 ### Local mode
 
@@ -470,11 +473,12 @@ every other row follows `rules/drivers.md` section 8.
   mark that evidence plane PARTIAL. Direct inspection is allowed only for a proven
   unauthenticated, synthetic, secret-free target such as an isolated local fixture.
 - Record expected versus observed evidence while running; do not reconstruct it from memory.
+- Add each capture to the evidence report right after you inspected it, and write each matrix
+  row when it is finished (`rules/report.md` sections 2 and 3).
 
-Parallel execution is allowed only when each lane has its own run directory, run config and
-`zensu-verify` session, its own fixtures, and no shared mutable state. Otherwise execute
-sequentially. Parallelism never
-reduces the evidence requirements.
+Parallel execution is allowed only when no evidence report is begun and each lane has its own run
+directory, run config and `zensu-verify` session, its own fixtures, and no shared mutable state.
+Otherwise execute sequentially. Parallelism never reduces the evidence requirements.
 
 ## Phase 4 — Cleanup (always)
 
@@ -496,33 +500,8 @@ Run cleanup on PASS, FAIL, cancellation, and setup failure:
 
 ## Phase 5 — Report
 
-Use this format:
-
-**Verdict: PASS | FAIL | PARTIAL**
-
-| Scenario | Driver | Pri | Expected | Observed | Evidence | Result |
-|---|---|---|---|---|---|---|
-| ... | ... | P0 | ... | ... | screenshot / snapshot / request | ✅ / ❌ / ⏭ |
-
-- **Target:** mode, base URL, worktree/branch/SHA or deployed identity.
-- **Coverage:** `N/N P0`, `N/N P1`, `N/N P2`; name every undriven row.
-- **Console:** sanitized error class and bounded message, or `clean`. Redact credentials,
-  tokens, cookies, authorization data, signed/query URLs, personal data, headers, and bodies;
-  never copy raw console output into the report.
-- **Network:** failed, missing, 4xx, or 5xx requests with method/path/status, or `clean`.
-  Strip query strings/fragments and never report headers, bodies, credentials, or personal
-  data.
-- **Visual:** what each screenshot actually showed about layout, clipping, overlap,
-  responsiveness, styling, and legibility. “Screenshot taken” is not an observation.
-- **Reproduction:** exact steps and captured signal for each failure.
-- **Consent:** one line per `(origin, route, decidedBy)` record the session's consent memory
-  holds after the run, where `decidedBy` is `asked` (the host raised a consent prompt for this
-  origin — the recorder cannot observe how the human answered, only that the navigation then
-  executed), `remembered` (any route on an origin already present in the memory — the route is
-  never tested), or `policy-mode` (a parent-environment policy the gate accepts authorized
-  it). In consent mode also name every prompt the user refused.
-- **Limitations:** environment, fixture, auth, or deployment-identity gaps.
-- **Other drivers:** the lines `rules/drivers.md` section 8 adds.
+Render the evidence report first (`rules/report.md` section 4), then write the report to the user
+in the format of its section 5, its location right above the final verdict line.
 
 Verdict rules:
 

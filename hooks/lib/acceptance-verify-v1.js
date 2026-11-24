@@ -509,7 +509,7 @@ function resolveChain(options) {
     return { error: receipt.reason };
   }
   const plan = planFor(root, stem);
-  if (plan.reason) return { error: plan.reason };
+  if (plan.reason) return { error: plan.reason, disclosures };
   return { root, stem, planPath: plan.planPath, planRel: plan.planRel, disclosures };
 }
 
@@ -721,7 +721,12 @@ function record(options) {
   const evidence = cleanEvidence(options.evidenceText, options.projectRoot, limits);
   if (evidence.error) return { code: 1, error: evidence.error };
   const chain = options.runId ? runChain(options) : resolveChain(options);
-  if (chain.error) return { code: 1, error: chain.error };
+  const result = chain.error ? { code: 1, error: chain.error } : recordInChain(options, chain, evidence, limits);
+  return { ...result, disclosures: chain.disclosures || [] };
+}
+
+function recordInChain(options, chain, evidence, limits) {
+  const ac = options.ac;
   if (chain.runId) {
     const head = runHeadCheck(options, chain.facts, limits);
     if (head.cause) return { code: 1, error: head.cause };
@@ -788,7 +793,7 @@ function record(options) {
     prune(locations, limits);
     sweepIdleSessions(locations, options.sessionKey, limits);
   } catch { }
-  return { code: 0, record: entry, line: recordLine(entry, options.projectRoot, limits), disclosures: chain.disclosures };
+  return { code: 0, record: entry, line: recordLine(entry, options.projectRoot, limits) };
 }
 
 function evaluate(criteria, entries, currentTree, projectRoot, limits = LIMITS, treeRoot = projectRoot) {
@@ -909,7 +914,7 @@ function status(options) {
   const refusal = workTreeRefusal(options, limits);
   if (refusal) return { code: 2, lines: [`ACCEPTANCE STATUS — unavailable | ${refusal}`] };
   const chain = options.runId ? runChain(options) : resolveChain(options);
-  if (chain.error) return { code: 2, lines: [`ACCEPTANCE STATUS — unresolved | ${chain.error}`] };
+  if (chain.error) return { code: 2, lines: [...(chain.disclosures || []), `ACCEPTANCE STATUS — unresolved | ${chain.error}`] };
   if (chain.runId) {
     const head = runHeadCheck(options, chain.facts, limits);
     if (head.cause) return { code: 1, lines: [...chain.disclosures, `ACCEPTANCE STATUS — unresolved | ${head.cause} | plan: ${chain.planRel}`] };
@@ -966,15 +971,16 @@ function verdictChain(options) {
       return { outcome: 'unresolved', reason: 'ZENSU_EDIT_LANDING_GATE=off left no receipt to name this chain\'s plan, and no acceptance record names one either' };
     }
     const root = canonical(path.resolve(options.projectRoot));
+    const disclosures = ['ACCEPTANCE STEM UNCHECKED — ZENSU_EDIT_LANDING_GATE=off leaves no receipt, so the plan was taken from the newest acceptance record'];
     const plan = planFor(root, newest.record.stem);
-    if (plan.reason) return { outcome: 'unresolved', reason: plan.reason };
+    if (plan.reason) return { outcome: 'unresolved', reason: plan.reason, disclosures };
     return {
       chain: {
         root,
         stem: newest.record.stem,
         planPath: plan.planPath,
         planRel: plan.planRel,
-        disclosures: ['ACCEPTANCE STEM UNCHECKED — ZENSU_EDIT_LANDING_GATE=off leaves no receipt, so the plan was taken from the newest acceptance record'],
+        disclosures,
       },
     };
   }
@@ -1589,6 +1595,7 @@ function standaloneVerdict(options, gate, lines, limits) {
       cause = result.reason;
     }
   } else {
+    lines.push(...(resolved.disclosures || []));
     state = resolved.outcome;
     cause = resolved.reason;
   }
@@ -1669,11 +1676,11 @@ async function main(argv, env = process.env) {
   const label = env.ZENSU_AVR_LABEL || 'acceptance-verify-v1';
   if (mode === 'record') {
     const result = record(options);
+    for (const line of result.disclosures || []) process.stderr.write(`${line}\n`);
     if (result.code !== 0) {
       process.stderr.write(`${label}: ${result.error}\n`);
       return result.code;
     }
-    for (const line of result.disclosures) process.stderr.write(`${line}\n`);
     process.stdout.write(`zensu acceptance: ${result.line.replace(/^ACCEPTANCE — /, '')}\n`);
     if (options.runLogLinePath) {
       try {
@@ -1805,6 +1812,7 @@ module.exports = {
   manualAcceptanceIds,
   consentDecision,
   hasChanges,
+  chainTree,
   citedRun,
   resolveChain,
   runChain,

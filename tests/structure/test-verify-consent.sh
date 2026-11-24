@@ -1230,6 +1230,15 @@ if [ -z "$DRIFT_MISSING" ]; then
 else
   check "V49 docs/gates.md names the version-drift gap: user-supplied driver, manifest-only guard, run-config fences and channels (missing:$DRIFT_MISSING)" FAIL
 fi
+if printf '%s' "$GATES_FLAT" | grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not" \
+  && printf '%s' "$GATES_FLAT" | grep -qF 'playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins' \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not" \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'it refuses every other HTTP(S) request there'; then
+  check "V73 docs/gates.md and docs/verify-feature.md name a shared worker's fetch as an exception to the HTTP(S) fence, with the measured versions" PASS
+else
+  check "V73 docs/gates.md and docs/verify-feature.md name a shared worker's fetch as an exception to the HTTP(S) fence, with the measured versions" FAIL
+fi
 if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'a shape denial — one that objects only to how the call is spelled — is re-issued once as one plain call with single-quoted literal arguments, and any other denial leaves the affected scenario PARTIAL' \
   && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'the skill reports the affected scenario PARTIAL rather than working around it'; then
   check "V50 docs/verify-feature.md separates a shape denial's one re-issue from a final denial" PASS

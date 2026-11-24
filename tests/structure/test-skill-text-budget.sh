@@ -15,7 +15,7 @@ gauntlet-loop 31628
 ghost-scan 26223
 plan-review 32832
 self-review 31814
-verify-feature 39802
+verify-feature 38674
 ALLOW
 )"
 

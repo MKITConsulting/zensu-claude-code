@@ -6,6 +6,7 @@ WORKFLOWS="$ROOT/.github/workflows"
 RUNNER="$ROOT/tests/run-all.sh"
 PACKAGE="$ROOT/package.json"
 MANIFEST="$ROOT/tests/profiles/promptfoo-local-only.v1.json"
+LIVE_EVALS="live-evals.yml"
 PASS=0
 FAIL=0
 
@@ -21,44 +22,184 @@ check() {
 
 workflow_matches() {
   local pattern="$1"
-  grep -RniE --include='*.yml' --include='*.yaml' "$pattern" "$WORKFLOWS" 2>/dev/null || true
+  grep -RniE --include='*.yml' --include='*.yaml' --exclude="$LIVE_EVALS" "$pattern" "$WORKFLOWS" 2>/dev/null || true
 }
 
-FORBIDDEN='promptfoo|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CODEX_AUTH|OPENAI_API_KEY|GOOGLE_API_KEY|AZURE_OPENAI_API_KEY|session-control:(selfcheck|contract|upgrade|live|concurrency|adversarial|release)|evals/|npm[[:space:]]+(run|exec)|npx|pnpm|yarn'
+FORBIDDEN='promptfoo|live-evals|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CODEX_AUTH|OPENAI_API_KEY|GOOGLE_API_KEY|AZURE_OPENAI_API_KEY|session-control:(selfcheck|contract|upgrade|live|concurrency|adversarial|release)|evals/|npm[[:space:]]+(run|exec)|npx|pnpm|yarn'
 MATCHES="$(workflow_matches "$FORBIDDEN")"
 if [ -z "$MATCHES" ]; then
-  check "GitHub Actions never invokes or configures Promptfoo/live-model evaluation" PASS
+  check "Every workflow except $LIVE_EVALS stays free of Promptfoo, eval suites, the live-eval scripts and model credentials" PASS
 else
-  check "GitHub Actions never invokes or configures Promptfoo/live-model evaluation" FAIL
+  check "Every workflow except $LIVE_EVALS stays free of Promptfoo, eval suites, the live-eval scripts and model credentials" FAIL
   printf '%s\n' "$MATCHES" | sed 's/^/    /'
 fi
 
-if node - "$WORKFLOWS" <<'NODE'
+FINDINGS="$(mktemp)" || exit 2
+SHAPE_JS="$(mktemp)" || exit 2
+MUTANTS="$(mktemp -d)" || exit 2
+trap 'rm -rf "$FINDINGS" "$SHAPE_JS" "$MUTANTS"' EXIT
+
+if node - "$WORKFLOWS" "$LIVE_EVALS" >"$FINDINGS" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
-const root = process.argv[2];
-let source = fs.readdirSync(root)
-  .filter((name) => /\.ya?ml$/.test(name))
-  .map((name) => fs.readFileSync(path.join(root, name), 'utf8'))
-  .join('\n');
-source = source.replace(
-  /\$\{\{\s*secrets\.(?:GITHUB_TOKEN|IMMUTABLE_RELEASES_ADMIN_TOKEN)\s*\}\}/g,
-  '',
-);
-process.exit(/\bsecrets\b/.test(source) ? 1 : 0);
+const [root, live] = process.argv.slice(2);
+const bad = [];
+for (const name of fs.readdirSync(root).filter((entry) => /\.ya?ml$/.test(entry)).sort()) {
+  const text = fs.readFileSync(path.join(root, name), 'utf8');
+  if (name === live) {
+    for (const line of text.split(/\r?\n/)) {
+      if (/\bsecrets\b/.test(line)
+        && !/^ {10}(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY): \$\{\{ secrets\.\1 \}\}$/.test(line)) {
+        bad.push(`${name}: ${line.trim()}`);
+      }
+    }
+    continue;
+  }
+  const rest = text.replace(/\$\{\{\s*secrets\.(?:GITHUB_TOKEN|IMMUTABLE_RELEASES_ADMIN_TOKEN)\s*\}\}/g, '');
+  if (/\bsecrets\b/.test(rest)) bad.push(`${name}: a secret other than GITHUB_TOKEN or IMMUTABLE_RELEASES_ADMIN_TOKEN`);
+}
+process.stdout.write(bad.join('\n'));
+process.exit(bad.length ? 1 : 0);
 NODE
 then
-  check "Actions secrets are limited to repository and immutable-release administration" PASS
+  check "Actions secrets stay with repository and release administration, and $LIVE_EVALS reads only the two Claude credentials as step env" PASS
 else
-  check "Actions secrets are limited to repository and immutable-release administration" FAIL
+  check "Actions secrets stay with repository and release administration, and $LIVE_EVALS reads only the two Claude credentials as step env" FAIL
+  sed 's/^/    /' "$FINDINGS"
+  echo
+fi
+
+cat > "$SHAPE_JS" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const bad = [];
+let text = '';
+try {
+  text = fs.readFileSync(file, 'utf8');
+} catch (error) {
+  process.stdout.write(`cannot read the live-eval workflow: ${error.code}`);
+  process.exit(1);
+}
+const lines = text.split(/\r?\n/);
+const block = (key) => {
+  const start = lines.indexOf(`${key}:`);
+  if (start < 0) return null;
+  let end = lines.findIndex((line, index) => index > start && /^\S/.test(line));
+  if (end < 0) end = lines.length;
+  return lines.slice(start + 1, end).filter((line) => line.trim());
+};
+const on = block('on');
+const triggers = on ? on.filter((line) => /^ {2}\S/.test(line)).map((line) => line.trim().replace(/:.*$/, '')) : [];
+if (JSON.stringify(triggers) !== JSON.stringify(['schedule', 'workflow_dispatch'])) {
+  bad.push(`triggers must be exactly schedule and workflow_dispatch, found: ${triggers.join(', ') || 'none'}`);
+}
+const permissions = block('permissions');
+if (JSON.stringify(permissions) !== JSON.stringify(['  contents: read'])) {
+  bad.push('the top-level permissions must be exactly contents: read');
+}
+if (lines.some((line) => /^\s+permissions:/.test(line))) bad.push('no job or step may widen the permissions');
+if (text.includes('tests/run-all.sh')) bad.push('the live-eval workflow must not run tests/run-all.sh');
+const installs = text.split('run: bash .github/scripts/live-evals-install-claude-code.sh\n').length - 1;
+if (installs !== 1) bad.push(`the newest Claude Code must be installed once by the canary installer, found ${installs}`);
+const [header, ...steps] = text.split(/\n(?= {6}- )/);
+if (/\bsecrets\b/.test(header)) bad.push('no secret may be declared above the first step');
+if (!/\n {4}environment: live-evals\n/.test(header)) bad.push('the job must run in the live-evals environment');
+if (!/\n {10}node-version: 22\n/.test(text)) bad.push('Node must be 22, the engine floor of Claude Code');
+const dependencyInstalls = text.match(/\bnpm\s+(?:ci|install|i|add)\b[^\n]*/g) || [];
+if (dependencyInstalls.length !== 1 || dependencyInstalls[0] !== 'npm ci --ignore-scripts') {
+  bad.push('dependencies must be installed once with npm ci --ignore-scripts');
+}
+for (const step of steps) {
+  if (!/\bsecrets\./.test(step)) continue;
+  if (!/\n {8}run: bash \.github\/scripts\/live-evals\.sh (?:probe|run|scrub)\n/.test(`${step}\n`) || /\buses:/.test(step)) {
+    bad.push(`a step other than the probe, the run or the scrub reads a secret: ${step.trim().split('\n')[0]}`);
+  }
+}
+const scrubAt = steps.findIndex((step) => /\n {8}id: scrub\n/.test(`${step}\n`));
+const scrub = scrubAt < 0 ? '' : `${steps[scrubAt]}\n`;
+if (!/\n {8}if: always\(\)\n/.test(scrub) || !/\n {8}run: bash \.github\/scripts\/live-evals\.sh scrub\n/.test(scrub)) {
+  bad.push('a step with id scrub must always run live-evals.sh scrub');
+}
+const uploads = steps.flatMap((step, index) => (/\n {8}uses: actions\/upload-artifact@/.test(`${step}\n`) ? [[`${step}\n`, index]] : []));
+if (uploads.length !== 1) {
+  bad.push(`the results must be uploaded by exactly one step, found ${uploads.length}`);
+} else {
+  const [upload, uploadAt] = uploads[0];
+  if (scrubAt < 0 || uploadAt < scrubAt
+    || !upload.includes("\n        if: always() && steps.scrub.outputs.scrubbed == 'true'\n")
+    || !upload.includes('\n          path: ${{ runner.temp }}/live-evals-upload/\n')) {
+    bad.push('the upload must follow the scrub, run only when it wrote scrubbed=true, and read only the staged upload directory');
+  }
+}
+process.stdout.write(bad.join('\n'));
+process.exit(bad.length ? 1 : 0);
+NODE
+
+SHAPE_LABEL="$LIVE_EVALS runs on schedule and dispatch only in the live-evals environment, keeps a read-only token, installs its dependencies on Node 22 without their install scripts, installs the newest Claude Code once, gives the credentials only to its probe, run and scrub steps, and uploads only what the scrub staged"
+if node "$SHAPE_JS" "$WORKFLOWS/$LIVE_EVALS" >"$FINDINGS"; then
+  check "$SHAPE_LABEL" PASS
+else
+  check "$SHAPE_LABEL" FAIL
+  sed 's/^/    /' "$FINDINGS"
+  echo
+fi
+
+MUTANT_BAD=""
+MUTANT_N=0
+if node - "$WORKFLOWS/$LIVE_EVALS" "$MUTANTS" >"$FINDINGS" 2>&1 <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const [file, dir] = process.argv.slice(2);
+const text = fs.readFileSync(file, 'utf8');
+const swap = (from, to) => (source) => {
+  if (source.split(from).length !== 2) throw new Error(`the mutant anchor is not unique: ${from.trim().split('\n')[0]}`);
+  return source.split(from).join(to);
+};
+const mutants = [
+  ['header-secret', 'no secret may be declared above the first step', swap('    timeout-minutes: 150\n', '    timeout-minutes: 150\n    services:\n      cache:\n        image: redis\n        env:\n          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}\n')],
+  ['pull-request-trigger', 'triggers must be exactly schedule and workflow_dispatch', swap('  workflow_dispatch:\n', '  pull_request:\n  workflow_dispatch:\n')],
+  ['write-token', 'the top-level permissions must be exactly contents: read', swap('permissions:\n  contents: read\n', 'permissions:\n  contents: write\n')],
+  ['job-permissions', 'no job or step may widen the permissions', swap('    runs-on: ubuntu-latest\n', '    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n')],
+  ['no-environment', 'the job must run in the live-evals environment', swap('    environment: live-evals\n', '')],
+  ['node-20', 'Node must be 22', swap('node-version: 22\n', 'node-version: 20\n')],
+  ['install-scripts', 'dependencies must be installed once with npm ci --ignore-scripts', swap('npm ci --ignore-scripts\n', 'npm ci\n')],
+  ['ungated-upload', 'the upload must follow the scrub', swap("if: always() && steps.scrub.outputs.scrubbed == 'true'\n", 'if: always()\n')],
+  ['raw-upload', 'the upload must follow the scrub', swap('path: ${{ runner.temp }}/live-evals-upload/\n', 'path: ${{ runner.temp }}/live-evals/\n')],
+  ['run-all', 'must not run tests/run-all.sh', (source) => `${source}      - run: bash tests/run-all.sh --ci\n`],
+  ['secret-on-npm-ci', 'a step other than the probe, the run or the scrub reads a secret', swap('      - run: npm ci --ignore-scripts\n', '      - run: npm ci --ignore-scripts\n        env:\n          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}\n')],
+  ['no-scrub', 'a step with id scrub must always run live-evals.sh scrub', swap('        run: bash .github/scripts/live-evals.sh scrub\n', '        run: "true"\n')],
+];
+const rows = [];
+for (const [name, want, mutate] of mutants) {
+  const target = path.join(dir, `${name}.yml`);
+  fs.writeFileSync(target, mutate(text));
+  rows.push(`${name} ${target} ${want}`);
+}
+process.stdout.write(`${rows.join('\n')}\n`);
+NODE
+then
+  while read -r name target want; do
+    [ -n "$name" ] || continue
+    MUTANT_N=$((MUTANT_N + 1))
+    if node "$SHAPE_JS" "$target" >"$MUTANTS/out.txt" 2>&1 < /dev/null || ! grep -qF "$want" "$MUTANTS/out.txt"; then
+      MUTANT_BAD="$MUTANT_BAD $name"
+    fi
+  done < "$FINDINGS"
+else
+  MUTANT_BAD=" (the mutants could not be built: $(tr '\n' ' ' < "$FINDINGS"))"
+fi
+if [ -z "$MUTANT_BAD" ] && [ "$MUTANT_N" = 12 ]; then
+  check "Each of the $MUTANT_N planted weakenings of $LIVE_EVALS fails its shape check with its own reason" PASS
+else
+  check "The $LIVE_EVALS shape check passes or misnames a planted weakening:$MUTANT_BAD (built $MUTANT_N of 12)" FAIL
 fi
 
 if [ ! -e "$WORKFLOWS/session-control-nightly.yml" ] \
   && [ ! -e "$WORKFLOWS/pretool-eval-nightly.yml" ] \
   && [ ! -e "$WORKFLOWS/evals.yml" ]; then
-  check "Dedicated Promptfoo Actions workflows are absent" PASS
+  check "The retired per-suite Promptfoo workflows stay absent" PASS
 else
-  check "Dedicated Promptfoo Actions workflows are absent" FAIL
+  check "The retired per-suite Promptfoo workflows stay absent" FAIL
 fi
 
 if node - "$WORKFLOWS" <<'NODE'

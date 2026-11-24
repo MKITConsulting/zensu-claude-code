@@ -343,6 +343,8 @@ test('only github.com remotes are supported and other forges are named', () => {
   assert.deepEqual(contract.repoIdentity('git@github.com:acme/app.git'), { provider: 'github', host: 'github.com', repo: 'acme/app' });
   assert.equal(contract.repoIdentity('https://gitlab.com/acme/app.git').provider, 'unsupported');
   assert.equal(contract.repoIdentity('').provider, 'unknown');
+  assert.deepEqual(contract.repoIdentity('FILE://github.com/acme/app.git'), { provider: 'unknown', host: null, repo: null });
+  assert.deepEqual(contract.repoIdentity('c:/github.com/acme/app.git'), { provider: 'unknown', host: null, repo: null });
 });
 
 test('every gh api call names github.com, so GH_HOST or a gh login to another host never answers the verification', () => {

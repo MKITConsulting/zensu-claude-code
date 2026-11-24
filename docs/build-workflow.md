@@ -665,14 +665,18 @@ Two writers apply it:
 | `hooks/post-artifact-redact.sh` | the plan (the named `file_path` on PostToolUse `Edit\|Write\|MultiEdit`), plus a bounded sweep on BOTH matchers, limited to artifacts git does not confirm as tracked and unchanged, that catches a hand-rolled `printf >>` and a subagent-written artifact |
 
 `.zensu/state/` is ephemeral session state and never belongs in a commit, and
-nothing in the plugin reads, writes or checks a consuming repo's `.gitignore`, so
-a consuming repo that commits the audit trail carries this rule itself:
+nothing in the plugin writes a consuming repo's `.gitignore`, so a consuming repo
+that commits the audit trail carries this rule itself:
 
 ```gitignore
 # Zensu — commit the audit trail, never the ephemeral session state.
 .zensu/state/
 .zensu/reviews/
+.zensu/verify-feature-runs/
 ```
+
+`.zensu/verify-feature-runs/` holds the captures of `/zensu:verify-feature` runs, and an evidence
+report refuses a run directory that git does not ignore, so its captures can never be committed.
 
 `.zensu/reviews/` holds the inputs of the review chain: the `review-packet-v1.js create`
 input with its model-written summaries, and the `finding-verify-v1.js --input` file with the

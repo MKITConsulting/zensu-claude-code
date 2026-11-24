@@ -282,6 +282,15 @@ time, through `_el_git` and `git_fault` in `hooks/lib/zensu-edit-landing.sh`
 (`.claude/rules/multi-repo-stage1.md`). A change to the split here moves both copies too.
 `workTreeTop` reads the same `NO_WORK_TREE_RE` for the external-review root rule and also
 places a root outside git when no `git` binary exists (`.claude/rules/external-review-import.md`).
+`evidence-report-v1.js` reads the split only through the exported `outsideWorkTree` and
+`workTreeTop`, and runs git only through the exported `git`, whose failure answer carries the exit
+`status` its `check-ignore` call needs; it also reads run records through `storeLocations`,
+`readRecordFile`, `validateRecord` and `effectiveState`, the tree through `computeTree` and `LIMITS`,
+a chain's fingerprint root through `fingerprintRoot`, and a chain's work-tree fault through
+`readWorkTreeFault` and `workTreeFaultCause`. It names a tree it could not fingerprint from the
+reason texts of `git`, `computeTree` and `computeFingerprint` (`TREE_FAILURE_RE`: the untracked-file
+limits, `git timed out`, `not a git work tree` and the `work tree: ` prefix), so rewording one of
+them moves that pattern in the same commit.
 The same options argument of `computeTree` takes `excluded`, a list of root-relative paths it
 drops beside `.zensu`, matched literally; the external review and `repositoryTree` pass one, the
 `.zensu` of a session whose project root lies below the top level they fingerprint, and every other

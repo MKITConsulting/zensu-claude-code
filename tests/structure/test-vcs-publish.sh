@@ -1,13 +1,10 @@
 #!/bin/bash
 set -u
 
-# Hermetic structure test for the VCS driver's team-review publish ops (Phase 3):
-# --scout-pr / --fetch-pr-ref / --diff-refs / --post-review. No gh/glab execution —
-# every op is a pure argv-builder (dry-printed under ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1)
-# plus node normalizers fed fixture JSON. The GitLab publish path is a LOOP (spec §7:
-# summary note + N inline discussions + position object + idempotency marker); its dry
-# output is the ordered argv sequence, each POST followed by its JSON request line, asserted
-# below.
+# Hermetic structure test for the VCS driver's team-review publish ops. The GitLab publish
+# path is a LOOP (spec §7: summary note + N inline discussions + position object + idempotency
+# marker); its dry output is the ordered argv sequence, each POST followed by its JSON request
+# line, asserted below.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
@@ -45,6 +42,7 @@ has()  { local l="$1" g="$2" n="$3"; case "$g" in *"$n"*) check "$l" PASS ;; *) 
 nothas(){ local l="$1" g="$2" n="$3"; case "$g" in *"$n"*) check "$l (unexpected '$n')" FAIL ;; *) check "$l" PASS ;; esac; }
 before(){ local l="$1" g="$2" a="$3" b="$4"; local pre="${g%%"$b"*}"; case "$g" in *"$b"*) case "$pre" in *"$a"*) check "$l" PASS ;; *) check "$l ('$a' not before '$b')" FAIL ;; esac ;; *) check "$l ('$b' absent)" FAIL ;; esac; }
 
+export ZENSU_VCS_REMOTE=https://github.com/acme/widget.git
 argv() { env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1 bash "$LIB" "$@" 2>/dev/null; }
 fails() { local l="$1"; shift; local o rc; o="$(argv "$@" 2>/dev/null)"; rc=$?; { [ -z "$o" ] && [ "$rc" -ne 0 ]; } && check "$l" PASS || check "$l (out='$o' rc=$rc)" FAIL; }
 nth_json() {
@@ -65,8 +63,8 @@ cat > "$PAY" <<'JSON'
 JSON
 
 # ---- scout-pr argv ----
-eq "A1 scout github branch"  "$(argv --scout-pr --provider github)"   "gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels"
-eq "A2 scout github num"     "$(argv --scout-pr --provider github 42)" "gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels -- 42"
+eq "A1 scout github branch"  "$(argv --scout-pr --provider github)"   "env GH_HOST=github.com GH_REPO= gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels"
+eq "A2 scout github num"     "$(argv --scout-pr --provider github 42)" "env GH_HOST=github.com GH_REPO= gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels -- 42"
 eq "A3 scout gitlab branch"  "$(argv --scout-pr --provider gitlab)"   "glab mr view --output json"
 eq "A4 scout gitlab num"     "$(argv --scout-pr --provider gitlab 7)"  "glab mr view --output json -- 7"
 
@@ -75,11 +73,11 @@ eq "A5 fetch-pr-ref github"  "$(argv --fetch-pr-ref --provider github 42)" "pull
 eq "A6 fetch-pr-ref gitlab"  "$(argv --fetch-pr-ref --provider gitlab 7)"  "merge-requests/7/head"
 
 # ---- diff-refs argv ----
-eq "A7 diff-refs github num" "$(argv --diff-refs --provider github 42)" "gh pr view --json headRefOid -- 42"
+eq "A7 diff-refs github num" "$(argv --diff-refs --provider github 42)" "env GH_HOST=github.com GH_REPO= gh pr view --json headRefOid -- 42"
 eq "A8 diff-refs gitlab"     "$(argv --diff-refs --provider gitlab --repo-id grp%2Fproj 7)" "glab api projects/grp%2Fproj/merge_requests/7"
 
 # ---- post-review GitHub: one atomic reviews --input call ----
-eq "A9 post-review github atomic" "$(argv --post-review --provider github --repo-id acme/widget 42 "$PAY")" "gh api -X POST repos/acme/widget/pulls/42/reviews --input $PAY"
+eq "A9 post-review github atomic, on the remote's host" "$(argv --post-review --provider github --repo-id acme/widget 42 "$PAY")" "gh api -X POST repos/acme/widget/pulls/42/reviews --input $PAY --hostname github.com"
 
 # ---- post-review GitLab: the ordered LOOP sequence (summary note THEN discussions) ----
 GLP="$(argv --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"BBB","start_sha":"SSS","head_sha":"HHH"}' 7 "$PAY")"
@@ -115,8 +113,298 @@ fails "G9 post-review github repo-id needs slash" --post-review --provider githu
 fails "G10 post-review non-numeric id rejected" --post-review --provider github --repo-id acme/widget abc "$PAY"
 fails "G11 post-review unknown provider"        --post-review --provider bogus --repo-id x/y 1 "$PAY"
 
+eq "A18 post-comment github posts one review comment, on the remote's host" \
+  "$(argv --post-comment --provider github --repo-id acme/widget 42 "$PAY")" "gh api -X POST repos/acme/widget/pulls/42/comments --input $PAY --hostname github.com"
+FR_ARGV="$(argv --fetch-review --provider github --repo-id acme/widget 42 7)"
+eq "A19 fetch-review github reads the review, on the remote's host" \
+  "$(printf '%s\n' "$FR_ARGV" | sed -n 1p)" "gh api repos/acme/widget/pulls/42/reviews/7 --hostname github.com"
+eq "A19b fetch-review github reads every page of the review's comments, on the remote's host" \
+  "$(printf '%s\n' "$FR_ARGV" | sed -n 2p)" "gh api --paginate --slurp repos/acme/widget/pulls/42/reviews/7/comments?per_page=100 --hostname github.com"
+eq "A19c fetch-review github makes exactly those two reads" "$(printf '%s\n' "$FR_ARGV" | grep -c .)" "2"
+refused() { local l="$1"; shift; local o rc; o="$(argv "$@" 2>/dev/null)"; rc=$?; { [ -z "$o" ] && [ "$rc" -eq 1 ]; } && check "$l" PASS || check "$l (out='$o' rc=$rc)" FAIL; }
+refused "G17 post-comment refuses gitlab, which posts every comment through --post-review" --post-comment --provider gitlab --repo-id grp%2Fproj 7 "$PAY"
+refused "G17b post-comment requires repo-id"          --post-comment --provider github 42 "$PAY"
+refused "G17c post-comment requires a payload"        --post-comment --provider github --repo-id acme/widget 42
+refused "G17d post-comment rejects a non-numeric id"  --post-comment --provider github --repo-id acme/widget abc "$PAY"
+refused "G17e post-comment refuses an unknown flag"   --post-comment --provider github --repo-id acme/widget --diff-refs-json '{}' 42 "$PAY"
+refused "G17f post-comment requires --provider"       --post-comment --repo-id acme/widget 42 "$PAY"
+refused "G17g post-comment refuses a third positional" --post-comment --provider github --repo-id acme/widget 42 "$PAY" extra
+refused "G18 fetch-review refuses gitlab"             --fetch-review --provider gitlab --repo-id grp%2Fproj 7 1
+refused "G18b fetch-review rejects a non-numeric review id" --fetch-review --provider github --repo-id acme/widget 42 'r?1'
+refused "G18c fetch-review requires a review id"      --fetch-review --provider github --repo-id acme/widget 42
+refused "G18d fetch-review requires a valid repo-id"  --fetch-review --provider github --repo-id noslash 42 7
+refused "G18e fetch-review refuses a third positional" --fetch-review --provider github --repo-id acme/widget 42 7 8
+refused "G18f fetch-review rejects a non-numeric id"  --fetch-review --provider github --repo-id acme/widget x 7
+
+. "$PLUGIN_DIR/tests/structure/lib-gh-host-fake.sh"
+mkdir -p "$WORK/hostpin/bin"
+gh_host_fake_write "$WORK/hostpin/bin/gh" <<'FAKE'
+set -u
+case "${1:-} ${2:-}" in
+  "pr view")
+    case "$*" in
+      *headRefOid*) printf '%s' '{"headRefOid":"ABCDEF0"}' ;;
+      *) printf '%s' '{"number":42,"url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","headRefName":"feat","baseRefName":"main","author":{"login":"alice"},"labels":[{"name":"bug"}]}' ;;
+    esac
+    exit 0 ;;
+  "api -X")
+    [ "${3:-}" = POST ] || exit 2
+    case "${4:-}" in
+      repos/acme/widget/pulls/42/reviews)
+        printf '%s' '{"html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-1"}' ;;
+      repos/acme/widget/pulls/42/comments)
+        input="" previous=""
+        for arg in "$@"; do
+          [ "$previous" = --input ] && input="$arg"
+          previous="$arg"
+        done
+        [ -n "$input" ] && [ -s "$input" ] || exit 3
+        [ -z "${FAKE_GH_COMMENT_LOG:-}" ] || cat -- "$input" > "$FAKE_GH_COMMENT_LOG"
+        printf '%s' '{"id":901,"html_url":"https://github.test/acme/widget/pull/42#discussion_r901"}' ;;
+      *) exit 2 ;;
+    esac
+    exit 0 ;;
+  "api repos/acme/widget/pulls/42/reviews/7")
+    printf '%s' '{"id":7,"user":{"login":"zensu-bot"},"state":"COMMENTED","submitted_at":"2026-11-19T10:00:00Z","html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-7"}'
+    exit 0 ;;
+  "api --paginate")
+    [ "${3:-}" = --slurp ] && [ "${4:-}" = 'repos/acme/widget/pulls/42/reviews/7/comments?per_page=100' ] || exit 2
+    printf '%s' '[[{"id":1,"pull_request_review_id":7},{"id":2,"pull_request_review_id":7}],[{"id":3,"pull_request_review_id":7}]]'
+    exit 0 ;;
+esac
+exit 2
+FAKE
+cat > "$WORK/hostpin/bin/ssh" <<'FAKE'
+#!/bin/bash
+[ -z "${FAKE_SSH_LOG:-}" ] || printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
+[ "${1:-}" = -G ] || exit 255
+shift
+[ "${1:-}" = -- ] && shift
+printf 'user git\nhostname %s\nport 22\n' "${1:-}"
+FAKE
+chmod +x "$WORK/hostpin/bin/ssh"
+hs_run() {
+  : > "$WORK/hostpin/hosts"; : > "$WORK/hostpin/env"
+  HS_OUT="$(env PATH="$WORK/hostpin/bin:$PATH" GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$WORK/hostpin/hosts" \
+    FAKE_GH_ENV_LOG="$WORK/hostpin/env" "$@" 2>"$WORK/hostpin/err")"
+  HS_RC=$?
+  HS_ERR="$(cat "$WORK/hostpin/err")"; HS_HOSTS="$(cat "$WORK/hostpin/hosts")"; HS_ENV="$(cat "$WORK/hostpin/env")"
+}
+hs_reached() {
+  local label="$1" want="$2" host="$3" calls="${4:-1}" count stray
+  count="$(printf '%s\n' "$HS_HOSTS" | grep -c .)"
+  stray="$(printf '%s\n' "$HS_HOSTS" | grep -v "^$host " | grep -c .)"
+  if [ "$HS_RC" -eq 0 ] && [ "$HS_OUT" = "$want" ] && [ "$count" = "$calls" ] && [ "$stray" = 0 ]; then check "$label" PASS
+  else check "$label (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS' err='$HS_ERR')" FAIL; fi
+}
+hs_tokens() {
+  if [ "$HS_RC" -eq 0 ] && gh_host_fake_env_all "$HS_ENV" ghe.example.com; then check "$1" PASS
+  else check "$1 (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL; fi
+}
+HS_SCOUT='{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","base":"main","head":"feat","author":"alice","labels":["bug"]}'
+hs_run bash "$LIB" --scout-pr --provider github
+hs_reached "HS1 --scout-pr of the current branch reaches the remote's github.com while GH_HOST names another host" "$HS_SCOUT" github.com
+hs_run bash "$LIB" --scout-pr --provider github 42
+hs_reached "HS2 --scout-pr by number reaches github.com while GH_HOST names another host" "$HS_SCOUT" github.com
+hs_run bash "$LIB" --diff-refs --provider github 42
+hs_reached "HS3 --diff-refs reaches github.com while GH_HOST names another host" '{"base_sha":"","start_sha":"","head_sha":"abcdef0"}' github.com
+hs_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
+hs_reached "HS4 --post-review posts to github.com while GH_HOST names another host" "https://github.test/acme/widget/pull/42#pullrequestreview-1" github.com
+hs_run ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com \
+  bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
+hs_reached "HS5 --post-review posts to the GitHub Enterprise host of an SSH remote while GH_HOST names another host" "https://github.test/acme/widget/pull/42#pullrequestreview-1" ghe.example.com
+HS_GHE=(ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com)
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --scout-pr --provider github
+hs_reached "HS6 --scout-pr of the current branch reaches the GitHub Enterprise host of the remote" "$HS_SCOUT" ghe.example.com
+hs_tokens "HS6b --scout-pr of the current branch sends no environment token to a host accepted for its stored gh login"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --scout-pr --provider github 42
+hs_reached "HS7 --scout-pr by number reaches the GitHub Enterprise host of the remote" "$HS_SCOUT" ghe.example.com
+hs_tokens "HS7b --scout-pr by number sends no environment token to that host"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --diff-refs --provider github 42
+hs_reached "HS8 --diff-refs reaches the GitHub Enterprise host of the remote" '{"base_sha":"","start_sha":"","head_sha":"abcdef0"}' ghe.example.com
+hs_tokens "HS8b --diff-refs sends no environment token to that host"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
+hs_tokens "HS9 --post-review to a host accepted for its stored login posts without the environment tokens"
+CPAY="$WORK/hostpin/comment.json"
+printf '%s' '{"path":"src/a.js","line":10,"side":"RIGHT","body":"fix `this` for $HOME","commit_id":"abc123"}' > "$CPAY"
+HS_COMMENT_URL='https://github.test/acme/widget/pull/42#discussion_r901'
+HS_REVIEW='{"id":"7","state":"COMMENTED","author":"zensu-bot","submittedAt":"2026-11-19T10:00:00Z","url":"https://github.test/acme/widget/pull/42#pullrequestreview-7","comments":3}'
+hs_run FAKE_GH_COMMENT_LOG="$WORK/hostpin/sent.json" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_reached "HS10 --post-comment posts to github.com while GH_HOST names another host and prints the comment URL" "$HS_COMMENT_URL" github.com
+if cmp -s "$CPAY" "$WORK/hostpin/sent.json"; then
+  check "HS10b --post-comment hands gh the payload file it was given" PASS
+else
+  check "HS10b --post-comment hands gh the payload file it was given" FAIL
+fi
+hs_run "${HS_GHE[@]}" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_reached "HS11 --post-comment posts to the GitHub Enterprise host of the remote" "$HS_COMMENT_URL" ghe.example.com
+hs_run ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com \
+  bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_reached "HS11b --post-comment posts to the GitHub Enterprise host of an SSH remote while GH_HOST names another host" "$HS_COMMENT_URL" ghe.example.com
+hs_run bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+hs_reached "HS12 --fetch-review reads the review and every page of its comments from github.com while GH_HOST names another host" "$HS_REVIEW" github.com 2
+hs_run "${HS_GHE[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+hs_reached "HS13 --fetch-review reads both from the GitHub Enterprise host of the remote" "$HS_REVIEW" ghe.example.com 2
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_tokens "HS14 --post-comment to a host accepted for its stored login posts without the environment tokens"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+if [ "$HS_RC" -eq 0 ] && gh_host_fake_env_all "$HS_ENV" ghe.example.com && [ "$(printf '%s\n' "$HS_ENV" | grep -c .)" = 2 ]; then
+  check "HS14b both --fetch-review reads to that host run without the environment tokens" PASS
+else
+  check "HS14b both --fetch-review reads to that host run without the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
+fi
+hs_run "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+HS_KEPT='github.com GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN'
+if [ "$HS_RC" -eq 0 ] && gh_host_fake_env_all "$HS_ENV" "$HS_KEPT" && [ "$(printf '%s\n' "$HS_ENV" | grep -c .)" = 2 ]; then
+  check "HS14c --fetch-review reads to github.com keep the environment tokens" PASS
+else
+  check "HS14c --fetch-review reads to github.com keep the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
+fi
+hs_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/no-such-comment.json"
+if [ "$HS_RC" -eq 1 ] && [ -z "$HS_HOSTS" ]; then
+  check "HS15 a missing comment payload is refused before any gh api call" PASS
+else
+  check "HS15 a missing comment payload is refused before any gh api call (rc=$HS_RC hosts='$HS_HOSTS')" FAIL
+fi
+hs_run FAKE_GH_PR_HOST=elsewhere.example bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+if [ "$HS_RC" -ne 0 ] && [ -z "$HS_OUT" ]; then
+  case "$HS_ERR" in
+    *"fetch-review"*"error connecting to github.com"*) check "HS16 a failed review read fails the verb with gh's message" PASS ;;
+    *) check "HS16 a failed review read fails the verb with gh's message (err='$HS_ERR')" FAIL ;;
+  esac
+else
+  check "HS16 a failed review read fails the verb with gh's message (rc=$HS_RC out='$HS_OUT')" FAIL
+fi
+: > "$WORK/hostpin/empty.json"
+hs_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+if [ "$HS_RC" -eq 1 ] && [ -z "$HS_OUT" ] && [ -z "$HS_HOSTS" ]; then
+  case "$HS_ERR" in
+    *"post-comment refused: the payload file is missing or empty"*) check "HS17 an empty comment payload is refused with a reason and posts nothing" PASS ;;
+    *) check "HS17 an empty comment payload is refused with a reason and posts nothing (err='$HS_ERR')" FAIL ;;
+  esac
+else
+  check "HS17 an empty comment payload is refused with a reason and posts nothing (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS')" FAIL
+fi
+hs_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+if [ "$HS_RC" -eq 1 ] && [ -z "$HS_OUT" ] && [ -z "$HS_HOSTS" ]; then
+  case "$HS_ERR" in
+    *"post-review refused: the payload file is missing or empty"*) check "HS18 an empty review payload is refused with a reason and posts nothing" PASS ;;
+    *) check "HS18 an empty review payload is refused with a reason and posts nothing (err='$HS_ERR')" FAIL ;;
+  esac
+else
+  check "HS18 an empty review payload is refused with a reason and posts nothing (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS')" FAIL
+fi
+HS_LOOKUP=(ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com
+  FAKE_GH_CONFIG_LOG="$WORK/hostpin/config" FAKE_SSH_LOG="$WORK/hostpin/ssh")
+hs_lookup_run() {
+  : > "$WORK/hostpin/config"; : > "$WORK/hostpin/ssh"
+  hs_run "${HS_LOOKUP[@]}" "$@"
+  HS_CONFIG="$(cat "$WORK/hostpin/config")"; HS_SSH="$(cat "$WORK/hostpin/ssh")"
+}
+hs_refused_early() {
+  local label="$1" reason="$2"
+  if [ "$HS_RC" -eq 1 ] && [ -z "$HS_OUT" ] && [ -z "$HS_HOSTS" ] && [ -z "$HS_CONFIG" ] && [ -z "$HS_SSH" ]; then
+    case "$HS_ERR" in
+      *"$reason"*) check "$label" PASS ;;
+      *) check "$label (err='$HS_ERR')" FAIL ;;
+    esac
+  else
+    check "$label (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS' config='$HS_CONFIG' ssh='$HS_SSH')" FAIL
+  fi
+}
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+if [ "$HS_RC" -eq 0 ] && [ "$HS_CONFIG" = ghe.example.com ] && [ "$HS_SSH" = '-G -- ghe.example.com' ]; then
+  check "HS19 control: a usable comment payload for an SSH GitHub Enterprise remote runs ssh -G and the login lookup" PASS
+else
+  check "HS19 control: a usable comment payload for an SSH GitHub Enterprise remote runs ssh -G and the login lookup (rc=$HS_RC config='$HS_CONFIG' ssh='$HS_SSH' err='$HS_ERR')" FAIL
+fi
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+hs_refused_early "HS19b an empty comment payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-comment refused: the payload file is missing or empty"
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/no-such-comment.json"
+hs_refused_early "HS19c a missing comment payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-comment refused: the payload file is missing or empty"
+hs_lookup_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+hs_refused_early "HS20 an empty review payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-review refused: the payload file is missing or empty"
+hs_lookup_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/no-such-review.json"
+hs_refused_early "HS20b a missing review payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-review refused: the payload file is missing or empty"
+mkdir -p "$WORK/hostpin/dash"
+cp "$CPAY" "$WORK/hostpin/dash/-"
+cd "$WORK/hostpin/dash" || exit 1
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 - < "$CPAY"
+cd "$OLDPWD" || exit 1
+hs_refused_early "HS21 a comment payload path of - is refused before ssh -G and any gh call, though the directory holds a usable file of that name and standard input a usable payload" \
+  "post-comment refused: the payload path is -, which names standard input"
+cd "$WORK/hostpin/dash" || exit 1
+hs_lookup_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 - < "$CPAY"
+cd "$OLDPWD" || exit 1
+hs_refused_early "HS21b a review payload path of - is refused on GitHub before ssh -G and any gh call, though the directory holds a usable file of that name and standard input a usable payload" \
+  "post-review refused: the payload path is -, which names standard input"
+refused_with() {
+  local l="$1" reason="$2" o rc e; shift 2
+  o="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1 bash "$LIB" "$@" 2>"$WORK/hostpin/refused.err")"; rc=$?
+  e="$(cat "$WORK/hostpin/refused.err")"
+  if [ -z "$o" ] && [ "$rc" -eq 1 ]; then
+    case "$e" in
+      *"$reason"*) check "$l" PASS ;;
+      *) check "$l (err='$e')" FAIL ;;
+    esac
+  else
+    check "$l (out='$o' rc=$rc)" FAIL
+  fi
+}
+refused_with "G19 post-comment refuses an empty payload file in dry-print mode too" \
+  "post-comment refused: the payload file is missing or empty" \
+  --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+refused_with "G19b post-review on GitHub refuses an empty payload file in dry-print mode too" \
+  "post-review refused: the payload file is missing or empty" \
+  --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+refused_with "G19c post-review on GitLab refuses an empty payload file in dry-print mode too" \
+  "post-review refused: the payload file is missing or empty" \
+  --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 "$WORK/hostpin/empty.json"
+printf '%s' '{"event":"COMMENT","body":"cut off' > "$WORK/hostpin/truncated.json"
+refused_with "G19d post-review on GitLab refuses a payload that is not a JSON object in dry-print mode too" \
+  "post-review refused: the payload file is not a JSON object" \
+  --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 "$WORK/hostpin/truncated.json"
+refused_with "G20 post-comment refuses the payload path - in dry-print mode too" \
+  "post-comment refused: the payload path is -, which names standard input" \
+  --post-comment --provider github --repo-id acme/widget 42 -
+refused_with "G20b post-review on GitHub refuses the payload path - in dry-print mode too" \
+  "post-review refused: the payload path is -, which names standard input" \
+  --post-review --provider github --repo-id acme/widget 42 -
+refused_with "G20c post-review on GitLab refuses the payload path - in dry-print mode too" \
+  "post-review refused: the payload path is -, which names standard input" \
+  --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 -
+
 # ---- normalizers (source + fixtures) ----
 source "$LIB" >/dev/null 2>&1
+
+nr() { { printf '%s' "$2"; printf '\0'; printf '%s' "$3"; } | _zensu_vcs_normalize_review "$1"; }
+NR_OK='{"id":7,"user":{"login":"alice"},"state":"COMMENTED","submitted_at":"2026-11-19T10:00:00Z","html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-7"}'
+eq "NR1 fetch-review normalizes the review and counts every page of its comments" \
+  "$(nr 7 "$NR_OK" '[[{"id":1,"pull_request_review_id":7},{"id":2}],[{"id":3,"pull_request_review_id":7}]]')" \
+  '{"id":"7","state":"COMMENTED","author":"alice","submittedAt":"2026-11-19T10:00:00Z","url":"https://github.test/acme/widget/pull/42#pullrequestreview-7","comments":3}'
+eq "NR2 a review without an author, a submission time or inline comments counts zero" \
+  "$(nr 7 '{"id":7,"user":null,"state":"APPROVED","submitted_at":null,"html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-7"}' '[[]]')" \
+  '{"id":"7","state":"APPROVED","author":"","submittedAt":"","url":"https://github.test/acme/widget/pull/42#pullrequestreview-7","comments":0}'
+eq "NR2b a comment listed on two pages counts once" \
+  "$(nr 7 "$NR_OK" '[[{"id":1}],[{"id":1},{"id":2}]]' | node -e 'var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){try{process.stdout.write(String(JSON.parse(s).comments));}catch(_){process.stdout.write("unparsed");}});')" "2"
+NR_BAD=""
+nr 7 "$NR_OK" '[[{"id":1}]]' >/dev/null 2>&1 || NR_BAD="$NR_BAD control-refused"
+nr 7 'not json' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD review-not-json"
+nr 8 "$NR_OK" '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD other-review-id"
+nr 7 '{"id":7,"user":{"login":"a"},"state":"COMMENTED","submitted_at":null,"html_url":"ftp://github.test/x"}' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD non-http-url"
+nr 7 '{"id":7,"user":{"login":"a"},"state":"","submitted_at":null,"html_url":"https://github.test/x"}' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD empty-state"
+nr 7 '{"id":7,"user":{"login":5},"state":"COMMENTED","submitted_at":null,"html_url":"https://github.test/x"}' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD author-not-text"
+nr 7 "$NR_OK" '{"id":1}' >/dev/null 2>&1 && NR_BAD="$NR_BAD comments-not-pages"
+nr 7 "$NR_OK" '[[{"id":"one"}]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD comment-id-not-integer"
+nr 7 "$NR_OK" '[[1,2]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD comment-not-object"
+nr 7 "$NR_OK" '[[{"id":1,"pull_request_review_id":8}]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD comment-of-another-review"
+printf '%s' "$NR_OK" | _zensu_vcs_normalize_review 7 >/dev/null 2>&1 && NR_BAD="$NR_BAD no-comments-document"
+[ -z "$NR_BAD" ] && check "NR3 the fetch-review normalizer accepts the control and fails closed on every malformed answer" PASS \
+  || check "NR3 the fetch-review normalizer:$NR_BAD" FAIL
 
 GH_SCOUT='{"number":42,"url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","headRefName":"feat","baseRefName":"main","author":{"login":"alice"},"labels":[{"name":"bug"},{"name":"p1"}]}'
 eq "N1 normalize_scout github" "$(printf '%s' "$GH_SCOUT" | _zensu_vcs_normalize_scout github)" '{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","base":"main","head":"feat","author":"alice","labels":["bug","p1"]}'
@@ -281,6 +569,8 @@ cat > "$WORK/live/bin/glab" <<'FAKE'
 #!/bin/bash
 set -u
 printf '%s\n' "$*" >> "$FAKE_DIR/calls"
+[ -z "${FAKE_CLOBBER:-}" ] || printf '%s' '{"event":"COMMENT","body":"cut' > "$FAKE_CLOBBER"
+[ -z "${FAKE_TMP_SEEN:-}" ] || ls "${TMPDIR:-/tmp}"/zensu-vcs-payload.* >> "$FAKE_TMP_SEEN" 2>/dev/null
 path="${*: -1}"
 if [ "${1:-}" = api ] && [ "$path" = 'projects/grp%2Fproj/merge_requests/7' ]; then
   printf '%s' '{"diff_refs":{"base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0"}}'
@@ -564,6 +854,130 @@ fi
 has "LV35b the unparseable answer is reported under the post-review publisher id label" "$(cat "$WORK/live/user/stderr-html" 2>/dev/null)" "zensu-vcs: post-review publisher id failed: the glab api user answer is not JSON"
 eq "LV36 a refused publisher lookup posts nothing" "$(grep -c -- '--method POST' "$WORK/live/user/calls" || true)" "0"
 
+mkdir -p "$WORK/live/payload-refusal"
+: > "$WORK/live/payload-refusal/empty.json"
+printf '%s' '{"event":"COMMENT","body":"cut off' > "$WORK/live/payload-refusal/truncated.json"
+printf '%s' '[{"event":"COMMENT","body":"in an array"}]' > "$WORK/live/payload-refusal/array.json"
+lv_refused() {
+  local label="$1" reason="$2" payload="$3" state="$WORK/live/payload-refusal/$4" out rc err
+  mkdir -p "$state"
+  out="$(FAKE_DIR="$state" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$payload" 2>"$state/stderr")"
+  rc=$?
+  err="$(cat "$state/stderr")"
+  if [ "$rc" -eq 1 ] && [ -z "$out" ] && [ ! -e "$state/calls" ]; then
+    case "$err" in
+      *"$reason"*) check "$label" PASS ;;
+      *) check "$label (err='$err')" FAIL ;;
+    esac
+  else
+    check "$label (rc=$rc out='$out' calls='$(cat "$state/calls" 2>/dev/null)')" FAIL
+  fi
+}
+lv_refused "LV37 an empty review payload on GitLab is refused with a reason before any glab call" \
+  "post-review refused: the payload file is missing or empty" "$WORK/live/payload-refusal/empty.json" empty
+lv_refused "LV38 a missing review payload on GitLab is refused with a reason before any glab call" \
+  "post-review refused: the payload file is missing or empty" "$WORK/live/payload-refusal/no-such.json" missing
+lv_refused "LV39 a truncated review payload on GitLab is refused as not a JSON object before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/truncated.json" truncated
+lv_refused "LV39b a review payload that is a JSON array is refused on GitLab before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/array.json" array
+printf '%s' '42' > "$WORK/live/payload-refusal/scalar.json"
+printf '%s' 'null' > "$WORK/live/payload-refusal/null.json"
+lv_refused "LV39c a review payload that is a JSON scalar is refused on GitLab before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/scalar.json" scalar
+lv_refused "LV39d a review payload that is JSON null is refused on GitLab before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/null.json" null
+cp "$WORK/live/payload.json" "$WORK/live/payload-refusal/unreadable.json"
+chmod 000 "$WORK/live/payload-refusal/unreadable.json"
+if [ -r "$WORK/live/payload-refusal/unreadable.json" ]; then
+  echo "  SKIP  LV40 an unreadable review payload is refused as unreadable (this host reads a mode-000 file)"
+else
+  lv_refused "LV40 an unreadable review payload is refused on GitLab as unreadable before any glab call" \
+    "post-review refused: the payload file cannot be read" "$WORK/live/payload-refusal/unreadable.json" unreadable
+fi
+chmod 600 "$WORK/live/payload-refusal/unreadable.json"
+mkdir -p "$WORK/live/clobber"
+cp "$WORK/live/payload.json" "$WORK/live/clobber/payload.json"
+FAKE_CLOBBER="$WORK/live/clobber/payload.json" FAKE_DIR="$WORK/live/clobber" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/clobber/payload.json" >/dev/null 2>&1
+CLOBBER_RC=$?
+CLOBBER_POSTED="$(cat "$WORK/live/clobber/posted" 2>/dev/null)"
+if [ "$CLOBBER_RC" -eq 0 ] && [ "$(grep -c -- '--method POST' "$WORK/live/clobber/calls" 2>/dev/null)" = 6 ] \
+   && [ "$(cat "$WORK/live/clobber/payload.json")" = '{"event":"COMMENT","body":"cut' ]; then
+  has "LV41 a payload cut short by the first glab call still posts the review that was checked, from one private copy" \
+    "$(nth_json "$CLOBBER_POSTED" 1 request.body)" "Live review body."
+else
+  check "LV41 a payload cut short by the first glab call still posts the review that was checked, from one private copy (rc=$CLOBBER_RC posts=$(grep -c -- '--method POST' "$WORK/live/clobber/calls" 2>/dev/null))" FAIL
+fi
+mkdir -p "$WORK/live/tmp-post/tmp" "$WORK/live/tmp-refuse/tmp" "$WORK/live/tmp-unreadable/tmp"
+TMPDIR="$WORK/live/tmp-post/tmp" FAKE_TMP_SEEN="$WORK/live/tmp-post/seen" FAKE_DIR="$WORK/live/tmp-post" PATH="$WORK/live/bin:$PATH" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1
+TMP_RC=$?
+TMP_LEFT="$(find "$WORK/live/tmp-post/tmp" -name 'zensu-vcs-payload.*' | grep -c .)"
+if [ "$TMP_RC" -eq 0 ] && [ -s "$WORK/live/tmp-post/seen" ] && [ "$TMP_LEFT" = 0 ]; then
+  check "LV42 a live GitLab post removes its private payload copy, which glab saw in TMPDIR while the run lasted" PASS
+else
+  check "LV42 a live GitLab post removes its private payload copy, which glab saw in TMPDIR while the run lasted (rc=$TMP_RC seen=$(grep -c . "$WORK/live/tmp-post/seen" 2>/dev/null) left=$TMP_LEFT)" FAIL
+fi
+TMPDIR="$WORK/live/tmp-refuse/tmp" FAKE_DIR="$WORK/live/tmp-refuse" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload-refusal/truncated.json" >/dev/null 2>&1
+TMP_RC=$?
+TMP_LEFT="$(find "$WORK/live/tmp-refuse/tmp" -name 'zensu-vcs-payload.*' | grep -c .)"
+if [ "$TMP_RC" -eq 1 ] && [ "$TMP_LEFT" = 0 ]; then
+  check "LV42b a payload refused as not a JSON object leaves no private copy in TMPDIR" PASS
+else
+  check "LV42b a payload refused as not a JSON object leaves no private copy in TMPDIR (rc=$TMP_RC left=$TMP_LEFT)" FAIL
+fi
+chmod 000 "$WORK/live/payload-refusal/unreadable.json"
+if [ -r "$WORK/live/payload-refusal/unreadable.json" ]; then
+  echo "  SKIP  LV42c an unreadable payload leaves no private copy in TMPDIR (this host reads a mode-000 file)"
+else
+  TMPDIR="$WORK/live/tmp-unreadable/tmp" FAKE_DIR="$WORK/live/tmp-unreadable" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload-refusal/unreadable.json" >/dev/null 2>&1
+  TMP_RC=$?
+  TMP_LEFT="$(find "$WORK/live/tmp-unreadable/tmp" -name 'zensu-vcs-payload.*' | grep -c .)"
+  if [ "$TMP_RC" -eq 1 ] && [ "$TMP_LEFT" = 0 ]; then
+    check "LV42c an unreadable payload leaves no private copy in TMPDIR" PASS
+  else
+    check "LV42c an unreadable payload leaves no private copy in TMPDIR (rc=$TMP_RC left=$TMP_LEFT)" FAIL
+  fi
+fi
+chmod 600 "$WORK/live/payload-refusal/unreadable.json"
+mkdir -p "$WORK/live/dash/state"
+cp "$WORK/live/payload.json" "$WORK/live/dash/-"
+DASH_OUT="$(cd "$WORK/live/dash" && FAKE_DIR="$WORK/live/dash/state" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 - < "$WORK/live/payload.json" 2>"$WORK/live/dash/stderr")"
+DASH_RC=$?
+DASH_ERR="$(cat "$WORK/live/dash/stderr")"
+if [ "$DASH_RC" -eq 1 ] && [ -z "$DASH_OUT" ] && [ ! -e "$WORK/live/dash/state/calls" ]; then
+  has "LV43 a review payload path of - is refused on GitLab before any glab call, though the directory holds a usable file of that name and standard input a usable payload" \
+    "$DASH_ERR" "post-review refused: the payload path is -, which names standard input"
+else
+  check "LV43 a review payload path of - is refused on GitLab before any glab call, though the directory holds a usable file of that name and standard input a usable payload (rc=$DASH_RC out='$DASH_OUT' calls='$(cat "$WORK/live/dash/state/calls" 2>/dev/null)')" FAIL
+fi
+mkdir -p "$WORK/live/copyfail/bin" "$WORK/live/copyfail/state"
+cat > "$WORK/live/copyfail/bin/mktemp" <<'FAKE'
+#!/bin/bash
+printf '%s\n' "$*" >> "$FAKE_MKTEMP_LOG"
+printf '%s\n' "$FAKE_MKTEMP_DIR/gone/zensu-vcs-payload.FAKE"
+FAKE
+chmod +x "$WORK/live/copyfail/bin/mktemp"
+CF_OUT="$(FAKE_MKTEMP_LOG="$WORK/live/copyfail/mktemp.log" FAKE_MKTEMP_DIR="$WORK/live/copyfail" FAKE_DIR="$WORK/live/copyfail/state" \
+  PATH="$WORK/live/copyfail/bin:$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" 2>"$WORK/live/copyfail/stderr")"
+CF_RC=$?
+CF_ERR="$(cat "$WORK/live/copyfail/stderr")"
+if [ "$CF_RC" -eq 1 ] && [ -z "$CF_OUT" ] && [ -s "$WORK/live/copyfail/mktemp.log" ] && [ ! -e "$WORK/live/copyfail/state/calls" ]; then
+  case "$CF_ERR" in
+    *"cannot be read"*) check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload (err='$CF_ERR')" FAIL ;;
+    *"post-review failed: the payload could not be copied into its temporary file"*) check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload" PASS ;;
+    *) check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload (err='$CF_ERR')" FAIL ;;
+  esac
+else
+  check "LV44 a copy the GitLab arm cannot write into its temporary file is named as a failed copy, never as an unreadable payload (rc=$CF_RC out='$CF_OUT' mktemp=$(grep -c . "$WORK/live/copyfail/mktemp.log" 2>/dev/null) calls='$(cat "$WORK/live/copyfail/state/calls" 2>/dev/null)')" FAIL
+fi
+
 mkdir -p "$WORK/live/foreign-src" "$WORK/live/foreign"
 if FAKE_DIR="$WORK/live/foreign-src" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1; then
@@ -602,6 +1016,266 @@ else
 fi
 eq "LV32b a re-run finds every part in the publisher's own notes and posts nothing new" \
   "$(grep -c -- '--method POST' "$WORK/live/foreign/calls" || true)" "6"
+
+mkdir -p "$WORK/gh/bin" "$WORK/gh/fixture" "$WORK/gh/listing" "$WORK/gh/fail" "$WORK/gh/reject" "$WORK/gh/empty" "$WORK/gh/inventory"
+RM_HEX_C="$(printf '%064d' 0 | tr 0 c)"
+RM_HEX_D="$(printf '%064d' 0 | tr 0 d)"
+RM_HEX_E="$(printf '%064d' 0 | tr 0 e)"
+RM_HEX_F="$(printf '%064d' 0 | tr 0 f)"
+GH_A1="<!-- zensu-review:v1:$RM_HEX_A:$RM_HEX_B:abcdef0:2:part=1/2 -->"
+GH_A2="<!-- zensu-review:v1:$RM_HEX_A:$RM_HEX_B:abcdef0:2:part=2/2 -->"
+GH_B1="<!-- zensu-review:v1:$RM_HEX_C:$RM_HEX_D:1234567:1:part=1/1 -->"
+GH_C1="<!-- zensu-review:v1:$RM_HEX_E:$RM_HEX_F:7654321:1:part=1/1 -->"
+A1="$GH_A1" A2="$GH_A2" B1="$GH_B1" C1="$GH_C1" DIR="$WORK/gh" node -e '
+  var fs=require("fs"),e=process.env;
+  function review(n,body){return {id:"PRR_"+n,author:{login:"reviewer-"+n},body:body,url:"https://github.test/acme/widget/pull/42#pullrequestreview-"+n};}
+  function page(nodes,next,cursor,previous){return JSON.stringify({data:{repository:{pullRequest:{reviews:{nodes:nodes,pageInfo:{startCursor:nodes.length?"start-"+nodes[0].id:null,hasNextPage:next,endCursor:cursor,hasPreviousPage:previous}}}}}});}
+  var first=[review(1,e.A1+"\n\nFirst part of the review."),review(2,e.A2+"\n\nSecond part of the review."),review(3,"Looks good to me."),review(4,e.C1+"\n\nA review only the first page carries.")];
+  fs.writeFileSync(e.DIR+"/page1.json",page(first,true,"cursor-4",false));
+  fs.writeFileSync(e.DIR+"/last.json",page(first,false,"cursor-4",false));
+  fs.writeFileSync(e.DIR+"/nocursor.json",page(first,true,null,false));
+  fs.writeFileSync(e.DIR+"/blankcursor.json",page(first,true,"",false));
+  fs.writeFileSync(e.DIR+"/middle.json",page([review(7,"A review between the two pages.")],true,"cursor-7",true));
+  fs.writeFileSync(e.DIR+"/page2.json",page([review(5,e.A1+"\n\nThe first part, posted again."),review(6,e.B1+"\n\nA review only the second page carries.")],false,"cursor-6",true));
+  fs.writeFileSync(e.DIR+"/empty.json",page([],false,null,false));'
+RM_MODEL="$PLUGIN_DIR/tests/structure/lib-fake-gh-graphql.js"
+{
+  printf '%s\n' '#!/bin/bash' 'set -u' "printf '%s\\n' \"\$*\" >> \"\$FAKE_DIR/calls\""
+  printf 'exec node %q %q "$@"\n' "$RM_MODEL" "$WORK/gh"
+} > "$WORK/gh/bin/gh"
+chmod +x "$WORK/gh/bin/gh"
+rm_pages() {
+  FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" "$@" 2>/dev/null | node -e '
+    var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var doc;try{doc=JSON.parse(s);}catch(_){process.stdout.write("not one JSON document");return;}
+      var pages=Array.isArray(doc)?doc:[doc];
+      process.stdout.write((Array.isArray(doc)?pages.length+" page(s) ":"one document ")+pages.map(function(p){
+        return p.data.repository.pullRequest.reviews.nodes.map(function(r){return r.id+(r.body===undefined?"":"+body");}).join(",");
+      }).join(" / "));
+    });' 2>/dev/null
+}
+rm_probe() {
+  rm_pages "$@" -f owner=acme -f name=widget -F num=42
+}
+rm_run() {
+  local err rc=0
+  err="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" "$@" 2>&1 >/dev/null)" || rc=$?
+  printf 'rc=%s %s' "$rc" "$err"
+}
+rm_refusal() {
+  rm_run api graphql --paginate --slurp -f "$1" -f owner=acme -f name=widget -F num=42
+}
+rm_unmodelled() {
+  local got
+  got="$(rm_run "$@")"
+  if [ "$got" = "rc=2 fake gh: unmodelled call: $*" ]; then printf 'named'; else printf '%s' "$got"; fi
+}
+rm_query() {
+  local connection="$2"
+  case "$connection" in
+    ("("*) connection="(first:100,${connection#\(}" ;;
+    (*) connection="(first:100)$connection" ;;
+  esac
+  printf 'query=query($owner:String!,$name:String!,$num:Int!%s){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews%s}}}' "$1" "$connection"
+}
+rm_connection() {
+  printf 'query=query($owner:String!,$name:String!,$num:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(%s){nodes{id}pageInfo{hasNextPage endCursor}}}}}' "$1"
+}
+GH_PAGE1="PRR_1,PRR_2,PRR_3,PRR_4"
+GH_BOTH="2 page(s) $GH_PAGE1 / PRR_5,PRR_6"
+GH_BODIES="PRR_1+body,PRR_2+body,PRR_3+body,PRR_4+body"
+RM_PAGING_QUERY="$(rm_query ',$endCursor:String' '(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}')"
+GH_PAGED="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate --slurp -f "$(rm_query ',$endCursor:String' '(after:$endCursor){nodes{id body url}pageInfo{hasNextPage endCursor}}')" -f owner=acme -f name=widget -F num=42 2>/dev/null)"
+eq "RM1 the fake gh slurps two review pages for a query that pages: a cross-page duplicate, a later part, a marker only each page carries, an unmarked review and each page's pageInfo" \
+  "$(printf '%s' "$GH_PAGED" | A1="$GH_A1" A2="$GH_A2" B1="$GH_B1" C1="$GH_C1" node -e '
+    var e=process.env,s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var pages;try{pages=JSON.parse(s);}catch(_){process.stdout.write("not one JSON document");return;}
+      function count(test){return pages.map(function(p){return p.data.repository.pullRequest.reviews.nodes.filter(function(r){return test(r.body);}).length;}).join("+");}
+      function marker(m){return count(function(b){return b.indexOf(m)>=0;});}
+      process.stdout.write(pages.length+" pages | A part 1/2: "+marker(e.A1)+" | A part 2/2: "+marker(e.A2)+" | B part 1/1: "+marker(e.B1)
+        +" | C part 1/1: "+marker(e.C1)+" | unmarked: "+count(function(b){return b.indexOf("zensu-review:")<0;})
+        +" | pageInfo: "+pages.map(function(p){var i=p.data.repository.pullRequest.reviews.pageInfo;return i.hasNextPage+" "+i.endCursor;}).join(" + "));
+    });' 2>/dev/null)" \
+  "2 pages | A part 1/2: 1+1 | A part 2/2: 1+0 | B part 1/1: 0+1 | C part 1/1: 1+0 | unmarked: 1+0 | pageInfo: true cursor-4 + false cursor-6"
+eq "RM1b the fake gh pages a query whose pageInfo selects other fields beside hasNextPage and endCursor, as gh 2.101.0 does" \
+  "$(rm_probe api graphql --paginate --slurp -f "$(rm_query ',$endCursor:String' '(after:$endCursor){nodes{id}pageInfo{startCursor hasNextPage endCursor hasPreviousPage}}')")" "$GH_BOTH"
+eq "RM1c the fake gh takes a flag before the endpoint, as gh 2.101.0 does" \
+  "$(rm_probe api --hostname github.com graphql --paginate --slurp -f "$RM_PAGING_QUERY")" "$GH_BOTH"
+GH_MISS="no cursor fields: $(rm_probe api graphql --paginate --slurp -f "$(rm_query '' '{nodes{id}}')")"
+GH_MISS="$GH_MISS | no pageInfo: $(rm_probe api graphql --paginate --slurp -f "$(rm_query ',$endCursor:String' '(after:$endCursor){nodes{id}}')")"
+GH_MISS="$GH_MISS | no endCursor: $(rm_probe api graphql --paginate --slurp -f "$(rm_query ',$endCursor:String' '(after:$endCursor){nodes{id}pageInfo{hasNextPage}}')")"
+GH_MISS="$GH_MISS | no hasNextPage: $(rm_probe api graphql --paginate --slurp -f "$(rm_query ',$endCursor:String' '(after:$endCursor){nodes{id}pageInfo{endCursor}}')")"
+GH_MISS="$GH_MISS | no --paginate: $(rm_probe api graphql -f "$RM_PAGING_QUERY")"
+eq "RM2 the fake gh serves only the first page to a query that misses one paging term and to a call without --paginate, as gh 2.101.0 does" "$GH_MISS" \
+  "no cursor fields: 1 page(s) $GH_PAGE1 | no pageInfo: 1 page(s) $GH_PAGE1 | no endCursor: 1 page(s) $GH_PAGE1 | no hasNextPage: 1 page(s) $GH_PAGE1 | no --paginate: one document $GH_PAGE1"
+GH_REFUSED="$(rm_refusal "$(rm_query ',$endCursor:String' '{nodes{id}pageInfo{hasNextPage endCursor}}')")"
+GH_REFUSED="$GH_REFUSED | $(rm_refusal "$(rm_query '' '(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}')")"
+GH_REFUSED="$GH_REFUSED | $(rm_refusal "$(rm_query ',$endCursor:String!' '(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}')")"
+eq "RM2b the fake gh refuses a cursor variable that is declared but unused, used but undeclared or declared String!, with the message of gh 2.101.0" "$GH_REFUSED" \
+  'rc=1 gh: Variable $endCursor is declared by anonymous query but not used | rc=1 gh: Variable $endCursor is used by anonymous query but not declared | rc=1 gh: Variable $endCursor of type String! was provided invalid value'
+GH_SELECTED="$(rm_probe api graphql -f "$(rm_query '' '{nodes{id url}}')")"
+GH_SELECTED="$GH_SELECTED | $(rm_probe api graphql -f "$(rm_query '' '{nodes{id body url}}')")"
+GH_SELECTED="$GH_SELECTED | $(rm_probe api graphql -f "$(rm_query '' '{nodes{id author{login} body}}')")"
+GH_SELECTED="$GH_SELECTED | $(rm_probe api graphql -f "$(rm_query '' '{nodes{id author{login}body}}')")"
+eq "RM2c the fake gh serves a review body only when the query selects it, also after a nested selection, spaced or compact" "$GH_SELECTED" \
+  "one document $GH_PAGE1 | one document $GH_BODIES | one document $GH_BODIES | one document $GH_BODIES"
+GH_UNMODELLED="$(rm_unmodelled api repos/acme/widget/pulls/42/reviews -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42)"
+GH_UNMODELLED="$GH_UNMODELLED | $(rm_unmodelled api graphql -f 'query=query Listing($owner:String!,$name:String!,$num:Int!){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100){nodes{id}}}}}' -f owner=acme -f name=widget -F num=42)"
+GH_UNMODELLED="$GH_UNMODELLED | $(rm_unmodelled api graphql --paginate --slurp -f "$(rm_query '' '{nodes{id}pageInfo{hasNextPage endCursor}}')" -f owner=acme -f name=widget -F num=42)"
+eq "RM2d the fake gh names a call it does not model on stderr and exits 2: another endpoint, a named operation and a paging query that never passes its cursor on" "$GH_UNMODELLED" \
+  "named | named | named"
+GH_NUM="-F num: $(rm_probe api graphql --paginate --slurp -f "$RM_PAGING_QUERY")"
+GH_NUM="$GH_NUM | -f num: $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -f num=42)"
+GH_NUM="$GH_NUM | no num: $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget)"
+eq "RM2e the fake gh serves a query that declares \$num as Int! for -F num and refuses a num sent with -f and a call without num, with the message of gh 2.101.0" "$GH_NUM" \
+  "-F num: $GH_BOTH"' | -f num: rc=1 gh: Variable $num of type Int! was provided invalid value | no num: rc=1 gh: Variable $num of type Int! was provided invalid value'
+GH_VARS="$(rm_refusal 'query=query($owner:String!,$login:String!,$name:String!,$num:Int!,$endCursor:String){repository(owner:$login,name:$name){pullRequest(number:$num){reviews(first:100,after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}}}')"
+GH_VARS="$GH_VARS | $(rm_refusal 'query=query($name:String!,$num:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100,after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}}}')"
+GH_VARS="$GH_VARS | $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -F num=42)"
+eq "RM2f the fake gh applies the declared, used and value rules to every variable: \$owner declared but unused, \$owner used but undeclared, \$name declared String! without a value" "$GH_VARS" \
+  'rc=1 gh: Variable $owner is declared by anonymous query but not used | rc=1 gh: Variable $owner is used by anonymous query but not declared | rc=1 gh: Variable $name of type String! was provided invalid value'
+GH_PHASES="$(rm_refusal "$(rm_query ',$zeta:String,$endCursor:String' '(after:$endCursor,before:$alpha){nodes{id}pageInfo{hasNextPage endCursor}}')")"
+GH_PHASES="$GH_PHASES | $(rm_refusal "$(rm_query ',$zeta:String,$endCursor:String!' '(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}')")"
+GH_PHASES="$GH_PHASES | $(rm_run api graphql --paginate --slurp -f 'query=query($num:Int!,$name:String!,$owner:String!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100,after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}}}' -f owner=acme)"
+eq "RM2g the fake gh reports every problem of one phase on its own line, the unused declaration first, and checks values only once the declarations hold, in declaration order, as gh 2.101.0 does" "$GH_PHASES" \
+  "$(printf '%s\n%s | %s | %s\n%s' 'rc=1 gh: Variable $zeta is declared by anonymous query but not used' 'Variable $alpha is used by anonymous query but not declared' 'rc=1 gh: Variable $zeta is declared by anonymous query but not used' 'rc=1 gh: Variable $num of type Int! was provided invalid value' 'Variable $name of type String! was provided invalid value')"
+GH_FOLLOW="first page ends: $(FAKE_PAGES='last.json page2.json' rm_probe api graphql --paginate --slurp -f "$RM_PAGING_QUERY")"
+GH_FOLLOW="$GH_FOLLOW | null cursor: $(FAKE_PAGES='nocursor.json page2.json' rm_probe api graphql --paginate --slurp -f "$RM_PAGING_QUERY")"
+GH_FOLLOW="$GH_FOLLOW | empty cursor: $(FAKE_PAGES='blankcursor.json page2.json' rm_probe api graphql --paginate --slurp -f "$RM_PAGING_QUERY")"
+GH_FOLLOW="$GH_FOLLOW | three pages: $(FAKE_PAGES='page1.json middle.json page2.json' rm_probe api graphql --paginate --slurp -f "$RM_PAGING_QUERY")"
+GH_FOLLOW="$GH_FOLLOW | own cursor: $(rm_probe api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f endCursor=cursor-4)"
+eq "RM2h the fake gh asks for another page only while the served page carries hasNextPage true and a non-empty endCursor, and serves the fixture page after that cursor" "$GH_FOLLOW" \
+  "first page ends: 1 page(s) $GH_PAGE1 | null cursor: 1 page(s) $GH_PAGE1 | empty cursor: 1 page(s) $GH_PAGE1 | three pages: 3 page(s) $GH_PAGE1 / PRR_7 / PRR_5,PRR_6 | own cursor: 1 page(s) PRR_5,PRR_6"
+GH_SHAPE="$(rm_unmodelled pr graphql -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42)"
+GH_SHAPE="$GH_SHAPE | $(rm_unmodelled api graphql --paginate -f)"
+GH_SHAPE="$GH_SHAPE | $(rm_unmodelled api graphql -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 --hostname)"
+GH_SHAPE="$GH_SHAPE | $(rm_unmodelled api graphql -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 -f =acme)"
+GH_SHAPE="$GH_SHAPE | $(rm_unmodelled api graphql -f "$RM_PAGING_QUERY" -F "owner=@$WORK/gh/owner.txt" -f name=widget -F num=42)"
+GH_SHAPE="$GH_SHAPE | $(rm_unmodelled api graphql --jq .data -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42)"
+GH_SHAPE="$GH_SHAPE | $(rm_unmodelled api graphql graphql -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42)"
+GH_SHAPE="$GH_SHAPE | $(rm_unmodelled api graphql --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42)"
+eq "RM2i the fake gh names a call shape it does not model and exits 2: another subcommand, a field flag or --hostname without its value, a field without a name, an @file value, an unknown flag, a second endpoint and --slurp without --paginate" "$GH_SHAPE" \
+  "named | named | named | named | named | named | named | named"
+GH_HEADER="$(rm_unmodelled api graphql --paginate --slurp -f "$(rm_query ',$endCursor:String="cursor-4"' '(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}')" -f owner=acme -f name=widget -F num=42)"
+GH_HEADER="$GH_HEADER | $(rm_unmodelled api graphql -f "$(rm_query ',$ids:[String]' '{nodes{id}}')" -f owner=acme -f name=widget -F num=42)"
+GH_HEADER="$GH_HEADER | $(rm_unmodelled api graphql -f "$(rm_query ',$first:Boolean' '{nodes{id}}')" -f owner=acme -f name=widget -F num=42)"
+eq "RM2j the fake gh names a query header it does not model and exits 2: a default value, a list type and a Boolean variable" "$GH_HEADER" \
+  "named | named | named"
+GH_PATH="$(rm_unmodelled api graphql -f 'query=query{viewer{login}}')"
+GH_PATH="$GH_PATH | $(rm_unmodelled api graphql -f 'query=query($name:String!,$num:Int!){repository(owner:"acme",name:$name){pullRequest(number:$num){reviews(first:100){nodes{id}}}}}' -f name=widget -F num=42)"
+GH_PATH="$GH_PATH | $(rm_unmodelled api graphql -f 'query=query($owner:String!,$name:String!,$num:Int!){repository(owner:$owner,owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100){nodes{id}}}}}' -f owner=acme -f name=widget -F num=42)"
+GH_PATH="$GH_PATH | $(rm_unmodelled api graphql -f 'query=query($owner:String!,$name:String!,$num:Int!){repository(owner:$owner,name:$name){pullRequest(number:$num,id:$num){reviews(first:100){nodes{id}}}}}' -f owner=acme -f name=widget -F num=42)"
+GH_PATH="$GH_PATH | $(rm_unmodelled api graphql -f "$(rm_query '' '{nodes{id}}title')" -f owner=acme -f name=widget -F num=42)"
+GH_PATH="$GH_PATH | $(rm_unmodelled api graphql -f 'query=query($owner:String,$name:String!,$num:Int!){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100){nodes{id}}}}}' -f owner=acme -f name=widget -F num=42)"
+GH_PATH="$GH_PATH | $(rm_unmodelled api graphql -f 'query=query($owner:String!,$name:Int!,$num:Int!){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100){nodes{id}}}}}' -f owner=acme -F name=7 -F num=42)"
+GH_PATH="$GH_PATH | $(rm_unmodelled api graphql -f 'query=query($owner:String!,$name:String!,$num:String!){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100){nodes{id}}}}}' -f owner=acme -f name=widget -f num=42)"
+eq "RM2k the fake gh names a query outside its repository path and exits 2: no repository path, a literal owner, a repeated owner, another pull request argument, a field beside reviews, and an owner, name or number variable of another type" "$GH_PATH" \
+  "named | named | named | named | named | named | named | named"
+GH_SELECT="$(rm_unmodelled api graphql -f "$(rm_query '' '{totalCount nodes{id}}')" -f owner=acme -f name=widget -F num=42)"
+GH_SELECT="$GH_SELECT | $(rm_unmodelled api graphql -f "$(rm_query '' '{nodes{id}nodes{body}}')" -f owner=acme -f name=widget -F num=42)"
+GH_SELECT="$GH_SELECT | $(rm_unmodelled api graphql -f "$(rm_query '' '{nodes}')" -f owner=acme -f name=widget -F num=42)"
+GH_SELECT="$GH_SELECT | $(rm_unmodelled api graphql -f "$(rm_query '' '{nodes{id text:body}}')" -f owner=acme -f name=widget -F num=42)"
+GH_SELECT="$GH_SELECT | $(rm_unmodelled api graphql -f "$(rm_query '' '{nodes{id ... on PullRequestReview{body}}}')" -f owner=acme -f name=widget -F num=42)"
+GH_SELECT="$GH_SELECT | $(rm_unmodelled api graphql -f "$(rm_query '' '{nodes{id title}}')" -f owner=acme -f name=widget -F num=42)"
+GH_SELECT="$GH_SELECT | $(rm_unmodelled api graphql -f 'query=query($owner:String!,$name:String!,$num:Int!){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100){nodes{id' -f owner=acme -f name=widget -F num=42)"
+eq "RM2l the fake gh names a selection it does not model and exits 2: a reviews field other than nodes and pageInfo, a repeated field, nodes without a selection, an alias, a fragment, a field the fixture lacks and an unterminated selection" "$GH_SELECT" \
+  "named | named | named | named | named | named | named"
+GH_PAGING="$(rm_unmodelled api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 -f endCursor=cursor-9)"
+GH_PAGING="$GH_PAGING | $(rm_unmodelled api graphql --paginate --slurp -f "$(rm_query ',$endCursor:Int' '(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}')" -f owner=acme -f name=widget -F num=42)"
+eq "RM2m the fake gh names a paging call it does not model and exits 2: an own cursor the fixture lacks and a cursor variable that cannot take the next page's endCursor" "$GH_PAGING" \
+  "named | named"
+GH_TYPED="5: $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 -F endCursor=5)"
+GH_TYPED="$GH_TYPED | true: $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 -F endCursor=true)"
+GH_TYPED="$GH_TYPED | false: $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 -F endCursor=false)"
+GH_TYPED="$GH_TYPED | null: $(rm_probe api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -F endCursor=null)"
+eq "RM2n the fake gh types -F true, false, null and integers as gh 2.101.0 does: a String variable refuses an integer, true and false and takes null" "$GH_TYPED" \
+  '5: rc=1 gh: Variable $endCursor of type String was provided invalid value | true: rc=1 gh: Variable $endCursor of type String was provided invalid value | false: rc=1 gh: Variable $endCursor of type String was provided invalid value | null: '"$GH_BOTH"
+GH_INT="$(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=-2147483648)"
+GH_INT="$GH_INT | $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=2147483648)"
+GH_INT="$GH_INT | $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=9223372036854775807)"
+GH_INT="$GH_INT | $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=9223372036854775808)"
+eq "RM2o the fake gh types an -F integer up to the 64-bit limit as a number that an Int takes past 32 bits and a larger one as a string, as gh 2.101.0 and GitHub do" "$GH_INT" \
+  'rc=1 gh: Could not resolve to a PullRequest with the number of -2147483648. | rc=1 gh: Could not resolve to a PullRequest with the number of 2147483648. | rc=1 gh: Could not resolve to a PullRequest with the number of 9223372036854775807. | rc=1 gh: Variable $num of type Int! was provided invalid value'
+GH_WHO="swapped: $(rm_refusal 'query=query($owner:String!,$name:String!,$num:Int!,$endCursor:String){repository(owner:$name,name:$owner){pullRequest(number:$num){reviews(first:100,after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}}}')"
+GH_WHO="$GH_WHO | other owner: $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=octo -f name=widget -F num=42)"
+GH_WHO="$GH_WHO | other name: $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=gadget -F num=42)"
+GH_WHO="$GH_WHO | other number: $(rm_run api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=43)"
+GH_WHO="$GH_WHO | renamed: $(rm_pages api graphql --paginate --slurp -f 'query=query($login:String!,$repo:String!,$number:Int!,$endCursor:String){repository(owner:$login,name:$repo){pullRequest(number:$number){reviews(first:100,after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}}}' -f login=acme -f repo=widget -F number=42 -f owner=octo -f name=gadget -F num=43)"
+eq "RM2p the fake gh resolves the pull request from the variables the query binds to repository and pullRequest and fails for another one with the message of GitHub: a swapped owner and name, another owner, name or number, and renamed variables beside unbound wrong ones" "$GH_WHO" \
+  "swapped: rc=1 gh: Could not resolve to a Repository with the name 'widget/acme'. | other owner: rc=1 gh: Could not resolve to a Repository with the name 'octo/widget'. | other name: rc=1 gh: Could not resolve to a Repository with the name 'acme/gadget'. | other number: rc=1 gh: Could not resolve to a PullRequest with the number of 43. | renamed: $GH_BOTH"
+GH_ALONE="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 2>/dev/null)"
+GH_SLURPED="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f owner=acme -f name=widget -F num=42 2>/dev/null)"
+eq "RM2q the fake gh prints the pages back to back for --paginate without --slurp, as gh 2.101.0 does" \
+  "$(ALONE="$GH_ALONE" SLURPED="$GH_SLURPED" node -e '
+    var e=process.env,pages;try{pages=JSON.parse(e.SLURPED);}catch(_){pages=[];}
+    process.stdout.write(pages.length+" pages, back to back: "+(pages.map(function(p){return JSON.stringify(p);}).join("")===e.ALONE));' 2>/dev/null)" \
+  "2 pages, back to back: true"
+GH_PAGE_SIZE="no first: $(rm_refusal "$(rm_connection 'after:$endCursor')")"
+GH_PAGE_SIZE="$GH_PAGE_SIZE | first and last: $(rm_refusal "$(rm_connection 'first:5,last:5,after:$endCursor')")"
+GH_PAGE_SIZE="$GH_PAGE_SIZE | first -1: $(rm_refusal "$(rm_connection 'first:-1,after:$endCursor')")"
+GH_PAGE_SIZE="$GH_PAGE_SIZE | first 101: $(rm_refusal "$(rm_connection 'first:101,after:$endCursor')")"
+GH_PAGE_SIZE="$GH_PAGE_SIZE | no first, other number: $(rm_run api graphql --paginate --slurp -f "$(rm_connection 'after:$endCursor')" -f owner=acme -f name=widget -F num=43)"
+GH_PAGE_SIZE="$GH_PAGE_SIZE | no first, no num: $(rm_run api graphql --paginate --slurp -f "$(rm_connection 'after:$endCursor')" -f owner=acme -f name=widget)"
+GH_PAGE_SIZE="$GH_PAGE_SIZE | first 0, no reviews: $(FAKE_PAGES=empty.json rm_refusal "$(rm_connection 'first:0,after:$endCursor')")"
+eq "RM2r the fake gh checks the reviews connection after the values and the pull request and fails like GitHub, as measured with gh 2.101.0: no first or last, both, a first below zero or above 100, and first 0" "$GH_PAGE_SIZE" \
+  'no first: rc=1 gh: You must provide a `first` or `last` value to properly paginate the `reviews` connection. | first and last: rc=1 gh: Passing both `first` and `last` to paginate the `reviews` connection is not supported. | first -1: rc=1 gh: `first` on the `reviews` connection cannot be less than zero. | first 101: rc=1 gh: Requesting 101 records on the `reviews` connection exceeds the `first` limit of 100 records. | no first, other number: rc=1 gh: Could not resolve to a PullRequest with the number of 43. | no first, no num: rc=1 gh: Variable $num of type Int! was provided invalid value | first 0, no reviews: rc=0 '
+GH_CONNECTION="$(rm_unmodelled api graphql --paginate --slurp -f "$(rm_connection 'last:5,after:$endCursor')" -f owner=acme -f name=widget -F num=42)"
+GH_CONNECTION="$GH_CONNECTION | $(rm_unmodelled api graphql --paginate --slurp -f "$(rm_connection 'first:$num,after:$endCursor')" -f owner=acme -f name=widget -F num=42)"
+GH_CONNECTION="$GH_CONNECTION | $(rm_unmodelled api graphql --paginate --slurp -f "$(rm_connection 'first:100,after:$endCursor,states:$endCursor')" -f owner=acme -f name=widget -F num=42)"
+GH_CONNECTION="$GH_CONNECTION | $(rm_unmodelled api graphql --paginate --slurp -f "$(rm_connection '')" -f owner=acme -f name=widget -F num=42)"
+GH_CONNECTION="$GH_CONNECTION | $(rm_unmodelled api graphql --paginate --slurp -f "$(rm_connection 'first:100,first:100,after:$endCursor')" -f owner=acme -f name=widget -F num=42)"
+GH_CONNECTION="$GH_CONNECTION | $(rm_unmodelled api graphql --paginate --slurp -f "$(rm_connection 'first:2,after:$endCursor')" -f owner=acme -f name=widget -F num=42)"
+GH_CONNECTION="$GH_CONNECTION | $(rm_unmodelled api graphql -f 'query=query($owner:String!,$name:String!,$num:Int!,$before:String){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100,before:$before){nodes{id}pageInfo{hasNextPage endCursor}}}}}' -f owner=acme -f name=widget -F num=42 -f before=cursor-6)"
+GH_CONNECTION="$GH_CONNECTION | $(rm_unmodelled api graphql --paginate --slurp -f "$(rm_connection 'first:100,after:$endCursor,before:$endCursor')" -f owner=acme -f name=widget -F num=42)"
+eq "RM2s the fake gh names a reviews argument it does not model and exits 2: last alone, a variable first, another argument, empty arguments, a repeated argument, a first below the size of a served page and a before cursor with a value on the first or a later page" "$GH_CONNECTION" \
+  "named | named | named | named | named | named | named | named"
+GH_OUT="$(FAKE_DIR="$WORK/gh/listing" PATH="$WORK/gh/bin:$PATH" bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 2>/dev/null)"
+GH_RC=$?
+if [ "$GH_RC" -eq 0 ]; then
+  check "RM3 --review-markers on GitHub succeeds against a gh that serves the reviews in two pages" PASS
+else
+  check "RM3 --review-markers on GitHub succeeds against a gh that serves the reviews in two pages (rc=$GH_RC)" FAIL
+fi
+eq "RM4 --review-markers on GitHub lists each distinct first-part marker of both pages once, one per line" \
+  "$(printf '%s\n' "$GH_OUT" | LC_ALL=C sort)" "$(printf '%s\n' "$GH_A1" "$GH_B1" "$GH_C1" | LC_ALL=C sort)"
+GH_CALLS="$(cat "$WORK/gh/listing/calls" 2>/dev/null)"
+has "RM5 the GitHub listing passes --paginate to gh" " $GH_CALLS " " --paginate "
+has "RM5b the GitHub listing passes --slurp to gh" " $GH_CALLS " " --slurp "
+has "RM6a the GitHub listing passes the pull request number as the typed field -F num" " $GH_CALLS " " -F num=42 "
+has "RM6b the GitHub listing sends the owner as a raw -f string" " $GH_CALLS " " -f owner=acme "
+has "RM6c the GitHub listing sends the repository name as a raw -f string" " $GH_CALLS " " -f name=widget "
+GH_FAIL_ERR="$(FAKE_REVIEWS=fail FAKE_DIR="$WORK/gh/fail" PATH="$WORK/gh/bin:$PATH" \
+  bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 2>&1 >/dev/null)"
+GH_FAIL_RC=$?
+if [ "$GH_FAIL_RC" -ne 0 ]; then
+  check "RM7 a failed GitHub listing makes --review-markers exit non-zero" PASS
+else
+  check "RM7 a failed GitHub listing makes --review-markers exit non-zero" FAIL
+fi
+has "RM8 the failed GitHub listing is reported under the review-markers inventory label" "$GH_FAIL_ERR" "zensu-vcs: review-markers inventory (gh api graphql reviews) failed (rc=1): "
+GH_REJECT_RC=0
+FAKE_DIR="$WORK/gh/reject" PATH="$WORK/gh/bin:$PATH" bash "$LIB" --review-markers --provider github --repo-id acme/widget "@$WORK/gh/num" >/dev/null 2>&1 || GH_REJECT_RC=$?
+if [ "$GH_REJECT_RC" -ne 0 ] && [ ! -e "$WORK/gh/reject/calls" ]; then
+  check "RM9 a non-numeric pull request id makes --review-markers exit non-zero before gh runs" PASS
+else
+  check "RM9 a non-numeric pull request id makes --review-markers exit non-zero before gh runs (rc=$GH_REJECT_RC)" FAIL
+fi
+GH_EMPTY_RC=0
+FAKE_PAGES=empty.json FAKE_DIR="$WORK/gh/empty" PATH="$WORK/gh/bin:$PATH" bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 >"$WORK/gh/empty/stdout" 2>/dev/null || GH_EMPTY_RC=$?
+if [ "$GH_EMPTY_RC" -eq 0 ] && [ -s "$WORK/gh/empty/calls" ] && [ -f "$WORK/gh/empty/stdout" ] && [ ! -s "$WORK/gh/empty/stdout" ]; then
+  check "RM10 --review-markers on GitHub exits 0 and prints nothing for a pull request without reviews" PASS
+else
+  check "RM10 --review-markers on GitHub exits 0 and prints nothing for a pull request without reviews (rc=$GH_EMPTY_RC)" FAIL
+fi
+GH_INVENTORY="$(FAKE_DIR="$WORK/gh/inventory" PATH="$WORK/gh/bin:$PATH" "$BASH_ABS" -c 'source "$1"; _zensu_vcs_review_fetch_inventory github acme/widget 42 "reconcile inventory" github.com' _ "$LIB" 2>/dev/null)"
+eq "RM11 the GitHub inventory fetch that --reconcile-review shares selects id, body and url: every review the fake serves on both pages carries all three as strings" \
+  "$(printf '%s' "$GH_INVENTORY" | node -e '
+    var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var pages;try{pages=JSON.parse(s);}catch(_){process.stdout.write("not one JSON document");return;}
+      var nodes=[].concat.apply([],pages.map(function(p){return p.data.repository.pullRequest.reviews.nodes;}));
+      process.stdout.write(pages.length+" pages | "+nodes.length+" reviews | "+nodes.filter(function(r){return typeof r.id==="string"&&typeof r.body==="string"&&typeof r.url==="string";}).length+" with id, body and url");
+    });' 2>/dev/null)" \
+  "2 pages | 6 reviews | 6 with id, body and url"
 
 rm -rf "$WORK"
 

@@ -1,0 +1,15 @@
+{
+  "description": "An image whose declared size differs from its content.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "file.type",
+        "at": "files.78aa501bf69b236fde07ec039438d5468f3a303bb80395f2645f5a2f2ef4e99a.type"
+      }
+    ]
+  }
+}

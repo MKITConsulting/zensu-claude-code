@@ -259,8 +259,14 @@ source in another data folder of the same account.
   when the saved environments look past the record's own presets file, because Claude Desktop keeps
   that file beside the store spelling it writes (`DF12`).
 - The resolver of a linked session's delivery route, `storeCandidates` in
-  `hooks/lib/linked-session-v1.js`, still probes the default list alone
-  (`.claude/rules/session-delivery-route.md`).
+  `hooks/lib/linked-session-v1.js`, reads the named stores, its platform's default stores and the
+  Session Hub profile stores in the order `ccdStoreCandidates` probes them, but probes the profile
+  path on macOS only, takes no other platform's default and refuses a relative entry; it answers an
+  own record two stores hold with `none` (`own-record-ambiguous`), and counts toward that answer
+  every entry under the record's name, a refused one included, where this skill counts only the
+  records it accepts (`.claude/rules/session-delivery-route.md`). `L3o` in
+  `tests/structure/test-linked-session-route.sh` holds the two macOS candidate lists equal in the
+  four layouts that rule file names, and in no other.
 - The SKIPPED count covers only what the command read, and `references/commands.md` says so.
   For the same reason the NOTE of plain-text `show` can count transcripts that `show --json`,
   which never probes siblings, does not read.

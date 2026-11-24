@@ -1,0 +1,15 @@
+{
+  "description": "A file the manifest lists but the bundle does not hold.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "file.missing",
+        "at": "files.78aa501bf69b236fde07ec039438d5468f3a303bb80395f2645f5a2f2ef4e99a"
+      }
+    ]
+  }
+}

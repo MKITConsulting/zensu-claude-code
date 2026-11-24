@@ -14,6 +14,7 @@ SKILL_DIR="$PLUGIN_DIR/skills/verify-feature"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 BROWSER_MD="$SKILL_DIR/rules/browser-verification.md"
 SETUP_MD="$SKILL_DIR/rules/setup.md"
+REPORT_MD="$SKILL_DIR/rules/report.md"
 CONSENT_MODULE="$PLUGIN_DIR/hooks/lib/verify-consent-v1.js"
 FLOOR_MODULE="$PLUGIN_DIR/hooks/lib/verify-navigation-floor-v1.js"
 BROWSER_CONFIG="$PLUGIN_DIR/scripts/verify-browser-config.js"
@@ -34,7 +35,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$SKILL_MD" "$BROWSER_MD" "$SETUP_MD" "$CONSENT_MODULE" "$FLOOR_MODULE" "$BROWSER_CONFIG" \
+for f in "$SKILL_MD" "$BROWSER_MD" "$SETUP_MD" "$REPORT_MD" "$CONSENT_MODULE" "$FLOOR_MODULE" "$BROWSER_CONFIG" \
   "$PLUGIN_JSON" "$README_MD" "$HELP_MD" "$DOCTOR_SH" "$DOCTOR_REPORT" "$DOCTOR_SKILL" \
   "$AUTOPILOT_SKILL" "$AUTOPILOT_AUTH" "$AUTOPILOT_CONFIG"; do
   if [ ! -f "$f" ]; then
@@ -460,7 +461,7 @@ if grep -qF 'but a remote origin is asked again at every `open`.' <<<"$SKILL_FLA
 else
   check "P4z a remote origin outside a policy is asked at every open, and refused with its remedy where the session cannot show the prompt" FAIL
 fi
-if grep -qF 'never copy raw console output' "$SKILL_MD" && grep -qF 'Strip query strings/fragments' "$SKILL_MD"; then
+if grep -qF 'never copy raw console output' "$REPORT_MD" && grep -qF 'Strip query strings/fragments' "$REPORT_MD"; then
   check "P4f console/network evidence is sanitized before reporting" PASS
 else
   check "P4f console/network evidence is sanitized before reporting" FAIL
@@ -1270,6 +1271,17 @@ if grep -qF "so the \`browser\` driver cannot verify a PWA's update prompt, its 
 else
   check "P10p the operator doc states the cost of blocking service workers beside the fence, and the question without the access option there and in the chain paragraph" FAIL
 fi
+if grep -qF "except a followed server redirect, a WebSocket and a shared worker's fetch." <<<"$SKILL_FLAT" \
+  && ! grep -qF 'every HTTP(S) subresource request' <<<"$SKILL_FLAT" \
+  && grep -qF "except a followed server redirect and a shared worker's fetch; a WebSocket connection is not fenced by the run config, which is an open gap." <<<"$BROWSER_FLAT" \
+  && grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not." <<<"$BROWSER_FLAT" \
+  && grep -qF 'measured with playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins' <<<"$BROWSER_FLAT" \
+  && grep -qF "a WebSocket connection and a shared worker's fetch are not fenced by it, which are open gaps" <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not." <<<"$AUTOPILOT_CONFIG_FLAT"; then
+  check "P10q the skill text names a followed redirect, a WebSocket and a shared worker's fetch as the fence's exceptions, and the rule files carry the measurement" PASS
+else
+  check "P10q the skill text names a followed redirect, a WebSocket and a shared worker's fetch as the fence's exceptions, and the rule files carry the measurement" FAIL
+fi
 ACCEPTANCE_RULE="$SKILL_DIR/rules/acceptance-evidence.md"
 ACCEPTANCE_FLAT="$(tr '\n' ' ' < "$ACCEPTANCE_RULE" 2>/dev/null | tr -s ' ')"
 if [ -f "$ACCEPTANCE_RULE" ] && grep -qF 'prints only' "$SKILL_MD" \
@@ -1297,6 +1309,275 @@ if grep -qF 'that file also says how one run backs several ACs.' <<<"$(tr '\n' '
   check "P12a one observed acceptance run backs every criterion it asserts, each recorded on its own, until the tree changes" PASS
 else
   check "P12a one observed acceptance run backs every criterion it asserts, each recorded on its own, until the tree changes" FAIL
+fi
+REPORT_FLAT="$(tr '\n' ' ' < "$REPORT_MD" | tr -s ' ')"
+EVIDENCE_REPORT_LIB="$PLUGIN_DIR/hooks/lib/evidence-report-v1.js"
+ZENSU_LOG_SH="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+P11_HEAD='CLAUDE_PLUGIN_DATA="<absolute-plugin-data>" bash "<absolute-plugin-root>/hooks/lib/zensu-log.sh"'
+if [ "$(grep -cF "$P11_HEAD --report-begin --run-dir " "$REPORT_MD")" = 1 ] \
+  && [ "$(grep -cF "$P11_HEAD --report-add --report <id> --kind image " "$REPORT_MD")" = 1 ] \
+  && [ "$(grep -cF "$P11_HEAD --report-add --report <id> --kind request " "$REPORT_MD")" = 1 ] \
+  && [ "$(grep -cF "$P11_HEAD --report-step --report <id> " "$REPORT_MD")" = 1 ] \
+  && [ "$(grep -cF "$P11_HEAD --report-render --report <id> " "$REPORT_MD")" = 1 ] \
+  && grep -qF -- '`--report-list [--limit <n>]`' "$REPORT_MD" \
+  && grep -qF -- '`--report-export --report <id>`' "$REPORT_MD" \
+  && ! grep -qF 'playwright-cli' "$REPORT_MD" \
+  && ! grep -qF '${CLAUDE_PLUGIN' "$REPORT_MD" \
+  && [ "$(grep -cF '<<' "$REPORT_MD")" = 4 ] \
+  && [ "$(grep -cF "<<'REPORT_<hex>'" "$REPORT_MD")" = 4 ] \
+  && [ "$(grep -cxF 'REPORT_<hex>' "$REPORT_MD")" = 4 ] \
+  && grep -qF 'Replace `<hex>` in the heredoc delimiter with eight random hex digits, new for each call and the same on both lines' <<<"$REPORT_FLAT"; then
+  check "P11a rules/report.md spells one command each for begin, add (image and request), step and render behind the plugin placeholders, each heredoc behind a fresh random delimiter, and names list and export" PASS
+else
+  check "P11a rules/report.md spells one command each for begin, add (image and request), step and render behind the plugin placeholders, each heredoc behind a fresh random delimiter, and names list and export" FAIL
+fi
+P11_DRIFT="$(node -e '
+  const fs = require("fs");
+  const [lib, shell, ...files] = process.argv.slice(1);
+  const allowed = require(lib).VERB_ARGUMENTS;
+  const src = fs.readFileSync(shell, "utf8");
+  const bool = /^\s*(--attach(?:\|--[a-z-]+)*)\)\s*$/m.exec(src);
+  const valued = /^\s*(--run-dir(?:\|--[a-z-]+)+)\)\s*$/m.exec(src);
+  if (!bool || !valued) {
+    console.log("the report flag list of zensu-log.sh was not found");
+    process.exit(0);
+  }
+  const shellFlags = new Set([...bool[1].split("|"), ...valued[1].split("|")].map((flag) => flag.slice(2)));
+  const verbFlags = new Set(Object.values(allowed).flat());
+  const skillFlags = ["config", "setup", "scope", "acceptance-record", "acceptance-status"];
+  const known = (flag) => /^report-(begin|add|step|render|list|export)$/.test(flag) || skillFlags.includes(flag)
+    || (verbFlags.has(flag) && shellFlags.has(flag));
+  const spans = (text) => {
+    const pieces = [];
+    const rest = text.replace(/^```[^\n]*\n([\s\S]*?)^```$/gm, (all, body) => { pieces.push(...body.split("\n")); return ""; });
+    rest.replace(/`([^`]+)`/g, (all, body) => { pieces.push(body.replace(/\s+/g, " ")); return ""; });
+    return pieces;
+  };
+  const strays = (text) => [...new Set(spans(text).flatMap((piece) => [...piece.matchAll(/(?:^|[\s\[(])--([a-z][a-z-]*)/g)].map((m) => m[1])))]
+    .filter((flag) => !known(flag));
+  const calls = (text) => {
+    const pieces = spans(text);
+    const found = [];
+    for (const piece of pieces) {
+      const verb = /--report-(begin|add|step|render|list|export)\b/.exec(piece);
+      if (!verb) continue;
+      const after = piece.slice(verb.index + verb[0].length);
+      found.push({ verb: verb[1], flags: [...after.matchAll(/(?:^|[\s\[])--([a-z][a-z-]*)/g)].map((m) => m[1]) });
+    }
+    return found;
+  };
+  const faults = (found) => found.flatMap(({ verb, flags }) => flags.flatMap((flag) => [
+    ...(allowed[verb].includes(flag) ? [] : [`--report-${verb} --${flag} is not in VERB_ARGUMENTS`]),
+    ...(shellFlags.has(flag) ? [] : [`--report-${verb} --${flag} is not in the shell flag list`]),
+  ]));
+  const out = [];
+  if (faults(calls("`--report-add --report <id> --caption x`")).length === 0
+    || faults(calls("```bash\nzensu-log.sh --report-step --report x --title y\n```")).length === 0
+    || faults(calls("`--report-list [--limit <n>]`")).length !== 0
+    || strays("`--bogus-flag` beside `--scope acceptance`, `--report-step` and `--authenticated`").join(",") !== "bogus-flag") out.push("the drift scan does not tell a known flag from an unknown one");
+  const minimum = [7, 5, 3];
+  files.forEach((file, index) => {
+    const found = calls(fs.readFileSync(file, "utf8"));
+    const flagged = found.filter((call) => call.flags.length > 0).length;
+    if (flagged < minimum[index]) out.push(`${file}: ${flagged} calls with flags, expected at least ${minimum[index]}`);
+    out.push(...faults(found).map((fault) => `${file}: ${fault}`));
+    if (index === 0) {
+      out.push(...strays(fs.readFileSync(file, "utf8")).map((flag) => `${file}: --${flag} is neither a report flag nor a skill flag the file names`));
+      const verbs = new Set(found.map((call) => call.verb));
+      for (const verb of ["begin", "add", "step", "render", "list", "export"]) if (!verbs.has(verb)) out.push(`${file}: no --report-${verb} call`);
+    }
+  });
+  console.log(out.length === 0 ? "ok" : out.join("; "));
+' "$EVIDENCE_REPORT_LIB" "$ZENSU_LOG_SH" "$REPORT_MD" "$DRIVERS_MD" "$BROWSER_MD" 2>&1)"
+if [ "$P11_DRIFT" = ok ] \
+  && grep -qF "\`--authenticated\` on a row that ran signed in, through a recipe login or a visible manual login, marks the report's run as authenticated." <<<"$REPORT_FLAT"; then
+  check "P11b every --report-<verb> call in the report, driver and browser rules names only flags the module and the shell accept for that verb, every flag rules/report.md names in code is one, and --authenticated marks a signed-in run" PASS
+else
+  check "P11b every --report-<verb> call in the report, driver and browser rules names only flags the module and the shell accept for that verb, every flag rules/report.md names in code is one, and --authenticated marks a signed-in run ($P11_DRIFT)" FAIL
+fi
+P11_MOVED_MISSING=""
+for line in '| Scenario | Driver | Pri | Expected | Observed | Evidence | Result |' '- **Target:**' '- **Coverage:**' '- **Console:**' \
+  '- **Network:**' '- **Visual:**' '- **Reproduction:**' '- **Consent:**' '- **Limitations:**' '- **Other drivers:**'; do
+  grep -qF -- "$line" "$REPORT_MD" || P11_MOVED_MISSING="$P11_MOVED_MISSING report.md:$line"
+  ! grep -qF -- "$line" "$SKILL_MD" || P11_MOVED_MISSING="$P11_MOVED_MISSING SKILL.md:$line"
+done
+if [ -z "$P11_MOVED_MISSING" ] \
+  && grep -qF "This common \`\$RUN_DIR\` must exist before runtime or authentication preparation. Right after it exists, begin the run's evidence report as \`rules/report.md\` section 1 says; in that file \`<absolute-plugin-root>\` is \`\${CLAUDE_PLUGIN_ROOT}\` and \`<absolute-plugin-data>\` is \`\${CLAUDE_PLUGIN_DATA}\`." <<<"$SKILL_FLAT" \
+  && grep -qF "Add each capture to the evidence report right after you inspected it, and write each matrix row when it is finished (\`rules/report.md\` sections 2 and 3)." <<<"$SKILL_FLAT" \
+  && grep -qF "Render the evidence report first (\`rules/report.md\` section 4), then write the report to the user in the format of its section 5, its location right above the final verdict line." <<<"$SKILL_FLAT" \
+  && grep -qF "Parallel execution is allowed only when no evidence report is begun and each lane has its own run directory, run config and \`zensu-verify\` session" <<<"$SKILL_FLAT" \
+  && grep -qF "While a report is begun, \`SKILL.md\` Phase 3 allows no parallel lanes: a report takes only the files of its own run directory" <<<"$REPORT_FLAT" \
+  && grep -qF 'Verdict rules:' "$SKILL_MD" && grep -qF 'VERIFY-FEATURE-VERDICT: PASS' "$SKILL_MD" \
+  && grep -qF 'Add a capture right after you opened and inspected it, never in a batch at the end' <<<"$REPORT_FLAT" \
+  && grep -qF 'stands right above the final verdict line' <<<"$REPORT_FLAT"; then
+  check "P11c SKILL.md begins, feeds and renders the report through rules/report.md, whose section 5 now holds the Phase 5 table and its nine bullets, and allows parallel lanes only while no report is begun" PASS
+else
+  check "P11c SKILL.md begins, feeds and renders the report through rules/report.md, whose section 5 now holds the Phase 5 table and its nine bullets, and allows parallel lanes only while no report is begun (missing:$P11_MOVED_MISSING)" FAIL
+fi
+if grep -qF '**Exit 0**: begun.' <<<"$REPORT_FLAT" \
+  && grep -qF '**Exit 3**: reports are switched off (`evidence.report.enabled` is false). Run no other report verb, and the report to the user carries no location line.' <<<"$REPORT_FLAT" \
+  && grep -qF '**Exit 1 or 2**: a refusal or a fault. The run goes on without a report and its verdict does not change: name the printed cause and its remedy under Limitations, and write `Evidence report: none — <cause>` as the location line. Never edit `.gitignore`, `.git/info/exclude` or any other file to satisfy a remedy;' <<<"$REPORT_FLAT" \
+  && grep -qF 'Chain mode passes `--log "<run log>"`, double-quoted like `--run-dir`, and no `AC-###:` line' <<<"$REPORT_FLAT" \
+  && grep -qF 'In matrix mode every criterion Phase 0 step 4 stated gets one `AC-###:` line of at most 400 characters, in the order Phase 0 stated them: a supplied id stays when it reads `AC-` and digits with at most one lowercase letter after them' <<<"$REPORT_FLAT" \
+  && grep -qF 'every other criterion, an `FR-###` one included, gets the next free `AC-###` id and keeps its own label at the start of its text' <<<"$REPORT_FLAT" \
+  && grep -qF 'A further line saying that `--report-render` will refuse a PASS means the working tree could not be fingerprinted, so this run cannot end PASS: tell the user so at once, with the printed cause and remedy, then go on' <<<"$REPORT_FLAT" \
+  && grep -qF 'In a local run in matrix mode, a file that a runtime, fixture or authentication step writes outside `.zensu/` and git does not ignore changes the working tree after begin, and render refuses a PASS for it (section 4); a recipe written under `.zensu/` does not count.' <<<"$REPORT_FLAT" \
+  && ! grep -qF 'A file that setup writes' <<<"$REPORT_FLAT" \
+  && ! grep -qF 'begin wrote nothing' <<<"$REPORT_FLAT" \
+  && grep -qF 'not begun, because evidence.report.enabled is false' "$EVIDENCE_REPORT_LIB" \
+  && grep -qF 'code: 3, lines' "$EVIDENCE_REPORT_LIB"; then
+  check "P11d a run whose report cannot begin goes on with its verdict, names the cause and edits no ignore file, a begin that puts PASS out of reach tells the user at once, and the criteria lines follow the mode" PASS
+else
+  check "P11d a run whose report cannot begin goes on with its verdict, names the cause and edits no ignore file, a begin that puts PASS out of reach tells the user at once, and the criteria lines follow the mode" FAIL
+fi
+P11_REMEDIES="$(node -e '
+  const src = require("fs").readFileSync(process.argv[1], "utf8");
+  const found = [...src.matchAll(/addFault\(faults, \x27(verdict\.[a-z-]+)\x27,[^\n]*, \x27([^\x27]*)\x27\);$/gm)];
+  const codes = new Set(found.map((m) => m[1]));
+  const ok = found.length >= 6 && ["verdict.contradiction", "verdict.empty", "verdict.tree-changed"].every((code) => codes.has(code))
+    && found.every((m) => /^state (FAIL|PARTIAL)\b/.test(m[2]))
+    && src.includes("link an image already in the report to a step that names") && src.includes("partial`");
+  console.log(ok ? "ok" : `remedies: ${found.map((m) => m[1] + "=" + m[2].slice(0, 13)).join(", ")}`);
+' "$EVIDENCE_REPORT_LIB" 2>&1)"
+if [ "$P11_REMEDIES" = ok ] \
+  && grep -qF '`--verdict` is the verdict the Phase 5 rules give this run, and the report to the user states the same one.' <<<"$REPORT_FLAT" \
+  && grep -qF 'When the remedy opens `state FAIL`, a recorded criterion or P0 row failed: render again with FAIL.' <<<"$REPORT_FLAT" \
+  && grep -qF 'When the remedy opens `state PARTIAL`, render again with PARTIAL, the verdict that remedy opens with, unless the message lists a criterion as `missing` in matrix mode that the run did pass: no row names it, so write that row with `--report-step` and render again with the verdict the Phase 5 rules give.' <<<"$REPORT_FLAT" \
+  && grep -qF "Another row changes no other state: a P0 row the message names stays as written, a criterion with a row that is not \`pass\` stays partial, and in chain mode a criterion's state comes only from its acceptance record" <<<"$REPORT_FLAT" \
+  && grep -qF 'When the same refusal returns, render with the verdict its remedy opens with. State the verdict that rendered in the report to the user too' <<<"$REPORT_FLAT" \
+  && ! grep -qF 'the message names a criterion or a P0 row that the run did pass' <<<"$REPORT_FLAT" \
+  && grep -qF '`criterion.no-image`: a criterion passed through a UI driver, and no row that names it links an image.' <<<"$REPORT_FLAT" \
+  && grep -qF 'write a `skip` row for it whose `observed:` says no image was captured, which leaves it partial, and render PARTIAL' <<<"$REPORT_FLAT" \
+  && grep -qF "In chain mode, where a row does not change a criterion's state, name the code under Limitations and write \`Evidence report: none — criterion.no-image\` as the location line." <<<"$REPORT_FLAT" \
+  && grep -qF 'In chain mode a criterion this run skips because it already passes on this tree through `browser`, `mobile` or `desktop` still takes one row beside the matrix rows' <<<"$REPORT_FLAT" \
+  && grep -qF 'open the screen its record names, take and inspect one screenshot, add it, and write a `pass` row that names the criterion and links that image. Record nothing for it, because its acceptance record stands.' <<<"$REPORT_FLAT" \
+  && grep -qF 'Without that row render refuses the criterion as `criterion.no-image`, and the run ends without a report.' <<<"$REPORT_FLAT" \
+  && grep -qF 'records at render time, so render after the last `--acceptance-record` and `--acceptance-status`.' <<<"$REPORT_FLAT" \
+  && grep -qF 'Any other refusal: name each code under Limitations and write `Evidence report: none — <code>` as the location line. The verdict stays as the Phase 5 rules give it.' <<<"$REPORT_FLAT" \
+  && grep -qF 'A refusal without a `REPORT REFUSED` line writes nothing either, and the Refusals paragraph applies. When render still refuses after it, name the cause under Limitations and write `Evidence report: none — <cause>` as the location line; the verdict stays as the Phase 5 rules give it.' <<<"$REPORT_FLAT"; then
+  check "P11e the rendered verdict is the stated one, a verdict refusal is answered with the verdict the core's remedy opens with unless a matrix criterion only lacked its row, a no-image refusal with an image row or a skip row, a chain-mode pass gives every UI criterion it skips a fresh image row and records nothing for it, and any other refusal keeps the verdict" PASS
+else
+  check "P11e the rendered verdict is the stated one, a verdict refusal is answered with the verdict the core's remedy opens with unless a matrix criterion only lacked its row, a no-image refusal with an image row or a skip row, a chain-mode pass gives every UI criterion it skips a fresh image row and records nothing for it, and any other refusal keeps the verdict ($P11_REMEDIES)" FAIL
+fi
+P11_GATE="$(node -e '
+  const fs = require("fs");
+  const consent = require(process.argv[1]);
+  const doc = fs.readFileSync(process.argv[2], "utf8").replace(/\s+/g, " ");
+  const session = ["zensu", "verify", "p11f"].join("-");
+  const spelled = /`(playwright-cli -s=<session> resize 1440 900)`/.exec(doc);
+  if (!spelled) {
+    console.log("the resize line of rules/browser-verification.md was not found");
+    process.exit(0);
+  }
+  const cli = spelled[1].split(" ")[0];
+  const judge = (command) => consent.evaluate({
+    command,
+    payload: { tool_name: "Bash", tool_input: { command }, permission_mode: "default" },
+    env: {},
+    records: [],
+    policy: null,
+    platform: process.platform,
+  });
+  const out = [];
+  for (const command of [spelled[1].replace("<session>", session), `${cli} -s=${session} screenshot`, `${cli} -s=${session} screenshot --full-page`]) {
+    const verdict = judge(command);
+    if (verdict.verdict !== "none") out.push(`${command.replace(session, "<session>")}: ${verdict.verdict}`);
+  }
+  if (judge(`${cli} -s=${session} resize --zzz 1440 900`).verdict !== "deny") out.push("an unknown resize flag was not denied");
+  console.log(out.length === 0 ? "ok" : out.join("; "));
+' "$CONSENT_MODULE" "$BROWSER_MD" 2>&1)"
+P11_CAPTURE_MISSING=""
+for pair in \
+  "$DRIVERS_MD|xcrun simctl io <UDID> screenshot \"\$RUN_DIR/shots/<row>-<step>.png\"" \
+  "$MOBILE_MD|xcrun simctl io <UDID> screenshot \"\$RUN_DIR/shots/<row>-<step>.png\"" \
+  "$DRIVERS_MD|adb -s <serial> exec-out screencap -p > \"\$RUN_DIR/shots/<row>-<step>.png\"" \
+  "$MOBILE_MD|adb -s <serial> exec-out screencap -p > \"\$RUN_DIR/shots/<row>-<step>.png\"" \
+  "$DRIVERS_MD|screencapture -x -o -l<window id> \"\$RUN_DIR/shots/<row>-<step>.png\"" \
+  "$DESKTOP_MD|screencapture -x -o -l<window id>" \
+  "$DRIVERS_MD|tmux -L <prefix>-tui capture-pane -p -t main > \"\$RUN_DIR/shots/<row>-<step>.txt\"" \
+  "$CLI_MD|tmux -L <prefix>-tui capture-pane -p -t main" \
+  "$DRIVERS_MD|--kind text --plane visual" \
+  "$DRIVERS_MD|--kind request --method <METHOD> --path '<path>' --status <code>" \
+  "$DRIVERS_MD|before the first capture with \`mkdir -p \"\$RUN_DIR/shots\"\`" \
+  "$MOBILE_MD|\`mkdir -p \"\$RUN_DIR/shots\"\`" \
+  "$REPORT_MD|--report-add --report <id> --kind image --file \"<run dir>/browser/<file>\" --viewport 1440x900@1" \
+  "$DRIVERS_MD|--kind run --evidence-run er1_" \
+  "$DRIVERS_MD|**Phase 5.** The report to the user adds these lines:" \
+  "$BROWSER_MD|--report-add --report <id> --kind image --file \"<run dir>/browser/<file>\" --viewport 1440x900@1"; do
+  grep -qF -- "${pair#*|}" "${pair%%|*}" || P11_CAPTURE_MISSING="$P11_CAPTURE_MISSING $(basename "${pair%%|*}"):${pair#*|}"
+done
+if [ "$P11_GATE" = ok ] && [ -z "$P11_CAPTURE_MISSING" ] \
+  && grep -qF 'a screenshot that a host tool (the simulator, emulator or computer-use tool) returns only to the conversation cannot enter the report.' <<<"$DRIVERS_FLAT" \
+  && grep -qF "Right after every \`open\` without \`--device\` or \`--mobile\`, run \`playwright-cli -s=<session> resize 1440 900\`, so every screenshot is 1440 by 900 at scale 1." <<<"$BROWSER_FLAT" \
+  && grep -qF 'A request or a console item enters only for an unauthenticated target' <<<"$BROWSER_FLAT" \
+  && grep -qF 'A screenshot that a host tool returns only to the conversation cannot enter' <<<"$REPORT_FLAT"; then
+  check "P11f each driver's report capture is a file beneath the run directory, spelled as its driver rule file spells it, and the browser resizes to 1440 by 900 first, in calls the consent gate admits as documented" PASS
+else
+  check "P11f each driver's report capture is a file beneath the run directory, spelled as its driver rule file spells it, and the browser resizes to 1440 by 900 first, in calls the consent gate admits as documented ($P11_GATE;$P11_CAPTURE_MISSING)" FAIL
+fi
+P11_PATHS="$(node -e '
+  const fs = require("fs");
+  const minimum = { path: 3, recipe: 1, origin: 1, class: 2 };
+  const flags = Object.keys(minimum).join("|");
+  const unquoted = (text) => [...text.matchAll(new RegExp(`--(?:${flags})\\s+(?!\\x27)\\S+`, "g"))].map((m) => m[0]);
+  const quoted = (text, flag) => [...text.matchAll(new RegExp(`--${flag}\\s+\\x27[^\\x27\\n]+\\x27`, "g"))].length;
+  const strayLog = (text) => [...text.matchAll(/--log\s+(?!")\S+/g)].map((m) => m[0]);
+  const doubleLog = (text) => [...text.matchAll(/--log\s+"[^"\n]+"/g)].length;
+  const out = [];
+  if (unquoted("x --path /a/b y").length !== 1 || unquoted("x --path \x27/a/b\x27 y").length !== 0 || quoted("x --path \x27/a/b\x27 y", "path") !== 1
+    || unquoted("x --class <class> y").length !== 1 || quoted("x --class \x27<class>\x27 y", "class") !== 1
+    || strayLog("x --log \x27<run log>\x27 y").length !== 1 || strayLog("x --log /a b").length !== 1
+    || strayLog("x --log \"<run log>\" y").length !== 0 || doubleLog("x --log \"<run log>\" y") !== 1) {
+    out.push("the value scan does not tell a quoted value from an unquoted one");
+  }
+  const totals = Object.fromEntries(Object.keys(minimum).map((flag) => [flag, 0]));
+  let logs = 0;
+  for (const file of process.argv.slice(1)) {
+    const text = fs.readFileSync(file, "utf8");
+    out.push(...unquoted(text).map((hit) => `${file}: ${hit}`));
+    out.push(...strayLog(text).map((hit) => `${file}: ${hit}`));
+    for (const flag of Object.keys(minimum)) totals[flag] += quoted(text, flag);
+    logs += doubleLog(text);
+  }
+  for (const [flag, least] of Object.entries(minimum)) {
+    if (totals[flag] < least) out.push(`${totals[flag]} single-quoted --${flag} values, expected at least ${least}`);
+  }
+  if (logs < 2) out.push(`${logs} double-quoted --log values, expected at least 2`);
+  console.log(out.length === 0 ? "ok" : out.join("; "));
+' "$REPORT_MD" "$DRIVERS_MD" "$BROWSER_MD" 2>&1)"
+if [ "$P11_PATHS" = ok ] && grep -qF 'Single-quote the path, because a request path can hold' <<<"$REPORT_FLAT" \
+  && grep -qF 'and write a single quote in it as `%27`. Replace a token, a code, an e-mail address or an opaque id in a path segment with a placeholder such as `/reset/:token` or `/users/:id`.' <<<"$REPORT_FLAT" \
+  && ! grep -qF 'A path that holds a single quote is not added' <<<"$REPORT_FLAT" \
+  && grep -qF 'as a single-quoted path relative to the project root; leave it out when none exists, when the file lies outside the project, or when its path holds anything but letters, digits, `.`, `_`, `-` and `/`.' <<<"$REPORT_FLAT"; then
+  check "P11g every --path, --recipe, --origin and --class value in the report, driver and browser rules is single-quoted and the chain-mode --log value double-quoted, a quote in a path is %27, an identifying path segment is a placeholder, and --recipe takes only plain path characters" PASS
+else
+  check "P11g every --path, --recipe, --origin and --class value in the report, driver and browser rules is single-quoted and the chain-mode --log value double-quoted, a quote in a path is %27, an identifying path segment is a placeholder, and --recipe takes only plain path characters ($P11_PATHS)" FAIL
+fi
+if grep -qF 'let no line of the text start with `REPORT_`, because a line equal to the delimiter ends the heredoc early. Write what a page showed as a one-line paraphrase, never as pasted page text.' <<<"$REPORT_FLAT" \
+  && ! grep -qF 'so no line of the text can end the heredoc early' <<<"$REPORT_FLAT" \
+  && grep -qF 'Replace a credential, token, cookie or personal identifier in any line, the request and the criteria included, with `[redacted]` before it goes on stdin.' <<<"$REPORT_FLAT" \
+  && grep -qF '**Refusals.** A verb that refuses writes nothing, and this holds for every verb, `--report-step` included.' <<<"$REPORT_FLAT" \
+  && grep -qF 'When the refusal names a text cap, a missing or malformed stdin line, a local path or a file that does not exist, fix that field and run the same call once more.' <<<"$REPORT_FLAT" \
+  && grep -qF 'When it names the secret screen, remove the secret value, name only the kind of value it was and run the call once more; never re-spell a secret to get past the screen.' <<<"$REPORT_FLAT" \
+  && grep -qF "A hook that denies a report command saw the browser CLI or a path it guards in the command's text: rewrite that text without it and run the call once more." <<<"$REPORT_FLAT" \
+  && grep -qF 'A hook denial that names a secret pattern is answered like the secret screen: remove the value and name only its kind, and never add the allow marker that denial offers, because a report refuses a text that carries it.' <<<"$REPORT_FLAT" \
+  && grep -qF 'A `consent:` route admits no brackets, so write such a segment there as a placeholder, as section 2 does for `--path`, such as `/invite/:token`.' <<<"$REPORT_FLAT" \
+  && grep -qF 'carries the ${ALLOW_MARKER} marker, which a report does not honor' "$EVIDENCE_REPORT_LIB" \
+  && grep -qF 'const ROUTE_RE = /^\/[A-Za-z0-9\-._~!$&'\''()*+,;=:@%/]*$/;' "$EVIDENCE_REPORT_LIB" \
+  && grep -qF 'When the call refuses again, or for any other cause, name the cause under Limitations and go on without that capture or row' <<<"$REPORT_FLAT" \
+  && grep -qF 'A refused add follows the Refusals paragraph.' <<<"$REPORT_FLAT" \
+  && grep -qF 'a row that stays refused after the Refusals paragraph is named under Limitations' <<<"$REPORT_FLAT" \
+  && ! grep -qF 'correct the caption or the file path' <<<"$REPORT_FLAT"; then
+  check "P11h rules/report.md keeps credentials and personal identifiers out of every line, a consent route included, lets no text line start with the delimiter prefix, and answers every refused verb, a hook denial and a secret-scan denial included, with one retry rule that never re-spells a secret or adds the allow marker" PASS
+else
+  check "P11h rules/report.md keeps credentials and personal identifiers out of every line, a consent route included, lets no text line start with the delimiter prefix, and answers every refused verb, a hook denial and a secret-scan denial included, with one retry rule that never re-spells a secret or adds the allow marker" FAIL
+fi
+if grep -qF 'The plugin screens text, never pixels, so add an image only after you inspected it for any of these.' <<<"$REPORT_FLAT" \
+  && grep -qF "What the run keeps out of the conversation stays out of the report too: credentials, tokens, cookies, personal data, raw console or log lines, the run's signed-in state, and the console and network output of an authenticated target." <<<"$REPORT_FLAT" \
+  && grep -qF 'An image that shows personal data, or a signed-in page of any account other than a dedicated test account with synthetic data, is not added: retake it on a state that shows neither, or leave the criterion without an image, which section 4 answers.' <<<"$REPORT_FLAT"; then
+  check "P11i an image enters only once inspected and never when it shows personal data or a signed-in page of a real account, and an authenticated target's console and network output stays out of the report" PASS
+else
+  check "P11i an image enters only once inspected and never when it shows personal data or a signed-in page of a real account, and an authenticated target's console and network output stays out of the report" FAIL
 fi
 . "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 unit_check "P11 the run-resource helper's unit file passes" "$RESOURCES_UNIT"

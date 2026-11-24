@@ -841,6 +841,52 @@ else
   check "P17g suggestions only on validated RIGHT anchors, dropped on remap, single-line on GitLab" FAIL
 fi
 
+p17j_flat_has() {
+  local flat
+  flat="$(tr '\n' ' ' < "$1" | tr -s ' ')"
+  case "$flat" in
+    *"$2"*) return 0 ;;
+  esac
+  return 1
+}
+P17J_STATEMENT='On GitLab, where the skill validates no anchor, this condition reads: the anchor is one line on side `RIGHT`, so a `LEFT` anchor, a comment without a line and a body-only finding never carry one. The driver'"'"'s preflight then places the anchor or degrades its discussion, and GitLab cannot apply the block of a degraded one (`rules/gitlab-publish.md`).'
+if p17j_flat_has "$PUBLISH_RULE" "$P17J_STATEMENT" \
+   && p17j_flat_has "$PUBLISH_RULE" 'On GitLab the driver'"'"'s `--post-review` runs its own anchor preflight over every page of the merge request'"'"'s diffs and turns an anchor it cannot place into a positionless discussion with the path in its body (`rules/gitlab-publish.md`), so the skill runs no `--pr-diff` read there, and a suggestion takes the GitLab form of the anchor condition in § Suggested changes.' \
+   && p17j_flat_has "$GITLAB_RULE" 'The conditions in `rules/github-publish.md` § Suggested changes apply, the anchor condition in the GitLab form stated there.' \
+   && p17j_flat_has "$SKILL_DIR/references/publish.md" 'The `suggestion` block is optional and is emitted only under the conditions in `rules/github-publish.md` § Suggested changes (on GitLab its fence reads `suggestion:-0+0`, `rules/gitlab-publish.md`, and its anchor condition takes the GitLab form stated in that section).' \
+   && ! p17j_flat_has "$GITLAB_RULE" 'one line on side' \
+   && ! p17j_flat_has "$SKILL_DIR/references/publish.md" 'one line on side' \
+   && ! p17j_flat_has "$GITLAB_RULE" '§ Suggested changes apply unchanged'; then
+  check "P17j the GitLab anchor condition of a suggestion is stated once and whole, in the GitHub rule, and three whole pointer sentences point at it, all matched across line breaks" PASS
+else
+  check "P17j the GitLab anchor condition of a suggestion is stated once and whole, in the GitHub rule, and three whole pointer sentences point at it, all matched across line breaks" FAIL
+fi
+P17_FX="$(mktemp -d "${TMPDIR:-/tmp}/zensu-p17-fx.XXXXXX")"
+if [ -z "$P17_FX" ] || [ ! -d "$P17_FX" ]; then
+  check "P17k setup: a private temporary directory for the statement copies" FAIL
+else
+  P17_NL='
+'
+  P17_S1="${P17J_STATEMENT/never carry one./never carry it.}"
+  P17_S2="${P17J_STATEMENT/cannot apply the block/can apply the block}"
+  P17_WRAP="${P17J_STATEMENT/where the skill validates/where the skill${P17_NL}  validates}"
+  printf 'Before the statement.\n%s\nAfter the statement.\n' "$P17_S1" > "$P17_FX/s1.md"
+  printf 'Before the statement.\n%s\nAfter the statement.\n' "$P17_S2" > "$P17_FX/s2.md"
+  printf 'Before the statement.\n%s\nAfter the statement.\n' "$P17_WRAP" > "$P17_FX/wrap.md"
+  printf 'A suggestion needs an anchor that is one line on\nside `RIGHT` there.\n' > "$P17_FX/dup.md"
+  if [ "$P17_S1" != "$P17J_STATEMENT" ] && [ "$P17_S2" != "$P17J_STATEMENT" ] && [ "$P17_WRAP" != "$P17J_STATEMENT" ] \
+     && ! p17j_flat_has "$P17_FX/s1.md" "$P17J_STATEMENT" \
+     && ! p17j_flat_has "$P17_FX/s2.md" "$P17J_STATEMENT" \
+     && p17j_flat_has "$P17_FX/wrap.md" "$P17J_STATEMENT" \
+     && ! grep -qF 'one line on side' "$P17_FX/dup.md" \
+     && p17j_flat_has "$P17_FX/dup.md" 'one line on side'; then
+    check "P17k the P17j checks fail on a copy of the statement with one word changed in either sentence, pass on a copy wrapped at another place, and find a wrapped restatement that a line-bound grep misses" PASS
+  else
+    check "P17k the P17j checks fail on a copy of the statement with one word changed in either sentence, pass on a copy wrapped at another place, and find a wrapped restatement that a line-bound grep misses" FAIL
+  fi
+  rm -rf "$P17_FX"
+fi
+
 if grep -qF '**Collapsing.**' "$WORKFLOW_MD" \
    && grep -qF 'Never collapse a P1 finding, the verdict, or the uncovered-files list.' "$WORKFLOW_MD" \
    && grep -qF '**Angle brackets.**' "$WORKFLOW_MD" \

@@ -135,9 +135,13 @@ Every run writes a **run config** into its own run directory with
 `scripts/verify-browser-config.js` and opens the browser with it, under a session named
 `zensu-verify-<run>`. The run config makes the browser isolated, restricts every HTTP(S) request
 to the run's origins (`network.allowedOrigins`) except a server redirect the browser follows — a
-WebSocket connection is not fenced by it, which is an open gap — blocks service workers, and
-keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
+WebSocket connection and a shared worker's fetch are not fenced by it, which are open gaps —
+blocks service workers, and keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
+
+The shared worker case was measured with playwright-cli 0.1.24 driving Google Chrome 157 on
+loopback `http` origins: a dedicated worker's fetch is fenced, a shared worker's fetch is not. An
+`https` target, a remote host, Windows and Linux were not measured.
 
 Blocking service workers has a cost to plan for. A state that depends on a service worker never
 appears in this browser, so the `browser` driver cannot verify a PWA's update prompt, its offline
@@ -223,9 +227,10 @@ Code, the gate runs in consent mode (`/zensu:doctor` reports this as
   before the browser starts. No credentials, no query or fragment in a navigation to a
   non-loopback origin, and the browser sends no HTTP(S) request to an origin outside the run
   config, except by following a server redirect (below). A WebSocket connection is not fenced by
-  the run config, which is an open gap. A loopback URL may carry a query or a fragment, such as a
-  fixture switch (`http://localhost:4200/?scenario=empty`): it is judged like the same URL without
-  them, and the consent record names the path only.
+  the run config, which is an open gap, and neither is a shared worker's fetch (measured, see
+  [How the browser is fenced](#how-the-browser-is-fenced)). A loopback URL may carry a query or a
+  fragment, such as a fixture switch (`http://localhost:4200/?scenario=empty`): it is judged like
+  the same URL without them, and the consent record names the path only.
 - An API or identity origin of a deployed app that its pages call is passed to the run as one
   more origin: it is asked in the same prompt as the app and never navigated to.
 - Under bypass permissions or `dontAsk`, or when the host reports no permission mode, the gate
@@ -250,7 +255,7 @@ control, not a proof: a forged record skips the prompt for a loopback origin, an
 bounds what it could reach to other loopback services; for a remote origin it skips only the
 prompt of a `goto` or `tab-new`, and the browser admits only the origins of the run config it was
 launched with. And the browser follows a server redirect to another origin even though
-it refuses every other HTTP(S) request there, so the skill checks the page URL after every navigation and
+it refuses an HTTP(S) request from a page or a dedicated worker there, so the skill checks the page URL after every navigation and
 stops a scenario that left the approved set. With a policy present its targets pass without a
 prompt, and every other origin is asked or, where the session cannot show the prompt, denied, as the sections
 below describe.
@@ -334,8 +339,9 @@ written for it. These limits are stated rather than hidden:
   types into a form. The list is yours, declared in the launch environment, bounded at 8 exact
   origins, and in remote mode public `https://` only, pinned to an approved address, so no entry
   reaches a private, metadata or loopback address.
-- The fence covers HTTP(S) only: page code can open a WebSocket connection to any origin, listed
-  or not.
+- The fence covers HTTP(S) requests from pages and dedicated workers only: page code can open a
+  WebSocket connection to any origin, listed or not, and a shared worker's fetch is not fenced
+  either.
 
 Consent mode has no network-only class: the helper refuses `--network-only-origin` without a
 policy. A loopback API origin of a local run, or a public HTTPS one of a remote run, is then
@@ -405,7 +411,7 @@ already names; the port rules below are for that case.
   refuses to trust DNS for a boundary decision.
 - **An API on another origin goes into the recipe under `validate.networkOnly`.** The browser
   requests nothing over HTTP(S) from an origin outside `allowedOrigins`, a followed server
-  redirect aside, so a frontend on
+  redirect, a WebSocket connection and a shared worker's fetch aside, so a frontend on
   `http://localhost:4200` that calls an API on `http://localhost:9090` needs both origins in the
   run config. List the API origin in the recipe's `validate.networkOnly.origins`. In consent mode
   the skill passes it as an ordinary origin, and one prompt covers both; under a policy that
@@ -711,3 +717,53 @@ second `open` of the same run config is denied, so a fresh browser means a fresh
   isolated organization with synthetic data only.
 - A login that needs a second factor or a CAPTCHA a script cannot pass keeps the visible manual
   login, as does a recipe without an `auth` block.
+
+## 7. The evidence report
+
+Every run that creates its run directory writes one evidence report, for PASS, FAIL and PARTIAL
+alike: a bundle with a versioned `manifest.json`, the captures it names and a static `index.html`
+that shows, per criterion and per matrix row, what was exercised, what was observed and which
+capture backs it. It is written locally, needs no Zensu account, no network and no forge CLI, and
+the run sends it nowhere ([the evidence report spec](verify-feature-evidence-report-spec.md)).
+
+- **Where it is.** The report to you names it on the line right above the final verdict line, as
+  `Evidence report: <path>/index.html`. The store is `evidence-report/v1/` in the plugin's data
+  directory, unless your user configuration's `evidence.report.dir` names another directory
+  ([Evidence Reports](configuration.md#evidence-reports)).
+- **How long it stays.** The store keeps the newest 30 reports of each repository
+  (`evidence.report.keep`) and at most 2 GiB in all (`evidence.report.maxBytes`); each
+  `--report-begin` deletes the oldest reports beyond those limits, sparing an unrendered report
+  touched in the last 14 days. No verb deletes one report: remove its `<id>` directory and the
+  `<id>.binding.json` beside it in the store. Setting `evidence.report.enabled` to `false` deletes
+  none of the reports already stored.
+- **What it holds.** The screenshots and text captures the run wrote beneath its run directory and
+  inspected, the requests and console signals of an unauthenticated target, and every matrix row
+  with its expected and observed text. A screenshot that a host tool returns only to the
+  conversation cannot enter it, so each driver that has a screen or an output also writes a file
+  capture, and a browser screenshot is taken at 1440 by 900. The capture rules keep credentials,
+  tokens, cookies, personal data, raw console and log lines and a run's signed-in state out of it.
+  As a backstop a text that matches a secret pattern is refused and local paths are replaced
+  before anything is stored, but nothing scans a screenshot or finds personal data in free text,
+  so a signed-in run uses the dedicated test account with synthetic data of section 6.
+- **Its verdict is the run's verdict.** The report refuses a verdict its own records contradict,
+  and the run then renders the verdict the refusal names, unless it only lacked the row of a
+  criterion it passed, which it writes first; the report and the chat state the same verdict. A
+  PASS is refused when a criterion or a P0 row failed or did not pass (`verdict.contradiction`),
+  when nothing passed (`verdict.empty`), in a local run in matrix mode when the working tree
+  changed between begin and render or could not be fingerprinted (`verdict.tree-changed`; a file
+  that a runtime, fixture or authentication step writes outside `.zensu/` and git does not ignore
+  is enough, and a project that was outside git at begin is exempt), and when a criterion passed
+  through `browser`, `mobile` or `desktop` without an image (`criterion.no-image`; a `desktop`
+  criterion off macOS has no file capture, so in matrix mode it ends partial). Setting
+  `evidence.report.enabled` to `false` turns the report and these refusals off together.
+- **One lane.** While a report is begun, the run drives every row in one lane, because a report
+  takes only the files of its own run directory; parallel lanes run only when no report is begun.
+- **When there is none.** With `evidence.report.enabled` set to `false` no report is written, and
+  the report to you has no location line. When a report cannot begin, for example because git
+  does not ignore the run directory, the run goes on with its verdict unchanged, writes
+  `Evidence report: none — <cause>` as the location line and names the remedy under Limitations;
+  it never edits `.gitignore` itself. The ignore rule for `.zensu/verify-feature-runs/` is in
+  [the build workflow](build-workflow.md#publication-safety-of-the-plan-and-log).
+- **Earlier reports.** Ask for them: `--report-list` lists this repository's reports, newest
+  first, and `--report-export --report <id>` writes one shareable `export.html` with every image
+  inlined.

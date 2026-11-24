@@ -55,10 +55,15 @@ fi
 grep -q 'ZENSU_EXPECTED_CLAUDE_VERSION is mandatory for the upgrade profile' \
   "$EVAL_DIR/run-eval.sh"
 test ! -e "$ROOT/.github/workflows/session-control-nightly.yml"
-if grep -RqiE --include='*.yml' --include='*.yaml' \
+if grep -RqiE --include='*.yml' --include='*.yaml' --exclude='live-evals.yml' \
   'promptfoo|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CODEX_AUTH|session-control:(selfcheck|contract|upgrade|live|concurrency|adversarial|release)|evals/session-control/(run-eval|run-self-check)\.sh' \
   "$ROOT/.github/workflows"; then
-  echo 'GitHub Actions must not invoke Promptfoo or model credentials' >&2
+  echo 'GitHub Actions must not invoke Promptfoo or model credentials outside live-evals.yml' >&2
+  exit 1
+fi
+if grep -qiE 'CODEX_AUTH|session-control:(selfcheck|contract|upgrade|live|concurrency|adversarial|release)|evals/session-control/' \
+  "$ROOT/.github/workflows/live-evals.yml"; then
+  echo 'live-evals.yml must not run the Session Control evals' >&2
   exit 1
 fi
 

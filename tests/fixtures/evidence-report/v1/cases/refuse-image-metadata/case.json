@@ -1,0 +1,15 @@
+{
+  "description": "A PNG that still carries a tEXt chunk, which --report-add drops before it stores a file.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "file.metadata",
+        "at": "files.3e484a9f001da15667e2fbbf82208c1a796eca0d818ebe1c77976e29b134f35b"
+      }
+    ]
+  }
+}

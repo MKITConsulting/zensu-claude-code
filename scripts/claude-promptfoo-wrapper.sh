@@ -7,6 +7,7 @@ ENRICH_RENDERER="$SCRIPT_DIR/claude-enrichment-render.js"
 FIXTURE_MANIFEST="$SCRIPT_DIR/fixture-manifest.js"
 FIXTURE_MUTATION_WATCH="$SCRIPT_DIR/fixture-mutation-watch.js"
 OWNED_PROCESS="$SCRIPT_DIR/owned-process.js"
+USAGE_LEDGER="$SCRIPT_DIR/eval-usage-ledger.js"
 MUTATION_WATCH_PID=""
 MUTATION_MARKER=""
 MUTATION_READY=""
@@ -205,6 +206,25 @@ if [ -n "${ZENSU_WRAPPER_SETTINGS:-}" ]; then
     exit 64
   fi
   CMD+=(--settings "$ZENSU_WRAPPER_SETTINGS")
+fi
+if [ -n "${EVAL_CLAUDE_MODEL:-}" ]; then
+  case "$EVAL_CLAUDE_MODEL" in
+    ([!A-Za-z0-9]*|*[!]A-Za-z0-9._:[-]*)
+      echo "claude-promptfoo-wrapper: EVAL_CLAUDE_MODEL must be a model alias or id made of letters, digits and . _ : - [ ]" >&2
+      exit 64
+      ;;
+  esac
+  if [ "${#EVAL_CLAUDE_MODEL}" -gt 64 ]; then
+    echo "claude-promptfoo-wrapper: EVAL_CLAUDE_MODEL is longer than 64 characters" >&2
+    exit 64
+  fi
+  CMD+=(--model "$EVAL_CLAUDE_MODEL")
+fi
+if [ -n "${EVAL_USAGE_LEDGER:-}" ]; then
+  case "$EVAL_USAGE_LEDGER" in
+    (/*) ;;
+    (*) echo "claude-promptfoo-wrapper: EVAL_USAGE_LEDGER must be an absolute path" >&2; exit 64 ;;
+  esac
 fi
 case "${ZENSU_WRAPPER_ASK_TOOL:-}" in
   ('') ;;
@@ -559,6 +579,10 @@ fi
 case "$RENDER_RC" in
   ''|*[!0-9]*) RENDER_RC=1 ;;
 esac
+if [ -n "${EVAL_USAGE_LEDGER:-}" ]; then
+  node "$USAGE_LEDGER" append "$RAW_STREAM" "$EVAL_USAGE_LEDGER" "${EVAL_SUITE:-unnamed}" "$CLAUDE_RC" \
+    || echo "claude-promptfoo-wrapper: the usage ledger line was not written" >&2
+fi
 rm -rf "$RENDER_STATUS_DIR"
 RENDER_STATUS_DIR=""
 if [ "$CLAUDE_RC" = "0" ] && [ "$RENDER_RC" != "0" ]; then

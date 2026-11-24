@@ -136,6 +136,19 @@ else
   check "P13d skill enforces neither a .claude/worktrees worktree nor English" PASS
 fi
 
+pin "P14a SKILL.md reads a pull request's diff through the driver's pinned --pr-diff" "$SKILL_MD" 'github) bash "$VCS" --pr-diff --provider github <n> ;;'
+pin "P14b SKILL.md re-detects with the forge the user named after an unknown-forge answer" "$SKILL_MD" 'DETECT="$(bash "$VCS" --detect --provider <github|gitlab> --repo "$(git rev-parse --show-toplevel)")"'
+pin "P14c SKILL.md reads a merge request's diff on GitLab with the repo= value of --detect" "$SKILL_MD" 'gitlab) bash "$VCS" --pr-diff --provider gitlab --repo-id "$REPOID" <n> ;;'
+pin "P14d SKILL.md takes REPOID from the repo= line of --detect" "$SKILL_MD" "REPOID=\"\$(printf '%s\\n' \"\$DETECT\" | sed -n 's/^repo=//p')\""
+pin "P14e SKILL.md names the remote override for a checkout whose remote --detect cannot read" "$SKILL_MD" 'export ZENSU_VCS_REMOTE="$(git remote get-url <remote>)"'
+pin "P14f SKILL.md says the --pr-diff read pins the host on GitHub only" "$SKILL_MD" "\`--pr-diff\`, which pins the pull request's host on GitHub only"
+pin "P14g SKILL.md names the --detect fallback to remotes that all name one project" "$SKILL_MD" 'else the remotes when they all name one project.'
+if grep -qF -- 'or when the checkout has' "$SKILL_MD"; then
+  check "P14h SKILL.md no longer says that a checkout without a tracked remote and origin leaves repo= empty" FAIL
+else
+  check "P14h SKILL.md no longer says that a checkout without a tracked remote and origin leaves repo= empty" PASS
+fi
+
 echo "----"
 echo "test-cover-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

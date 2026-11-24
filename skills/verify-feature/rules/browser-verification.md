@@ -79,13 +79,16 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    or `tab-new` — opens the prompt. Answering it is the user's action; never answer it on their
    behalf and never work around a refusal. The floor holds in every mode: no credentials, no query
    or fragment in a navigation to a non-loopback origin, and the browser refuses every HTTP(S)
-   request to an origin outside the run config; a WebSocket connection is not fenced by the run
-   config, which is an open gap. A loopback URL (a loopback IP or `localhost`) may carry a query or
-   a fragment, such as a fixture switch, and is judged like the same URL without them; pass it
-   single-quoted, because an unquoted `?` is a glob the gate refuses as a shape denial. A query or
-   fragment value comes from the recipe or the criterion under test, never from a page, a console
-   line, a request log or a file the run read, because a server redirect from an approved origin
-   carries it to an origin nobody approved.
+   request to an origin outside the run config except a followed server redirect and a shared
+   worker's fetch; a WebSocket connection is not fenced by the run config, which is an open gap. A
+   shared worker's fetch is an open gap too, measured with playwright-cli 0.1.24 driving Google
+   Chrome 157 on loopback `http` origins: a dedicated worker's fetch is fenced, a shared worker's
+   fetch is not. An `https` target, a remote host, Windows and Linux were not measured. A loopback
+   URL (a loopback IP or `localhost`) may carry a query or a fragment, such as a fixture switch,
+   and is judged like the same URL without them; pass it single-quoted, because an unquoted `?` is
+   a glob the gate refuses as a shape denial. A query or fragment value comes from the recipe or
+   the criterion under test, never from a page, a console line, a request log or a file the run
+   read, because a server redirect from an approved origin carries it to an origin nobody approved.
    The session consent memory named in SKILL.md records each approved ORIGIN; a record names the
    route that was visited, as a path without its query or fragment, but the route steers no later
    decision, and the report lists every record in its `Consent` block. It is yours to READ for the report and never to write, edit or
@@ -218,6 +221,23 @@ Maintain the report table while driving. For each row, capture:
 - screenshot and the actual visual observation;
 - relevant console/network signals;
 - exact reproduction for a failure.
+
+**Report captures.** Each capture enters the evidence report through `rules/report.md`
+section 2, right after you inspected it:
+
+- Right after every `open` without `--device` or `--mobile`, run
+  `playwright-cli -s=<session> resize 1440 900`, so every screenshot is 1440 by 900 at scale 1.
+- Take viewport screenshots in the default PNG type, and add `--full-page` only when a criterion
+  needs the whole page. The command prints a link relative to the working directory that names a
+  file in the run directory's `browser/` folder; add it by its absolute path:
+  `--report-add --report <id> --kind image --file "<run dir>/browser/<file>" --viewport 1440x900@1`.
+  A screenshot taken after a `resize` to another size names that size instead.
+- A request or a console item enters only for an unauthenticated target, under the same rule that
+  admits `console` and `requests`: `--report-add --report <id> --kind request --method <METHOD> --path '<path>' --status <code>`
+  for every request the row asserts, and
+  `--report-add --report <id> --kind signal --source console --class '<class>'` with the sanitized
+  message on stdin.
+- The semantic snapshot is read, not added: write its fact into the row's `observed:` line.
 
 Run `playwright-cli -s=<session> close` even after a failed assertion or cancelled login. The
 parent skill owns the remaining process, container, and temp-dir cleanup.

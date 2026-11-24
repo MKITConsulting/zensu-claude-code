@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-20
+
+### Added
+
+- **verify-feature**: Write an evidence report on every verify-feature run (#660)
+- **verify-feature**: Add the evidence report core, its report verbs and the conformance corpus (#593)
+
+### Changed
+
+- **windows**: Judge each Windows shard by its newest run attempt (#659)
+- **live-evals**: Run the Promptfoo evals nightly against the newest Claude Code (#637)
+- **vcs**: Add fake-backed checks for the GitHub review-markers listing (#646)
+- **cli**: Drop the 0.15.0 tree gap and name the 0.22.0 file flags in the plm catalog (#647)
+
+### Fixed
+
+- **acceptance**: Keep the plan disclosure on refusals and pin the run-facts split (#662)
+- **implement**: Pick the doc type from the feature scope and skip a new revision while one is open (#661)
+- **vcs**: Route the skills' GitHub calls through host-pinned driver verbs (#656)
+- **vcs**: Refuse hostless remotes and name the remote refusal remedies (#654)
+- **vcs**: Read every remote as the GitHub verbs pin it (#655)
+- **verify-feature**: Name a shared worker's fetch as a third exception to the browser fence (#642)
+- **gate**: Classify zensu ai-work recover as a capture mutation (#632)
+- **vcs**: Pin the pull request's host on every GitHub gh call (#650)
+- **autopilot**: Carry a durable run through a session-trail takeover (#651)
+- **hooks**: Record nothing on the plan gate's unattended default (#653)
+- **hooks**: Record nothing when the route question is refused (#649)
+
 ## [0.41.0] - 2026-11-18
 
 ### Added
@@ -82,6 +110,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   confirmation, the `zensu-plm` agent names the end without paths, and `test-pulse-skill.sh`
   pins each block whole. C4 of `test-zensu-plm-arg-guidance.sh` counts a catalog line only by
   the command spans before its description.
+- **CLI write-gate**: zensu-cli 0.22.0's `zensu ai-work recover` is an AI-work capture
+  mutation, `recover_ai_work_capture`. The main thread runs it without a skill window, also in
+  direct mode, and a subagent is denied with a reason that leaves the command to the main
+  thread. A localhost backend reading never lifts that deny, also without the word reader,
+  because the verb sends no request but changes the local capture receipts. The recorded CLI
+  tree moves to 0.22.0, the drift test exempts only the bare `update` leaf, and the
+  `pulse-session` live scenario expects `zensu pulse start` or `zensu pulse summary`.
 
 ## [0.40.2] - 2026-11-17
 

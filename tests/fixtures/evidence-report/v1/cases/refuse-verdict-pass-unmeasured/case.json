@@ -1,0 +1,15 @@
+{
+  "description": "Verdict PASS in local matrix mode inside git while the tree could not be fingerprinted at --report-begin or at --report-render.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "verdict.tree-changed",
+        "at": "verdict"
+      }
+    ]
+  }
+}
