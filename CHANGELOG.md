@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-11-25
+
+### Added
+
+- **verify-feature**: Store verified lossless WebP in evidence reports and add the viewer policy (#680)
+
+### Changed
+
+- **clock-shift**: Put the retention and receipt tests on one clock (#684)
+- **rules**: Correct stale facts and remove review history (#668)
+- **changelog**: List #671 in the 0.43.0 section (#682)
+
+### Fixed
+
+- **evals**: Stop the live-eval graders from failing correct replies (#674)
+- **evals**: Let the verify-feature live eval pass on macOS 26 with promptfoo 0.121.20 (#675)
+- **doctor**: Make a linked session's desktop-store miss visible (#676)
+
 ## [0.43.0] - 2026-11-25
 
 ### Added
