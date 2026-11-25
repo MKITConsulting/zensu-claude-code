@@ -198,13 +198,17 @@ config held in a variable and a relative config handed to a wrapper are refused,
    `--json/--raw/--help/--version` harmless everywhere and a repeated flag denied. `COMMAND_DENIED` and `FLAG_DENIED` scope the refusal to
    `/zensu:verify-feature` and forbid a retry under another session name or program. The arguments
    are parsed by `parseCliArgs`, a port of the CLI's own minimist parser MEASURED against
-   `PLAYWRIGHT_CLI_SOURCE_VERSION` (0.1.24) and pinned by a golden fixture recorded from that
+   `PLAYWRIGHT_CLI_SOURCE_VERSION` (0.1.25) and pinned by a golden fixture recorded from that
    version's own parser; an argument shape it does not recognize denies rather than admits — an
    unknown option on a gated call, and, through step 7, a `zensu-verify` name no call resolves.
    A flag a newer CLI adds stays off the allowlist until a change admits it: 0.1.23 added
    `tab-new --isolated-context`, `find --filename` and `--max-results`, and `--all` on `console`
    and `requests`, and each denies `FLAG_DENIED`; `find --filename` would be a file-write channel
    outside the run directory. The unknown-flag unit case holds all five; 0.1.24 adds no flag.
+   0.1.25 adds `attach --session-color` and `--no-tab-group` and `detach --close-tabs`; `attach`
+   and `detach` stay off the allowlist, so each denies `COMMAND_DENIED`, and the same unit case
+   holds all three. The two new booleans joined `CLI_BOOLEAN_OPTIONS`: a word after either stays
+   a positional word, as it does in the CLI.
    **The per-call order matters:** the wrapper ladder decides only the deny REASON, never whether a
    call is admitted.
 5. **`open`** must carry `--config=<absolute path>`, and the gate reads that file itself through
@@ -611,8 +615,11 @@ announces a prompt rather than a capability the plugin hands itself.
   than copying the set) ↔ `tests/structure/test-verify-feature-skill.sh`.
 - `PLAYWRIGHT_CLI_SOURCE_VERSION` ↔ `parseCliArgs` / `CLI_BOOLEAN_OPTIONS` / `CLI_STRING_OPTIONS` /
   `CLI_BASENAMES` ↔ the golden fixture `tests/structure/fixtures/playwright-cli-argv.v1.json` and
-  its recorder `tests/structure/fixtures/record-playwright-cli-argv.js` ↔ the doctor's version
-  rows. A playwright-cli upgrade re-records the fixture with the recorder FIRST — it runs the new
+  its recorder `tests/structure/fixtures/record-playwright-cli-argv.js` ↔ the recorded command list
+  `tests/structure/fixtures/playwright-cli-commands.v1.json`, whose `version` must equal the
+  constant and whose flag lists are the sorted `flags` keys of each command in the installed
+  `help.json`, which the unit suite compares with it when the measured version is installed ↔
+  the doctor's version rows. A playwright-cli upgrade re-records the fixture with the recorder FIRST — it runs the new
   version's own `minimist.js` and refuses when `program.js` no longer carries the boolean set, the
   minimist call or the `-s`/`-g` folds it asserts — runs the fence probe SECOND with the new
   release first on `PATH` (`tests/integration/verify-fence/probe.mjs`: `matrix` and `remote`,
@@ -624,12 +631,14 @@ announces a prompt rather than a capability the plugin hands itself.
   `sessionName || process.env.PLAYWRIGHT_CLI_SESSION` precedence and records `pkg.bin`, which the
   unit suite compares with `CLI_BASENAMES`. The version is hand-copied as prose into
   `skills/verify-feature/SKILL.md` (pinned by `P6f`), `README.md` (`P7d`), `docs/verify-feature.md`
-  (the install block and the troubleshooting table), `docs/gates.md` (the install command and the
-  golden-recording sentence), the verify-feature troubleshooting row of `docs/operations.md`,
+  (the install block and the troubleshooting table), `docs/gates.md` (the install command, the
+  golden-recording sentence and the command-list sentence), the verify-feature troubleshooting
+  row of `docs/operations.md`,
   `skills/doctor/SKILL.md`, `skills/autopilot/rules/config.md`, the
   `## [Unreleased]` upgrade note of `CHANGELOG.md` (`P9e`), `evals/verify-feature/README.md`, the
-  Electron sentence of `.claude/rules/verify-feature-drivers.md` and this rule file (step 4 and
-  the run-config measurement), and as a literal into the unit pin beside the
+  Electron sentence of `.claude/rules/verify-feature-drivers.md`, the integration-test sentence
+  of `.claude/rules/verify-auth-guard.md` and this rule file (step 4 and the run-config
+  measurement), and as a literal into the unit pin beside the
   constant. `P7e` derives the version from the module and requires the pinned install command, in
   backticks, in the skill, `README.md`, the three docs pages — in `docs/verify-feature.md` only the
   troubleshooting row carries that form — the doctor skill and the autopilot config rule; `P7h`
@@ -782,14 +791,16 @@ an entry that names another version, or do not list the measured version: an unp
 measured version breaks the pinned install command. The `drift-issue` job holds
 `issues: write` and nothing else, checks out nothing and runs only after a successful drift
 job; it opens the issue labelled `playwright-cli-drift`, rewrites it when the marker changes,
-and closes it when the report is empty. A red scheduled run comments on or opens the issue
-labelled `playwright-cli-drift-check`; the label, not the title, finds each issue. One
+and closes it when the report is empty. The `notify` job runs after every scheduled run and
+reads the results of both jobs through `env:`: a red run comments on or opens the issue
+labelled `playwright-cli-drift-check`, and a green run closes that issue with a comment that
+links the run; the label, not the title, finds each issue. One
 concurrency group serializes every run, so a dispatch and the nightly run never race on an
 issue. A dispatch runs both jobs on the ref it names, so a dispatch from a branch writes the
 issue from that branch's constant until the next nightly run on `main` corrects it. Not read:
 `dist-tags`, publish times and deprecations. `tests/structure/test-playwright-cli-drift.sh`
 pins the workflow graph, runs the script against fixture metadata with spies that admit one
-`curl` and no package manager, archiver or CLI, runs the compare, issue and red-run steps
+`curl` and no package manager, archiver or CLI, runs the compare, issue and `notify` steps
 against a fake `gh`, and requires three mutants (release order by text, an unanchored stable
 filter, a whole-body marker match) to give the wrong answer their cases refuse. Like
 `tests/structure/test-gitlab-live-workflow.sh`, the guard of the GitLab `drift` and
@@ -1133,6 +1144,57 @@ the update check's shell resolves. **Release class: `patch`.** No schema field, 
 matcher, config key or attestation moves, and the gate decides every call as before; the one
 consequence is that `checkReadiness` now refuses every version but 0.1.24, 0.1.21 included, which
 the `## [Unreleased]` upgrade note of `CHANGELOG.md` states.
+
+**The 0.1.25 measurement (2026-11-25).** The fixture was re-recorded from the npm package,
+installed with `--ignore-scripts`; the recorder raised no refusal, and the recording differs
+from 0.1.24's in `source.version`, in `source.playwrightCore` (1.66.0-alpha-1794252756000 to
+1.66.0-alpha-2026-11-18) and in two entries of `booleanOptions`, `close-tabs` and `no-tab-group`,
+which now stand in `CLI_BOOLEAN_OPTIONS`. The recorded command list was regenerated from the new
+`help.json`: it names the same 102 commands, and only `attach` (`no-tab-group`, `session-color`)
+and `detach` (`close-tabs`) gained flags. READ, comparing both installed packages: the CLI
+client's `minimist.js` and `registry.js`, the entry point `playwright-cli.js` and `skillCheck.js`
+are identical, so the once-a-day update check is as in 0.1.24. All three new flags belong to
+extension mode: `--no-tab-group` and `--session-color` name the tab group of an attached session,
+and `detach --close-tabs` closes its tabs and throws for a session that was not attached with
+`--extension`. The new environment names are `PLAYWRIGHT_MCP_SESSION_NAME` and
+`PLAYWRIGHT_MCP_SESSION_COLOR`, inside the prefix `ambientOverride` and `AMBIENT_TEXT_RE` already
+judge; a set comparison of the upper-case names the bundle, the client and the entry point read
+through `process.env` finds no other difference. The new config keys `sessionName` and
+`sessionColor` lie outside `GLOBAL_CONFIG_HARMLESS` and outside the key set of `runConfigShape`:
+called directly, `runConfigShape` refuses a run config that carries either and `globalConfigFault`
+a global config that sets either, and the config-file locations are unchanged. The four
+run-config fences keep their names and their readers: the bundle diff holds no hunk in the
+request interception over `network.allowedOrigins`, `originOrHostGlob`, the `launchOptions.proxy`
+bypass translation, the service-worker block, `PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK`,
+`parseConfigFile` or the isolated contexts, and the only change to the browser's own switches is
+one more default,
+`--optimization-guide-performance-class=8`, which skips an on-device model benchmark. Beside them
+0.1.25 drops `--no-sandbox` for the `chromium` channel from the extension launcher on Linux,
+gives a CDP connect a 10 s `maxPageAttachTime`, and moves the bundled Chromium from revision 1254
+(158.0.8127.18) to 1255 (159.0.8154.6); none of these is a fence the gate relies on. MEASURED on
+macOS 26.7.2, arm64, headless, with the fence probe: `matrix` with Google Chrome 158.0.8127.37,
+with Chrome for Testing 159.0.8154.6 (`--browser=chromium`) and with its shell binary
+(`--browser=headless-shell`) passed both judged columns each, with 10 of 10 approved checks, both
+`localhost` listeners among them, and no sink connection from a page, a dedicated worker, a
+shared worker or a service worker; `remote` with Google Chrome 158.0.8127.37 passed both judged
+columns, loading `https://example.com` through its resolver pin and failing `https://example.org`
+with `net::ERR_BLOCKED_BY_CLIENT` under `fence` and `net::ERR_PROXY_CONNECTION_FAILED` under
+`fence-alone`; the `routes-only` reference column still lets a page's WebSocket, a shared
+worker's fetch and WebSocket, a dedicated worker's WebSocket, a service worker's WebSocket and a
+followed redirect reach a sink, and blocks a dedicated worker's fetch; and `gated`, run once the
+constant named 0.1.25, answered `ask` for the `open` and passed 8 of 8 approved checks with no
+sink connection. MEASURED on a plain session with the default channel: a `goto` and a `tab-new
+--isolated-context=probe` to an origin outside `allowedOrigins` failed with
+`net::ERR_BLOCKED_BY_CLIENT`; a `goto` and a `tab-new` on a session that was never opened exit 1
+with the not-open message, leave no process naming that session and list no browser; and the
+response lines the eval grader parses (the `- Page URL:` line, a snapshot `[ref=…]`, the console
+`Errors:` count, a `[GET] … => [200]` request line and the screenshot link) match its patterns.
+UNMEASURED on 0.1.25: Windows, Linux, the Edge and prerelease Chrome channels, a managed proxy
+policy, and which `npm` binary and which `.npmrc` files the update check's shell resolves.
+**Release class: `patch`.** No schema field, key set, hook, matcher, config key or attestation
+moves, and the gate decides every call as before; the one consequence is that `checkReadiness`
+now refuses every version but 0.1.25, 0.1.24 included, which the `## [Unreleased]` upgrade note
+of `CHANGELOG.md` states.
 
 **The network fence measurement (2026-11-18 and 2026-11-19).** Every run below is one of the
 fence probe (`tests/integration/verify-fence/probe.mjs`) with playwright-cli 0.1.24, on a session

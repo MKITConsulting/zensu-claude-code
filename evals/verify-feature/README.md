@@ -117,7 +117,7 @@ ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
 ```
 
 The runner requires authenticated `claude` and `playwright-cli` on `PATH` (the
-run-config helper accepts only the measured version, `playwright-cli` 0.1.24, and the grader in
+run-config helper accepts only the measured version, `playwright-cli` 0.1.25, and the grader in
 `assertions/transcript-check.js` parses its response lines) and the repository's own promptfoo:
 `npm ci` installs the version `package.json` pins, and the runner starts that binary, never one it
 finds on `PATH` (`VERIFY_FEATURE_PROMPTFOO` names another one by absolute path; the runner refuses

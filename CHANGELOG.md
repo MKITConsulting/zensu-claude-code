@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release writes. One remedy covers every such case: start `/zensu:verify-feature` again in a
   session started or reloaded after the update, so that helper and gate come from one
   installation.
+- **verify-feature**: the browser consent gate is now measured against `playwright-cli`
+  0.1.25, and the run-config helper refuses to start a browser verification run on any other
+  version, 0.1.24 included. Upgrade with `npm install -g @playwright/cli@0.1.25`.
+  `brew install playwright-cli` is unpinned: the helper refuses it unless Homebrew ships
+  exactly that version. A session that was running when the plugin updated keeps its earlier
+  plugin root, whose helper still accepts only 0.1.24 and tells you to install 0.1.24 again; do
+  not follow it, but start a fresh session for `/zensu:verify-feature` after upgrading
+  `playwright-cli`.
 
 ## [0.42.0] - 2026-11-20
 
