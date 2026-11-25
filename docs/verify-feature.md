@@ -768,12 +768,19 @@ the run sends it nowhere ([the evidence report spec](verify-feature-evidence-rep
 - **How a screenshot is stored.** As captured, or as a lossless WebP when libwebp's `cwebp` and
   `dwebp` are installed and the report found that the WebP decodes to the captured pixels. A
   screenshot it could not verify stays a PNG, and the line the add prints names the reason.
-  `evidence.report.webp` set to `off` keeps every PNG
-  ([Evidence Reports](configuration.md#evidence-reports)).
-- **What the page can do.** `index.html` carries no script, and a Content-Security-Policy that
-  names only its own images and style sheet. Opened from disk in Chrome, Safari or Firefox it
-  sent no request to a network when it was measured. The policy does not keep a link from being
-  followed, and Firefox does not apply it to files on your disk
+  `evidence.report.webp` set to `off` keeps every PNG, and on Windows every screenshot stays a
+  PNG ([Evidence Reports](configuration.md#evidence-reports)).
+- **When a report stays PNG although libwebp is installed** and no line names a reason, one of
+  four things holds: `evidence.report.webp` is `off`, the run is on Windows, no absolute `PATH`
+  entry of the shell that runs the verb holds `cwebp`, or the pair found there was not accepted.
+  The first `PATH` entry that holds `cwebp` decides: `dwebp` has to sit beside it, and both have
+  to lie outside the project, in a place that not everyone may write or replace through a
+  directory above it.
+- **What the page can do.** `index.html` carries no script and, when this release or a later one
+  rendered it, a Content-Security-Policy that allows only images and the page's own style sheet.
+  Opened from disk in Chrome, Safari or Firefox it sent no request to a network when it was
+  measured. The policy still lets an image from another local file load and does not keep a link
+  from being followed, and Firefox does not apply it to files on your disk
   ([the evidence report spec](verify-feature-evidence-report-spec.md), section 6.6).
 - **Its verdict is the run's verdict.** The report refuses a verdict its own records contradict,
   and the run then renders the verdict the refusal names, unless it only lacked the row of a

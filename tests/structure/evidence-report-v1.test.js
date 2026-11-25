@@ -117,7 +117,11 @@ const STAND_IN_TOOL = [
   "fs.appendFileSync(plan.log, `${JSON.stringify({ tool: plan.tool, program: process.argv[1], args, env: process.env, cwd: process.cwd() })}\\n`);",
   'if (plan.sleepMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, plan.sleepMs);',
   'if (plan.exit) process.exit(plan.exit);',
-  "if (plan.output) fs.copyFileSync(plan.output, args[args.indexOf('-o') + 1]);",
+  "const target = args[args.indexOf('-o') + 1];",
+  'if (plan.output) fs.copyFileSync(plan.output, target);',
+  'if (plan.link) fs.symlinkSync(plan.link, target);',
+  'if (plan.folder) fs.mkdirSync(target);',
+  "if (plan.fifo) require('node:child_process').execFileSync(plan.fifo, [target]);",
   '',
 ].join('\n');
 
@@ -172,6 +176,8 @@ function pngOf(spec) {
   header.writeUInt32BE(spec.height, 4);
   header[8] = spec.depth || 8;
   header[9] = spec.colour === undefined ? (channels === 3 ? 2 : 6) : spec.colour;
+  header[10] = spec.compression || 0;
+  header[11] = spec.filter || 0;
   header[12] = spec.interlace || 0;
   const data = spec.idat === undefined ? [zlib.deflateSync(Buffer.concat(lines))] : [].concat(spec.idat);
   return Buffer.concat([
@@ -228,19 +234,19 @@ function standInTools(plans = {}, directory = tempDir('tools')) {
     plan(tool, plans[tool]);
   }
   const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : []);
-  const answer = (name, bytes) => {
-    const target = path.join(directory, name);
-    fs.writeFileSync(target, bytes);
-    return target;
+  const reply = (tool, bytes) => {
+    const output = path.join(directory, `${tool}.answer`);
+    fs.writeFileSync(output, bytes);
+    plan(tool, { output });
   };
-  return { directory, plan, calls, answer };
+  return { directory, plan, calls, reply };
 }
 
-function verifiedTools(width, height, pixels, channels, webpOptions = {}, directory = undefined) {
-  const tools = standInTools({}, directory);
-  const webp = losslessWebp(width, height, webpOptions);
-  tools.plan('cwebp', { output: tools.answer('answer.webp', webp) });
-  tools.plan('dwebp', { output: tools.answer('answer.pam', pamOf(width, height, rgbaOf(pixels, channels))) });
+function verifiedTools(picture, options = {}) {
+  const tools = standInTools({}, options.directory);
+  const webp = losslessWebp(picture.width, picture.height, options.webp);
+  tools.reply('cwebp', webp);
+  tools.reply('dwebp', pamOf(picture.width, picture.height, rgbaOf(picture.pixels, picture.channels || 3)));
   return { ...tools, webp };
 }
 
@@ -1531,7 +1537,7 @@ test('the core module makes no network request, starts only the two WebP tools t
   assert.doesNotMatch(source, /\bfetch\(|execFileSync|execSync|\bspawn\(|\bfork\(|shell: true/);
   assert.match(source, /^const childProcess = require\('node:child_process'\);$/m);
   assert.equal((source.match(/childProcess\./g) || []).length, 1);
-  assert.match(source, /childProcess\.spawnSync\(tool, args, \{\n    cwd: directory,\n    env: emptyEnvironment\(\),\n    shell: false,\n    stdio: 'ignore',\n    timeout: limits\.toolMs,\n    killSignal: 'SIGKILL',\n    windowsHide: true,\n  \}\)/);
+  assert.match(source, /childProcess\.spawnSync\(tool, args, \{\n    cwd: directory,\n    env: toolEnvironment\(\),\n    shell: false,\n    stdio: 'ignore',\n    timeout: limits\.toolMs,\n    killSignal: 'SIGKILL',\n    windowsHide: true,\n  \}\)/);
   assert.deepEqual([...source.matchAll(/runTool\(tools\.(encoder|decoder), /g)].map((match) => match[1]), ['encoder', 'decoder']);
   assert.equal((source.match(/\brunTool\(/g) || []).length, 3);
   assert.match(source, /evidenceRun\.git\(/);
@@ -2444,6 +2450,8 @@ test('the PNG facts name the first reason a PNG is outside what a lossless WebP 
   assert.equal(facts({ depth: 16 }).reason, 'it is not an 8-bit truecolor image');
   for (const colour of [0, 3, 4]) assert.equal(facts({ colour }).reason, 'it is not an 8-bit truecolor image');
   assert.equal(facts({ interlace: 1 }).reason, 'it is interlaced');
+  assert.equal(facts({ compression: 1 }).reason, 'its header names an unknown compression or filter method');
+  assert.equal(facts({ filter: 1 }).reason, 'its header names an unknown compression or filter method');
   assert.equal(er.pngFacts(pngOf({ width: 16384, height: 1, pixels: Buffer.alloc(16384 * 3) })).reason, 'a side is longer than 16383 pixels, the limit of a WebP');
   assert.equal(er.pngFacts(pngOf({ width: 1, height: 16384, pixels: Buffer.alloc(16384 * 3) })).reason, 'a side is longer than 16383 pixels, the limit of a WebP');
   assert.equal(er.pngFacts(pngOf({ width: 16383, height: 1, pixels: Buffer.alloc(16383 * 3) })).reason, undefined);
@@ -2487,6 +2495,11 @@ test('the tool lookup takes the first absolute path entry that holds cwebp, need
   assert.deepEqual(er.findWebpTools(join('', 'relative/bin', '.', empty, path.join(empty, 'missing'), good.directory), roots), found);
   asked = 0;
   for (const value of [undefined, '', 'bin', join('', '.', 'tools/bin'), empty, path.join(empty, 'missing')]) assert.equal(er.findWebpTools(value, roots), null);
+  const reachable = path.relative(process.cwd(), good.directory);
+  assert.equal(path.isAbsolute(reachable), false);
+  assert.ok(fs.statSync(path.join(reachable, 'cwebp')).isFile(), 'the relative entry reaches the pair');
+  assert.equal(er.findWebpTools(reachable, roots), null);
+  assert.equal(er.findWebpTools(join(reachable, empty), roots), null);
   assert.equal(asked, 0);
   const encoderOnly = standInTools({ dwebp: null });
   assert.equal(er.findWebpTools(join(encoderOnly.directory, good.directory), roots), null);
@@ -2542,6 +2555,71 @@ test('the tool lookup takes the first absolute path entry that holds cwebp, need
   assert.deepEqual(er.findWebpTools(viaLinks, roots), openPair);
   fs.chmodSync(viaLinks, 0o777);
   assert.equal(er.findWebpTools(viaLinks, roots), null);
+  const above = tempDir('above');
+  const below = standInTools({}, path.join(above, 'bin'));
+  const belowPair = { encoder: path.join(below.directory, 'cwebp'), decoder: path.join(below.directory, 'dwebp') };
+  for (const [mode, expected] of [[0o777, null], [0o757, null], [0o1777, belowPair], [0o775, belowPair], [0o755, belowPair]]) {
+    fs.chmodSync(above, mode);
+    asked = 0;
+    assert.deepEqual(er.findWebpTools(below.directory, roots), expected, `a directory above the pair of mode ${mode.toString(8)}`);
+    if (expected === null) assert.equal(asked, 0);
+  }
+  const linkedBelow = tempDir('linked-below');
+  for (const tool of ['cwebp', 'dwebp']) fs.symlinkSync(path.join(below.directory, tool), path.join(linkedBelow, tool));
+  fs.chmodSync(linkedBelow, 0o755);
+  assert.deepEqual(er.findWebpTools(linkedBelow, roots), belowPair);
+  fs.chmodSync(above, 0o777);
+  assert.equal(er.findWebpTools(linkedBelow, roots), null);
+  fs.chmodSync(above, 0o755);
+  const high = tempDir('high');
+  const deep = standInTools({}, path.join(high, 'mid', 'bin'));
+  fs.chmodSync(path.join(high, 'mid'), 0o755);
+  const deepPair = { encoder: path.join(deep.directory, 'cwebp'), decoder: path.join(deep.directory, 'dwebp') };
+  for (const [mode, expected] of [[0o777, null], [0o757, null], [0o1777, deepPair], [0o775, deepPair], [0o755, deepPair]]) {
+    fs.chmodSync(high, mode);
+    asked = 0;
+    assert.deepEqual(er.findWebpTools(deep.directory, roots), expected, `a directory two levels above the pair of mode ${mode.toString(8)}`);
+    if (expected === null) assert.equal(asked, 0);
+  }
+  const opening = tempDir('opening');
+  const entry = path.join(opening, 'links');
+  fs.mkdirSync(entry);
+  fs.chmodSync(entry, 0o755);
+  for (const tool of ['cwebp', 'dwebp']) fs.symlinkSync(path.join(good.directory, tool), path.join(entry, tool));
+  for (const [mode, expected] of [[0o777, null], [0o757, null], [0o1777, found], [0o755, found]]) {
+    fs.chmodSync(opening, mode);
+    asked = 0;
+    assert.deepEqual(er.findWebpTools(entry, roots), expected, `a directory above the entry of mode ${mode.toString(8)}`);
+    if (expected === null) assert.equal(asked, 0);
+  }
+  const spelling = tempDir('spelling');
+  const spelled = path.join(spelling, 'bin');
+  fs.symlinkSync(good.directory, spelled);
+  for (const [mode, expected] of [[0o777, null], [0o757, null], [0o1777, found], [0o755, found]]) {
+    fs.chmodSync(spelling, mode);
+    asked = 0;
+    assert.deepEqual(er.findWebpTools(spelled, roots), expected, `a directory above the entry as the tool path spells it of mode ${mode.toString(8)}`);
+    if (expected === null) assert.equal(asked, 0);
+  }
+});
+
+test('the tool lookup answers no pair on Windows, where it was never measured', () => {
+  const directory = tempDir('windows-tools');
+  fs.chmodSync(directory, 0o755);
+  for (const name of ['cwebp', 'dwebp', 'cwebp.exe', 'dwebp.exe']) fs.writeFileSync(path.join(directory, name), '', { mode: 0o755 });
+  let asked = 0;
+  const roots = () => {
+    asked += 1;
+    return [tempDir('project')];
+  };
+  assert.equal(er.findWebpTools(directory, roots, 'win32'), null);
+  assert.equal(asked, 0);
+  if (process.platform === 'win32') {
+    assert.equal(er.findWebpTools(directory, roots), null);
+    return;
+  }
+  assert.deepEqual(er.findWebpTools(directory, roots, process.platform), { encoder: path.join(directory, 'cwebp'), decoder: path.join(directory, 'dwebp') });
+  assert.equal(asked, 1);
 });
 
 test('add stores a verified lossless WebP in place of the PNG and records the captured file as its source', { skip: NO_STAND_IN_TOOLS }, () => {
@@ -2549,9 +2627,9 @@ test('add stores a verified lossless WebP in place of the PNG and records the ca
   const { id, bundle } = begin(fx);
   const width = 9;
   const height = 6;
-  const pixels = sampleBytes(width * height * 3, 11);
-  const captured = pngOf({ width, height, pixels, filters: [4, 1, 2, 3, 0] });
-  const tools = verifiedTools(width, height, pixels, 3);
+  const picture = { width, height, pixels: sampleBytes(width * height * 3, 11) };
+  const captured = pngOf({ ...picture, filters: [4, 1, 2, 3, 0] });
+  const tools = verifiedTools(picture);
   const scratch = scratchOf(fx);
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
   for (const [name, time] of [['webp-stale', hourAgo], ['webp-fresh', new Date()], ['other', hourAgo]]) {
@@ -2588,10 +2666,10 @@ test('add stores a verified lossless WebP in place of the PNG and records the ca
   }
   assert.deepEqual(fs.readdirSync(scratch).sort(), ['other', 'webp-fresh']);
   const profile = sampleBytes(200, 5);
-  const translucent = sampleBytes(width * height * 4, 12);
-  const tagged = pngOf({ width, height, channels: 4, pixels: translucent, filters: [3, 4], extra: [['iCCP', profileChunk(profile)], ['tEXt', Buffer.from('Software\u0000Example capture tool', 'latin1')]] });
+  const overlay = { width, height, channels: 4, pixels: sampleBytes(width * height * 4, 12) };
+  const tagged = pngOf({ ...overlay, filters: [3, 4], extra: [['iCCP', profileChunk(profile)], ['tEXt', Buffer.from('Software\u0000Example capture tool', 'latin1')]] });
   const cleaned = er.sniff(tagged).clean();
-  const withProfile = verifiedTools(width, height, translucent, 4, { profiles: [profile] });
+  const withProfile = verifiedTools(overlay, { webp: { profiles: [profile] } });
   const second = ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, 'tagged.png', tagged) }, 'A translucent overlay', { toolPath: withProfile.directory }));
   const taggedSha = hex(withProfile.webp);
   assert.equal(second.lines[0], `zensu evidence report: e2 added to ${id} | image | image/webp ${width}x${height} | ${withProfile.webp.length} bytes | files/${taggedSha}.webp | dropped the metadata chunks tEXt | transcoded losslessly from a PNG of ${cleaned.length} bytes`);
@@ -2615,8 +2693,9 @@ test('a transcode that cannot be verified keeps the PNG and names the reason on 
     count += 1;
     const channels = spec.channels || 3;
     const pixels = sampleBytes(width * height * channels, 100 + count);
-    const captured = pngOf({ width, height, channels, pixels, ...spec });
-    const tools = verifiedTools(width, height, pixels, channels);
+    const picture = { width, height, channels, pixels };
+    const captured = pngOf({ ...picture, ...spec });
+    const tools = verifiedTools(picture);
     prepare(tools, pixels, captured);
     const added = ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, `case-${count}.png`, captured) }, `Case ${count}`, { toolPath: tools.directory, ...overrides }));
     assert.equal(added.lines[0], `zensu evidence report: e${count} added to ${id} | image | image/png ${width}x${height} | ${captured.length} bytes | files/${hex(captured)}.png | PNG kept: ${reason}`);
@@ -2631,23 +2710,41 @@ test('a transcode that cannot be verified keeps the PNG and names the reason on 
   attempt(differs, both, (tools, pixels) => {
     const rgba = rgbaOf(pixels, 3);
     rgba[rgba.length - 2] ^= 1;
-    tools.plan('dwebp', { output: tools.answer('answer.pam', pamOf(width, height, rgba)) });
+    tools.reply('dwebp', pamOf(width, height, rgba));
   });
   attempt(differs, both, (tools, pixels) => {
     const rgba = rgbaOf(pixels, 3);
     rgba[3] = 0xfe;
-    tools.plan('dwebp', { output: tools.answer('answer.pam', pamOf(width, height, rgba)) });
+    tools.reply('dwebp', pamOf(width, height, rgba));
   });
-  attempt(differs, both, (tools, pixels) => tools.plan('dwebp', { output: tools.answer('answer.pam', pamOf(width + 1, height, rgbaOf(pixels, 3))) }));
-  attempt(differs, both, (tools, pixels) => tools.plan('dwebp', { output: tools.answer('answer.pam', pamOf(width, height, rgbaOf(pixels, 3)).subarray(0, 200)) }));
+  attempt(differs, both, (tools, pixels) => tools.reply('dwebp', pamOf(width + 1, height, rgbaOf(pixels, 3))));
+  attempt(differs, both, (tools, pixels) => tools.reply('dwebp', pamOf(width, height, rgbaOf(pixels, 3)).subarray(0, 200)));
   attempt(differs, both, (tools) => tools.plan('dwebp', {}));
+  attempt(differs, both, (tools, pixels) => {
+    const exact = path.join(tools.directory, 'exact.pam');
+    fs.writeFileSync(exact, pamOf(width, height, rgbaOf(pixels, 3)));
+    tools.plan('dwebp', { link: exact });
+  });
+  attempt(differs, both, (tools) => tools.plan('dwebp', { folder: true }));
+  const mkfifo = (process.env.PATH || '').split(path.delimiter).filter((entry) => path.isAbsolute(entry)).map((entry) => path.join(entry, 'mkfifo')).find((candidate) => fs.existsSync(candidate));
+  if (mkfifo) attempt(differs, both, (tools) => tools.plan('dwebp', { fifo: mkfifo }));
+  const openSync = fs.openSync;
+  fs.openSync = (file, ...rest) => {
+    if (String(file).endsWith(`${path.sep}decoded.pam`)) throw new TypeError('a fault that is no file-system error');
+    return openSync(file, ...rest);
+  };
+  try {
+    attempt('the transcode could not be completed', both, () => {});
+  } finally {
+    fs.openSync = openSync;
+  }
   attempt(differs, both, (tools, pixels) => {
     const rgba = rgbaOf(pixels, 4);
     rgba[7] ^= 0x80;
-    tools.plan('dwebp', { output: tools.answer('answer.pam', pamOf(width, height, rgba)) });
+    tools.reply('dwebp', pamOf(width, height, rgba));
   }, { channels: 4 });
   const encoderOnly = ['cwebp'];
-  const answers = (bytes) => (tools) => tools.plan('cwebp', { output: tools.answer('answer.webp', bytes) });
+  const answers = (bytes) => (tools) => tools.reply('cwebp', bytes);
   attempt('the WebP has another size than the PNG', encoderOnly, answers(losslessWebp(width + 1, height)));
   attempt('the WebP has another size than the PNG', encoderOnly, answers(losslessWebp(width, height - 1)));
   attempt('cwebp wrote no lossless WebP', encoderOnly, answers(riff([['VP8 ', Buffer.alloc(12)]])));
@@ -2661,7 +2758,7 @@ test('a transcode that cannot be verified keeps the PNG and names the reason on 
   attempt('the ICC profile did not survive', encoderOnly, answers(losslessWebp(width, height)), tagged);
   attempt('the ICC profile did not survive', encoderOnly, answers(losslessWebp(width, height, { profiles: [sampleBytes(120, 10)] })), tagged);
   attempt('the ICC profile did not survive', encoderOnly, answers(losslessWebp(width, height, { profiles: [profile, profile] })), tagged);
-  attempt('the WebP is not smaller', encoderOnly, (tools, pixels, captured) => tools.plan('cwebp', { output: tools.answer('answer.webp', losslessWebp(width, height, { pad: captured.length })) }));
+  attempt('the WebP is not smaller', encoderOnly, (tools, pixels, captured) => tools.reply('cwebp', losslessWebp(width, height, { pad: captured.length })));
   attempt('cwebp failed', encoderOnly, (tools) => tools.plan('cwebp', { exit: 3 }));
   attempt('cwebp wrote no file', encoderOnly, (tools) => tools.plan('cwebp', {}));
   attempt('dwebp failed', both, (tools) => tools.plan('dwebp', { exit: 1 }));
@@ -2670,6 +2767,15 @@ test('a transcode that cannot be verified keeps the PNG and names the reason on 
   attempt('cwebp could not be started', [], (tools) => fs.writeFileSync(path.join(tools.directory, 'cwebp'), '#!/nonexistent/interpreter\n', { mode: 0o755 }));
   assert.deepEqual(fs.readdirSync(path.join(bundle, 'files')).filter((name) => !name.endsWith('.png')), []);
   assert.equal(fs.readdirSync(path.join(bundle, 'files')).length, count);
+  const blocked = fixture();
+  const blockedId = begin(blocked).id;
+  fs.rmSync(scratchOf(blocked), { recursive: true, force: true });
+  fs.writeFileSync(scratchOf(blocked), 'a file where the scratch directory belongs');
+  const picture = { width, height, pixels: sampleBytes(width * height * 3, 199) };
+  const idle = verifiedTools(picture);
+  const kept = ok(call(blocked, 'add', { report: blockedId, kind: 'image', file: runFile(blocked, 'blocked.png', pngOf(picture)) }, 'A capture', { toolPath: idle.directory }));
+  assert.match(kept.lines[0], /\| image\/png 8x5 \| [0-9]+ bytes \| files\/[0-9a-f]{64}\.png \| PNG kept: the scratch directory is unavailable$/);
+  assert.deepEqual(idle.calls(), []);
 });
 
 test('the pixel comparison reads a decoded image in several blocks, and a difference in any of them or a file that ends early keeps the PNG', { skip: NO_STAND_IN_TOOLS }, () => {
@@ -2684,10 +2790,10 @@ test('the pixel comparison reads a decoded image in several blocks, and a differ
   let count = 0;
   const add = (channels, change) => {
     count += 1;
-    const pixels = sampleBytes(width * height * channels, 400 + count);
-    const captured = pngOf({ width, height, channels, pixels });
-    const tools = verifiedTools(width, height, pixels, channels, { pad: 3 + count });
-    tools.plan('dwebp', { output: tools.answer('answer.pam', change(pamOf(width, height, rgbaOf(pixels, channels)))) });
+    const picture = { width, height, channels, pixels: sampleBytes(width * height * channels, 400 + count) };
+    const captured = pngOf(picture);
+    const tools = verifiedTools(picture, { webp: { pad: 3 + count } });
+    tools.reply('dwebp', change(pamOf(width, height, rgbaOf(picture.pixels, channels))));
     const added = ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, `blocks-${count}.png`, captured) }, `Blocks ${count}`, { toolPath: tools.directory }));
     assert.deepEqual(tools.calls().map((entry) => entry.tool), ['cwebp', 'dwebp']);
     assert.deepEqual(privateScratch(fx), []);
@@ -2707,7 +2813,7 @@ test('the pixel comparison reads a decoded image in several blocks, and a differ
     [3, flipped(block), 'the first byte of the second block'],
     [3, flipped(height * stride - 1), 'the last byte'],
     [4, flipped(height * stride - 4), 'the last pixel of an image with alpha'],
-    [3, (pam) => pam.subarray(0, head + block), 'a file that ends after the first block'],
+    [3, (pam) => pam.subarray(0, head + block), 'a file cut after the first block, which its size gives away'],
   ];
   for (const [channels, change, label] of changes) {
     const kept = add(channels, change);
@@ -2772,7 +2878,7 @@ test('a pair that is incomplete, inside the project or its work tree, or switche
     assert.deepEqual(prepared.calls(), [], label);
   };
   const here = { fx, id };
-  const working = (directory) => (pixels) => verifiedTools(width, height, pixels, 3, {}, directory);
+  const working = (directory) => (pixels) => verifiedTools({ width, height, pixels }, { directory });
   const onPath = (prepared) => ({ toolPath: prepared.directory });
   silent(here, () => standInTools({ dwebp: null }), onPath, 'cwebp without dwebp');
   silent(here, working(path.join(fx.root, 'node_modules', '.bin')), onPath, 'a pair inside the project root');
@@ -2787,8 +2893,9 @@ test('a pair that is incomplete, inside the project or its work tree, or switche
   const nested = fixture({ root: application });
   const below = { fx: nested, id: begin(nested).id };
   silent(below, working(path.join(top, 'tools')), onPath, 'a pair elsewhere in the repository of a project root below its top');
-  const outside = verifiedTools(width, height, sampleBytes(width * height * 3, 399), 3);
-  const proof = ok(call(nested, 'add', { report: below.id, kind: 'image', file: runFile(nested, 'proof.png', pngOf({ width, height, pixels: sampleBytes(width * height * 3, 399) })) }, 'A capture', { toolPath: outside.directory }));
+  const picture = { width, height, pixels: sampleBytes(width * height * 3, 399) };
+  const outside = verifiedTools(picture);
+  const proof = ok(call(nested, 'add', { report: below.id, kind: 'image', file: runFile(nested, 'proof.png', pngOf(picture)) }, 'A capture', { toolPath: outside.directory }));
   assert.match(proof.lines[0], /\| image\/webp 4x3 \| .* \| transcoded losslessly from a PNG of [0-9]+ bytes$/);
 });
 

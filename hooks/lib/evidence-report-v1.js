@@ -85,6 +85,7 @@ const SCRATCH_PREFIX = 'webp-';
 const PAM_READ_BYTES = 1024 * 1024;
 const NODE_COPIED_VARIABLES = Object.freeze(['NODE_V8_COVERAGE']);
 const OTHERS_MAY_WRITE = 0o002;
+const STICKY_BIT = 0o1000;
 
 const VERDICTS = Object.freeze(['PASS', 'FAIL', 'PARTIAL']);
 const MODES = Object.freeze(['local', 'remote']);
@@ -419,14 +420,18 @@ function withLock(target, limits, action) {
   }
 }
 
+function openForReading(file) {
+  const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+  return fs.openSync(file, fs.constants.O_RDONLY | noFollow | (fs.constants.O_NONBLOCK || 0));
+}
+
 function readBounded(filePath, maxBytes) {
   let descriptor;
   try {
     const before = fs.lstatSync(filePath);
     if (before.isSymbolicLink()) return { error: 'symlink' };
     if (!before.isFile()) return { error: 'not a regular file' };
-    const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
-    descriptor = fs.openSync(filePath, fs.constants.O_RDONLY | noFollow | (fs.constants.O_NONBLOCK || 0));
+    descriptor = openForReading(filePath);
     const stat = fs.fstatSync(descriptor);
     if (!stat.isFile()) return { error: 'not a regular file' };
     if (stat.dev !== before.dev || stat.ino !== before.ino) return { error: 'replaced while it was opened' };
@@ -801,48 +806,50 @@ function decodePng(facts) {
   return rows;
 }
 
+function readExactly(descriptor, buffer, length, position) {
+  let filled = 0;
+  while (filled < length) {
+    const read = fs.readSync(descriptor, buffer, filled, length - filled, position + filled);
+    if (read === 0) return false;
+    filled += read;
+  }
+  return true;
+}
+
+function rowMatches(row, decoded, rgbaRow) {
+  if (rgbaRow === null) return row.equals(decoded);
+  for (let source = 0, target = 0; target < rgbaRow.length; source += 3, target += 4) {
+    rgbaRow[target] = row[source];
+    rgbaRow[target + 1] = row[source + 1];
+    rgbaRow[target + 2] = row[source + 2];
+  }
+  return rgbaRow.equals(decoded);
+}
+
 function pamMatches(file, facts, rows) {
   const header = Buffer.from(`P7\nWIDTH ${facts.width}\nHEIGHT ${facts.height}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n`, 'latin1');
   const stride = facts.width * 4;
   let descriptor;
   try {
-    if (!fs.lstatSync(file).isFile()) return false;
-    descriptor = fs.openSync(file, 'r');
-    if (fs.fstatSync(descriptor).size !== header.length + stride * facts.height) return false;
-    const head = Buffer.alloc(header.length);
-    if (fs.readSync(descriptor, head, 0, head.length, 0) !== head.length || !head.equals(header)) return false;
-    const perRead = Math.max(1, Math.floor(PAM_READ_BYTES / stride));
-    const block = Buffer.alloc(perRead * stride);
-    const opaque = facts.channels === 4 ? null : Buffer.alloc(stride, 0xff);
-    let position = header.length;
-    for (let line = 0; line < facts.height; line += perRead) {
-      const count = Math.min(perRead, facts.height - line);
-      const wanted = count * stride;
-      let filled = 0;
-      while (filled < wanted) {
-        const read = fs.readSync(descriptor, block, filled, wanted - filled, position + filled);
-        if (read === 0) return false;
-        filled += read;
-      }
-      position += wanted;
+    descriptor = openForReading(file);
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size !== header.length + stride * facts.height) return false;
+    const found = Buffer.alloc(header.length);
+    if (!readExactly(descriptor, found, found.length, 0) || !found.equals(header)) return false;
+    const rowsPerBlock = Math.max(1, Math.floor(PAM_READ_BYTES / stride));
+    const block = Buffer.alloc(rowsPerBlock * stride);
+    const rgbaRow = facts.channels === 4 ? null : Buffer.alloc(stride, 0xff);
+    for (let line = 0; line < facts.height; line += rowsPerBlock) {
+      const count = Math.min(rowsPerBlock, facts.height - line);
+      if (!readExactly(descriptor, block, count * stride, header.length + line * stride)) return false;
       for (let index = 0; index < count; index += 1) {
-        const decoded = block.subarray(index * stride, (index + 1) * stride);
-        const row = rows[line + index];
-        if (opaque === null) {
-          if (!row.equals(decoded)) return false;
-          continue;
-        }
-        for (let source = 0, target = 0; target < stride; source += 3, target += 4) {
-          opaque[target] = row[source];
-          opaque[target + 1] = row[source + 1];
-          opaque[target + 2] = row[source + 2];
-        }
-        if (!opaque.equals(decoded)) return false;
+        if (!rowMatches(rows[line + index], block.subarray(index * stride, (index + 1) * stride), rgbaRow)) return false;
       }
     }
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (error && isString(error.syscall)) return false;
+    throw error;
   } finally {
     if (descriptor !== undefined) {
       try { fs.closeSync(descriptor); } catch { }
@@ -865,11 +872,11 @@ function physicalPath(file) {
   return fs.realpathSync.native(file);
 }
 
-function toolFile(candidate, platform) {
+function toolFile(candidate) {
   try {
     const real = physicalPath(candidate);
     if (!fs.statSync(real).isFile()) return null;
-    if (platform !== 'win32') fs.accessSync(real, fs.constants.X_OK);
+    fs.accessSync(real, fs.constants.X_OK);
     return real;
   } catch {
     return null;
@@ -880,26 +887,41 @@ function othersMayWrite(target) {
   return (fs.statSync(target).mode & OTHERS_MAY_WRITE) !== 0;
 }
 
+function othersMayReplace(directory) {
+  let current = directory;
+  let parent = path.dirname(current);
+  while (parent !== current) {
+    const mode = fs.statSync(parent).mode;
+    if ((mode & OTHERS_MAY_WRITE) !== 0 && (mode & STICKY_BIT) === 0) return true;
+    current = parent;
+    parent = path.dirname(current);
+  }
+  return false;
+}
+
+function trustedPair(entry, encoder, decoder, roots) {
+  let directory;
+  try {
+    directory = physicalPath(entry);
+    const holders = [directory, path.dirname(encoder), path.dirname(decoder)];
+    if ([...holders, encoder, decoder].some(othersMayWrite) || [path.resolve(entry), ...holders].some(othersMayReplace)) return false;
+  } catch {
+    return false;
+  }
+  const forbidden = roots();
+  if (forbidden === null) return false;
+  const outside = (target) => forbidden.every((root) => !samePath(target, root) && !isInside(root, target));
+  return [path.resolve(entry), directory, encoder, decoder].every(outside);
+}
+
 function findWebpTools(toolPath, roots, platform = process.platform) {
-  if (!isString(toolPath) || toolPath === '') return null;
-  const suffix = platform === 'win32' ? '.exe' : '';
+  if (platform === 'win32' || !isString(toolPath) || toolPath === '') return null;
   for (const entry of toolPath.split(path.delimiter)) {
     if (!path.isAbsolute(entry)) continue;
-    const encoder = toolFile(path.join(entry, `${WEBP_ENCODER}${suffix}`), platform);
+    const encoder = toolFile(path.join(entry, WEBP_ENCODER));
     if (encoder === null) continue;
-    const decoder = toolFile(path.join(entry, `${WEBP_DECODER}${suffix}`), platform);
-    if (decoder === null) return null;
-    let directory;
-    try {
-      directory = physicalPath(entry);
-      if (platform !== 'win32' && [directory, encoder, decoder, path.dirname(encoder), path.dirname(decoder)].some(othersMayWrite)) return null;
-    } catch {
-      return null;
-    }
-    const forbidden = roots();
-    if (forbidden === null) return null;
-    const outside = (target) => forbidden.every((root) => !samePath(target, root, platform) && !isInside(root, target));
-    return [path.resolve(entry), directory, encoder, decoder].every(outside) ? { encoder, decoder } : null;
+    const decoder = toolFile(path.join(entry, WEBP_DECODER));
+    return decoder !== null && trustedPair(entry, encoder, decoder, roots) ? { encoder, decoder } : null;
   }
   return null;
 }
@@ -922,14 +944,14 @@ function projectRoots(options) {
   return roots.length > 0 ? roots : null;
 }
 
-function emptyEnvironment() {
+function toolEnvironment() {
   return Object.fromEntries(NODE_COPIED_VARIABLES.map((name) => [name, undefined]));
 }
 
 function runTool(tool, args, directory, limits) {
   const result = childProcess.spawnSync(tool, args, {
     cwd: directory,
-    env: emptyEnvironment(),
+    env: toolEnvironment(),
     shell: false,
     stdio: 'ignore',
     timeout: limits.toolMs,
@@ -958,44 +980,49 @@ function sweepScratch(scratch, limits) {
   }
 }
 
+function scratchDirectory(where, limits) {
+  try {
+    const scratch = ensureDirectory(where.root, 'scratch', 'the report scratch directory');
+    sweepScratch(scratch, limits);
+    return fs.mkdtempSync(path.join(scratch, SCRATCH_PREFIX));
+  } catch {
+    return null;
+  }
+}
+
+function encodedProblem(written, facts, pngLength) {
+  if (written.error) return `${WEBP_ENCODER} wrote no file`;
+  const webp = sniff(written.bytes);
+  if (webp.error || webp.type !== 'image/webp') return `${WEBP_ENCODER} wrote no lossless WebP`;
+  if (webp.dropped) return 'the WebP carries metadata';
+  if (webp.width !== facts.width || webp.height !== facts.height) return 'the WebP has another size than the PNG';
+  const profiles = webpProfiles(written.bytes);
+  const kept = facts.icc === null ? profiles.length === 0 : profiles.length === 1 && profiles[0].equals(facts.icc);
+  if (!kept) return 'the ICC profile did not survive';
+  return written.bytes.length >= pngLength ? 'the WebP is not smaller' : null;
+}
+
 function transcodePng(png, options, where, limits) {
-  let roots;
-  const tools = findWebpTools(options.toolPath, () => {
-    if (roots === undefined) roots = projectRoots(options);
-    return roots;
-  });
+  const tools = findWebpTools(options.toolPath, () => projectRoots(options));
   if (tools === null) return {};
   const facts = pngFacts(png, limits);
   if (facts.reason) return { reason: facts.reason };
   const rows = decodePng(facts);
   if (rows === null) return { reason: 'its pixel data cannot be read' };
-  let directory;
-  try {
-    const scratch = ensureDirectory(where.root, 'scratch', 'the report scratch directory');
-    sweepScratch(scratch, limits);
-    directory = fs.mkdtempSync(path.join(scratch, SCRATCH_PREFIX));
-  } catch {
-    return { reason: 'the scratch directory is unavailable' };
-  }
+  const directory = scratchDirectory(where, limits);
+  if (directory === null) return { reason: 'the scratch directory is unavailable' };
   try {
     const source = path.join(directory, 'source.png');
     const target = path.join(directory, 'target.webp');
     const decoded = path.join(directory, 'decoded.pam');
     fs.writeFileSync(source, png, { mode: 0o600, flag: 'wx' });
-    const encoded = runTool(tools.encoder, [...WEBP_ENCODER_ARGUMENTS, '-o', target, source], directory, limits);
-    if (encoded) return { reason: `${WEBP_ENCODER} ${encoded}` };
+    const encoderFailure = runTool(tools.encoder, [...WEBP_ENCODER_ARGUMENTS, '-o', target, source], directory, limits);
+    if (encoderFailure) return { reason: `${WEBP_ENCODER} ${encoderFailure}` };
     const written = readBounded(target, limits.maxFileBytes);
-    if (written.error) return { reason: `${WEBP_ENCODER} wrote no file` };
-    const webp = sniff(written.bytes);
-    if (webp.error || webp.type !== 'image/webp') return { reason: `${WEBP_ENCODER} wrote no lossless WebP` };
-    if (webp.dropped) return { reason: 'the WebP carries metadata' };
-    if (webp.width !== facts.width || webp.height !== facts.height) return { reason: 'the WebP has another size than the PNG' };
-    const profiles = webpProfiles(written.bytes);
-    const kept = facts.icc === null ? profiles.length === 0 : profiles.length === 1 && profiles[0].equals(facts.icc);
-    if (!kept) return { reason: 'the ICC profile did not survive' };
-    if (written.bytes.length >= png.length) return { reason: 'the WebP is not smaller' };
-    const read = runTool(tools.decoder, [target, '-pam', '-o', decoded], directory, limits);
-    if (read) return { reason: `${WEBP_DECODER} ${read}` };
+    const problem = encodedProblem(written, facts, png.length);
+    if (problem) return { reason: problem };
+    const decoderFailure = runTool(tools.decoder, [target, '-pam', '-o', decoded], directory, limits);
+    if (decoderFailure) return { reason: `${WEBP_DECODER} ${decoderFailure}` };
     if (!pamMatches(decoded, facts, rows)) return { reason: 'the decoded WebP differs from the PNG' };
     return { webp: written.bytes };
   } catch {

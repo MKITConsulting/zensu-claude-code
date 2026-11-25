@@ -365,17 +365,24 @@ and visual evidence.
   carries no chunk a WebP cannot hold: a palette or a transparency chunk (`PLTE`, `tRNS`), a
   background, histogram or suggested palette (`bKGD`, `hIST`, `sPLT`), colour signalling beyond a
   profile (`cICP`, `mDCV`, `cLLI`), `gAMA` or `cHRM` without `sRGB` or `iCCP`, or a `pHYs` chunk
-  with unequal axes. Every other PNG is stored as PNG with its reason on the same line, and no
-  tool is started for it.
+  with unequal axes. Every other PNG is stored as PNG, and no tool is started for it; when a tool
+  pair was found, its reason stands on the same line.
 - **Where the tools come from.** The transport hands the caller's `PATH` to the core, which reads
   only its absolute entries, in order. The first entry that holds an executable `cwebp` decides:
   `dwebp` must sit beside it, and neither the entry nor either file may lie inside the project
-  root, its work tree or the chain's work tree, so a repository never supplies the program. On
-  macOS and Linux the pair is also left unused when everyone may write its directory, one of the
-  two files or the directory a file really lies in, because another account could then replace
-  the program. The tools run by their resolved path, without a shell, with an empty environment
-  and under a time limit, inside a private directory below the store's `scratch` directory that
-  is removed afterwards. Without such a pair the add is the add of build step 2, line included.
+  root, its work tree or the chain's work tree, so a repository never supplies the program. The
+  pair is also left unused when everyone may write its directory, one of the two files or the
+  directory a file really lies in, or a directory that is not sticky above one of them or above
+  the entry as `PATH` spells it, because another account could then replace the program or the
+  link that leads to it. Who owns the pair is not judged: a tool tree
+  often belongs to another account, which then supplies every other program on `PATH` as well.
+  The tools run by their resolved path, without a shell, with an empty environment and under a
+  time limit, inside a private directory below the store's `scratch` directory that is removed
+  afterwards. Without such a pair the add is the add of build step 2, line included, so a pair
+  that was found and left unused prints no reason either.
+- **Windows keeps the PNG.** The lookup answers no pair there: neither it nor the start of a tool
+  with an empty environment was ever run on Windows, so the transcode stays off on that platform
+  until it is measured.
 - **Pixels only, no metadata.** `--report-add` walks a PNG chunk by chunk to `IEND`: bytes after
   it, a truncated chunk, an animation and an unknown critical chunk are refused, and text, EXIF,
   time and private chunks are dropped before the file is stored. A WebP drops its EXIF, XMP and
@@ -423,8 +430,10 @@ default-src 'none'; img-src 'self' file:; style-src 'sha256-<digest>'; base-uri 
 
 `<digest>` is the SHA-256 of the page's one `style` element, so the page's own style sheet applies
 and no other style does, a `style` attribute included. `export.html` carries the same element with
-`img-src data:`. The policy names the page's images and its style sheet and nothing else: no
-script, no frame, no font, no media and no request to a network.
+`img-src data:`. The policy allows images and the page's style sheet and nothing else: no script,
+no frame, no font, no media and no request to a network. `img-src` is the one directive that does
+not single out the page's own files: `'self' file:` matches every local file, as the list below
+says.
 
 Measured on 2026-11-25 on `file://` in Chrome 158, Safari 27.2 and Firefox 161.0 (Appendix A): the
 page under the policy loads both a PNG and a WebP from its `files` directory and applies its style
@@ -433,9 +442,11 @@ page without the element. A probe page under the policy ran no inline script and
 and applied no injected style, and of the 17 or 18 kinds of request that the same page without the
 element sent to a loopback witness server it sent none, in all three browsers.
 
-**What the policy does not stop**, each measured:
+**What the policy does not stop**, measured unless a line says otherwise:
 
-- **A navigation**, through a link or a meta refresh, in all three browsers.
+- **A navigation.** A meta refresh reached the witness server in all three browsers. A link was
+  not driven: no directive of this policy governs a navigation, so a link passes it by
+  definition.
 - **A `preconnect` hint**, which opened one connection that carried no request, in all three.
 - **An image named by any other local file**, in all three. `file:` matches every `file:` URL, and
   in Chrome and Safari `'self'` alone already let such an image load. A `file:` URL with a host is
@@ -445,18 +456,24 @@ element sent to a loopback witness server it sent none, in all three browsers.
   fetch directives to a `file:` URL: a script named by one ran, a style sheet applied and a frame
   loaded under the policy, and `img-src 'none'` did not stop a local image. Chrome and Safari
   stopped the script, the style sheet and the frame. Firefox did stop every inline script, style
-  and event handler and every request to the network.
+  and event handler, and each of the 18 kinds of request that Appendix A counts as stopped; the
+  meta refresh and the `preconnect` hint above passed it there as in the other two.
 
 So the policy is the second line, not the first: the renderer escapes every value and writes no
-image address other than `files/<sha256>.<ext>`. A page that carries foreign markup despite that
-cannot reach a network through a subresource in any of the three browsers, and in Firefox it could
-still run a script that already lies on the reader's disk.
+image address other than `files/<sha256>.<ext>`. A page that carried foreign markup despite that
+sent none of the requests Appendix A counts as stopped, in any of the three browsers on macOS,
+while a meta refresh or a `preconnect` hint in it would still pass. A manifest link in all three
+browsers, an icon link in Chrome and Safari, `prefetch` in Firefox and Safari, and a form submit
+in Safari were not exercised. In Firefox such a page could still run a script that already lies
+on the reader's disk.
 
 `file:` stands beside `'self'` although no measured browser needs it: all three load the relative
 images under `img-src 'self'` alone. It is kept because Firefox's source derives `'self'` for a
 document without a host as a unique origin that matches nothing (read in `nsCSPUtils.cpp`, not
 measurable while Firefox exempts local files), so a version that begins to apply the policy to
 local files would otherwise hide a report's own images. It widens nothing that was measured.
+Whether it stays is an open decision: dropping it gives the narrowest policy that was measured,
+and doing so after a release moves every rendering digest of the conformance corpus again.
 
 `--report-export` writes the same page with every file inlined as a `data:` URI, for a ticket
 attachment or an e-mail. That is how a report is shared without Zensu.
@@ -932,11 +949,18 @@ costs and what it rejected.
 - **Images are not machine-screened** for personal data. The capture rules and the preview before
   publishing carry that.
 - **Encoder availability.** Without libwebp's `cwebp` and `dwebp` a report stays at PNG size, and
-  so does every image whose transcode cannot be verified (§6.5).
+  so does every image whose transcode cannot be verified (§6.5). On Windows every image stays a
+  PNG, because the tool lookup is switched off there until it is measured.
+- **The tool pair is trusted as far as `PATH` is.** The lookup refuses a pair inside the project
+  and a pair that everyone may write or replace through a directory above it. It does not judge
+  who owns the pair, nor a link that a symlink chain passes through in a directory on neither
+  the spelled nor the real path; a file swapped between the lookup and the start is followed,
+  and a pair that was found and left unused prints no reason (§6.5).
 - **The viewer's policy stops loads, not everything.** A navigation, a `preconnect` connection and
   an image from another local file pass it in every measured browser, and Firefox applies it to
-  nothing that is loaded from a local file, a script included (§6.6). The renderer's escaping
-  stays the first line.
+  nothing that is loaded from a local file, a script included (§6.6). A manifest link, an icon
+  link and `prefetch` fired in too few browsers to count as measured, and a form submit was not
+  driven in Safari (Appendix A). The renderer's escaping stays the first line.
 - **Equal WebP files are stored once.** Two captures that become the same WebP, as two PNGs with
   equal pixels can, share one file, and its entry keeps only the first capture's digest as
   `source_sha256`.
@@ -946,8 +970,8 @@ costs and what it rejected.
 - **Unmeasured:** WebP attachments on GitHub, the multipart uploads call through `glab`, the file
   captures for the Android emulator and for desktop windows, pre-signed uploads with digest
   enforcement on the service's object store, and Windows paths. On Windows that includes the WebP
-  transcode, whose lookup reads `cwebp.exe` and `dwebp.exe` there, and the viewer's policy, a
-  `file:` URL with a host among it; the policy was measured on macOS only.
+  transcode, which is therefore switched off there, and the viewer's policy, a `file:` URL with a
+  host among it; the policy was measured on macOS only.
 - **A report is a snapshot.** It shows what held on its tree. The summary names head and tree, so
   a reader can tell it from the current state.
 - **Codex and Kiro wait** for their verify-feature ports before they can produce a report.

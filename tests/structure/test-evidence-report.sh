@@ -62,7 +62,7 @@ TOOL_PAIR="$WORK/tools-pair"
 TOOL_RAN="$WORK/tool-ran"
 mkdir -p "$ENCODER_ONLY" "$TOOL_PAIR"
 chmod 755 "$ENCODER_ONLY" "$TOOL_PAIR"
-for stub in "$ENCODER_ONLY/cwebp" "$ENCODER_ONLY/cwebp.exe" "$TOOL_PAIR/cwebp" "$TOOL_PAIR/cwebp.exe" "$TOOL_PAIR/dwebp" "$TOOL_PAIR/dwebp.exe"; do
+for stub in "$ENCODER_ONLY/cwebp" "$TOOL_PAIR/cwebp" "$TOOL_PAIR/dwebp"; do
   printf '#!/bin/sh\n: > "%s"\nexit 97\n' "$TOOL_RAN" > "$stub"
   chmod 755 "$stub"
 done
@@ -668,8 +668,12 @@ A grayscale capture of the settings page
 EOF
 RC=$?
 cat "$OUT" "$ERRF" > "$WORK/r24-pair.txt"
-if [ "$RC" -ne 0 ] || ! grep -q "^zensu evidence report: e1 added to $PAIR_ID | image | image/png 3x2 | 73 bytes | files/[0-9a-f]*\.png | PNG kept: it is not an 8-bit truecolor image\$" "$OUT"; then R24="$R24 pair-first($RC)"; fi
-bash "$LOG" --report-add --report "$PAIR_ID" --kind image --file "$PAIR_RUN/shot.png" >"$OUT" 2>"$ERRF" <<'EOF'
+R24_KEPT=' | PNG kept: it is not an 8-bit truecolor image'
+case "$(uname -s)" in
+  (MINGW*|MSYS*|CYGWIN*) R24_KEPT='' ;;
+esac
+if [ "$RC" -ne 0 ] || ! grep -q "^zensu evidence report: e1 added to $PAIR_ID | image | image/png 3x2 | 73 bytes | files/[0-9a-f]*\.png$R24_KEPT\$" "$OUT"; then R24="$R24 pair-first($RC)"; fi
+PATH="$ENCODER_ONLY:$TOOL_PAIR:$SUITE_PATH" bash "$LOG" --report-add --report "$PAIR_ID" --kind image --file "$PAIR_RUN/shot.png" >"$OUT" 2>"$ERRF" <<'EOF'
 The settings page after a reload shows the new locale
 EOF
 RC=$?
@@ -677,9 +681,9 @@ cat "$OUT" "$ERRF" > "$WORK/r24-encoder-only.txt"
 if [ "$RC" -ne 0 ] || ! grep -q "^zensu evidence report: e2 added to $PAIR_ID | image | image/png [0-9]*x[0-9]* | [0-9]* bytes | files/$(basename "$PNG_SOURCE")\$" "$OUT"; then R24="$R24 encoder-only($RC)"; fi
 [ ! -e "$TOOL_RAN" ] || R24="$R24 a-tool-was-started"
 if [ -z "$R24" ]; then
-  check "R24 --report-add hands the caller's PATH to the module: a tool pair first on PATH keeps a grayscale PNG with its reason, an encoder without its decoder leaves the add line as it was, and no tool is started" PASS
+  check "R24 --report-add hands the caller's PATH to the module: a tool pair first on PATH keeps a grayscale PNG with its reason, an encoder without its decoder ahead of a pair leaves the add line as it was, no tool is started, and on Windows, where the lookup answers no pair, both lines stay plain" PASS
 else
-  check "R24 --report-add hands the caller's PATH to the module: a tool pair first on PATH keeps a grayscale PNG with its reason, an encoder without its decoder leaves the add line as it was, and no tool is started ($R24)" FAIL
+  check "R24 --report-add hands the caller's PATH to the module: a tool pair first on PATH keeps a grayscale PNG with its reason, an encoder without its decoder ahead of a pair leaves the add line as it was, no tool is started, and on Windows, where the lookup answers no pair, both lines stay plain ($R24)" FAIL
   cat "$WORK/r24-pair.txt" "$WORK/r24-encoder-only.txt" 2>/dev/null
 fi
 

@@ -51,7 +51,8 @@ two `evidence.report` layers that `zensu_evidence_report_config_json` reads, `{u
 `zensu-host-path.sh`, a file as its directory plus its name, and travel in `ZENSU_ERP_*` variables
 kept out of MSYS conversion. One variable is left to that conversion on purpose:
 `ZENSU_ERP_TOOL_PATH` carries the caller's `PATH` for the tool lookup, and Git Bash has to turn it
-into the native list the core splits at `path.delimiter`. The shell refuses every flag outside its list, so no free-text flag
+into the native list the core splits at `path.delimiter`. Nothing reads that list on win32 yet,
+because the lookup answers no pair there (§"The WebP transcode"). The shell refuses every flag outside its list, so no free-text flag
 exists; the module refuses a flag that does not belong to the verb. Chain mode (`--log` at begin
 and render) reuses `_zensu_avr_prepare` and `_zensu_avr_work_tree`, the acceptance verbs'
 transport, and a work-tree fault reaches the module as the `work-tree-fault` file.
@@ -171,27 +172,36 @@ trusted, because the encoder does not refuse what it cannot keep: measured with 
 `gAMA` of 1.0 changed the decoded pixels, a 16-bit PNG was reduced to 8 bits without a message, and
 without `-exact` the colour under alpha 0 was lost (spec Appendix A).
 
-- **Lookup (`findWebpTools`).** Only absolute entries of the tool path, in order. An entry without
-  an executable regular `cwebp` (`cwebp.exe` on win32) is skipped, the first entry with one
-  decides, and `dwebp` must sit beside it. First-entry-decides is deliberate: a decoder from
-  another directory may be another build, and the check would then verify one library with
-  another. `projectRoots` is asked only once a pair exists, because it runs git: the project root,
-  the top of its work tree, and the same two for the chain's work tree. The spelled entry, its real
+- **Lookup (`findWebpTools`).** On win32 it answers no pair before it reads the tool path: neither
+  the lookup nor the start of a tool with an empty environment was ever run there, so the
+  transcode stays off on that platform until it is measured. The platform is the function's third
+  parameter, so a unit case drives that answer on every host. Elsewhere only absolute entries of
+  the tool path count, in order. An entry without an executable regular `cwebp` is skipped
+  (`toolFile`), the first entry with one decides, and `dwebp` must sit beside it.
+  First-entry-decides is deliberate: a decoder from another directory may be another build, and
+  the check would then verify one library with another. `trustedPair` judges the pair in two
+  steps. First the places: the pair is refused when everyone may write the entry's real
+  directory, a real tool file or the directory a tool really lies in (`othersMayWrite`, the
+  `0o002` bit), and when a directory above one of those three directories, or above the entry as
+  the tool path spells it, is writable by everyone and not sticky (`othersMayReplace`, which
+  walks to the file-system root), because another account could then replace the program or a
+  directory that leads to it. The spelled entry joins the walk because a symlinked entry is a
+  name in its parent directory: whoever may rename entries there can point it at another tool
+  directory, whose own real place then passes. A sticky directory
+  above the pair passes, since only an entry's owner may rename or remove it there, and so does a
+  group-writable place. Ownership is not judged on purpose: a Homebrew prefix belongs to an
+  ordinary account, and a shared install to a service account, so an owner rule would switch the
+  transcode off without a line for people who did nothing wrong. Then the roots: `projectRoots`
+  is asked only once a pair passed the first step, because it runs git: the project root, the top
+  of its work tree, and the same two for the chain's work tree. The spelled entry, its real
   directory and both real files must lie outside every root, so a link inside the project that
   points outside is refused too, and a root that cannot be determined refuses the pair. A
   repository therefore never supplies the program. The real paths come from `physicalPath`, which
-  is `fs.realpathSync.native` on every platform, the reader this module uses for containment,
-  because it expands a Windows short name that the JavaScript reader keeps. On POSIX the pair is
-  also refused when everyone may write the entry's real directory, a real tool file or the
-  directory a tool really lies in (`othersMayWrite`, the `0o002` bit), because another account
-  could then replace the program; that check comes before the roots are asked, and a
-  group-writable place passes. Ownership is not judged on purpose: a Homebrew prefix belongs to an
-  ordinary account, and a shared install to a service account, so an owner rule would switch the
-  transcode off without a line for people who did nothing wrong.
+  is `fs.realpathSync.native` on every platform, the reader this module uses for containment.
 - **Runner (`runTool`).** `spawnSync` with the tool's real path, no shell, an empty environment,
   `stdio: 'ignore'`, `LIMITS.toolMs` (30 s) and `SIGKILL`, inside the private directory. It is the
   module's only use of `node:child_process`; the unit file pins the option block, the two call
-  sites and their order by reading the source. The environment is built by `emptyEnvironment`,
+  sites and their order by reading the source. The environment is built by `toolEnvironment`,
   not written as `{}`: Node copies `NODE_V8_COVERAGE` from its own process into a child's
   environment unless the given object has that name as an own key (measured with Node 26.13.1 on
   macOS, with the variable present at start and set at run time, and with Node 22.23.5 on Linux),
@@ -206,12 +216,18 @@ without `-exact` the colour under alpha 0 was lost (spec Appendix A).
   before a tool starts.
 - **Verification.** The core decodes the PNG itself (`decodePng`: one inflate bounded by the
   expected size, the five filter types, a stream of any other length refused). `cwebp` runs with
-  `WEBP_ENCODER_ARGUMENTS`. Its output must sniff as a still, lossless WebP with nothing to drop,
-  have the PNG's size, carry the PNG's ICC profile byte for byte, or none when the PNG has none
+  `WEBP_ENCODER_ARGUMENTS`. `encodedProblem` judges its output in a fixed order and names the
+  first failure: it must sniff as a still, lossless WebP with nothing to drop, have the PNG's
+  size, carry the PNG's ICC profile byte for byte, or none when the PNG has none
   (`webpProfiles`), and be smaller than the cleaned PNG. `dwebp -pam` then writes RGBA, and
-  `pamMatches` compares the header and every pixel, an RGB source against alpha 255. Any
-  difference, a tool that fails, writes no file or runs past its limit, and a scratch directory
-  that cannot be made each keep the PNG with a reason of their own.
+  `pamMatches` compares it with the core's decode: it opens the file through `openForReading`,
+  the no-follow, non-blocking open that `readBounded` uses too, requires a regular file of exactly the header's and the pixels' size on that descriptor, and
+  reads it in blocks through `readExactly`, so a short read is no match, while `rowMatches`
+  compares each row, an RGB source against alpha 255. Only a file-system error answers no match
+  there; any other error reaches `transcodePng`, which keeps the PNG with `the transcode could
+  not be completed`. Any difference, a tool that fails, writes no file or runs past its limit,
+  and a scratch directory that cannot be made (`scratchDirectory`) each keep the PNG with a
+  reason of their own.
 - **Scratch.** `<store>/scratch/webp-<random>` holds `source.png`, `target.webp` and
   `decoded.pam` for one call and is removed in `finally`. `sweepScratch` removes a `webp-`
   directory older than `LIMITS.scratchStaleMs` (10 minutes) before a new one is made, which clears
@@ -335,8 +351,8 @@ from `IMAGE_SOURCES` (`'self' file:` for the bundle page, `data:` for the export
 recomputes it from the rendered page's one `style` element. The renderer writes no `style`
 attribute, because the hash covers the element alone. Measured on 2026-11-25 on `file://` in
 Chrome 158, Safari 27.2 and Firefox 161.0 (spec Appendix A): the page loads its relative images
-and applies its style sheet under the policy, and a probe page ran no inline script and sent no
-request to a network. What it does not stop: a navigation, a `preconnect` connection, an image
+and applies its style sheet under the policy, and a probe page ran no inline script and sent
+none of the requests the spec counts as stopped. What it does not stop: a navigation, a `preconnect` connection, an image
 from another local file, and in Firefox anything loaded from a local file, a script included,
 because Firefox applied none of the fetch directives to a `file:` URL. `file:` in `img-src` is
 redundant in the three measured browsers, which load the relative images under `'self'` alone. It
@@ -440,15 +456,20 @@ rendering digest of the corpus; `ZENSU_ERP_TOOL_PATH` in the report arm of `zens
 `transportOptions`, and the line citations of `zensu-log.sh` in `docs/multi-repo-chains-spec.md`
 and `docs/multi-repo-chains-overview.html`, which a line added to that file shifts
 (`test-multi-repo-doc-citations.sh`), and with the tool-path row of the port table in spec §7.1;
-the lookup's refusals (`findWebpTools`, `othersMayWrite`) with the "where the tools come from"
-bullet of spec §6.5 and the `--report-add` row of `docs/configuration.md`, and with the fixed modes
-the unit helper `standInTools` and the driver's stub directories set, so a permissive umask
-cannot make a stand-in look writable by everyone; the `webp` rule of `combineConfigLayers` with the
-`evidence.report.webp` rows of spec §6.11 and `docs/configuration.md`, its deviation paragraph
-there, which counts the deviating keys, and `config.example.json`; and in
-`tests/structure/test-evidence-report.sh` the `ENCODER_ONLY` directory that leads `PATH` for the
-whole suite, which keeps every check independent of a libwebp the machine may have, with `R24`,
-the one check that puts a tool pair first.
+the lookup's refusals (`findWebpTools`, `trustedPair`, `othersMayWrite`, `othersMayReplace`) with
+the "where the tools come from" and "Windows keeps the PNG" bullets of spec §6.5, the encoder,
+tool-pair and unmeasured bullets of spec §11, the `--report-add` and `evidence.report.webp` rows
+of `docs/configuration.md` and the two screenshot bullets of `docs/verify-feature.md` section 7,
+and with the fixed modes the unit helper `standInTools` and the driver's stub directories set, so
+a permissive umask cannot make a stand-in look writable by everyone; the `webp` rule of
+`combineConfigLayers` with the `evidence.report.webp` rows of spec §6.11 and
+`docs/configuration.md`, its deviation paragraph there, which counts the deviating keys, and
+`config.example.json`; and in `tests/structure/test-evidence-report.sh` the `ENCODER_ONLY`
+directory that leads `PATH` for the whole suite, which keeps every check independent of a libwebp
+the machine may have, with `R24`, the one check that puts a tool pair first. `R24` expects the
+plain add line on Git Bash, where the lookup answers no pair, and that host branch is the suite's
+only native-Windows marker, which its `excluded` entry in
+`tests/profiles/windows-native-structure.v1.json` records.
 
 **Version: `patch`.** A new module, new verbs, a new private store and sidecar, and a new config
 subtree read permissively. No context-record or workflow-state field moves, no strict key set an
@@ -472,8 +493,17 @@ moves. That the module now starts two programs is not on the breaking list.
 - The transcode runs the first `cwebp` and `dwebp` pair the caller's `PATH` names outside the
   project, as every tool the plugin starts by name is whatever `PATH` names. The pair is resolved
   and then started, so a file swapped in between is followed. The writability check reads three
-  directories and two files, not their ancestors, and judges no owner. The verification bounds
-  what a wrong encoder can store, not what a hostile program on `PATH` can do.
+  directories, every directory above them or above the entry as spelled, and two files, and
+  judges no owner. A link that a symlink chain passes through on its way, stored in a directory
+  on neither of those paths, is not judged. The verification
+  bounds what a wrong encoder can store, not what a hostile program on `PATH` can do.
+- A `cwebp` that was found and not accepted prints nothing: the add line is then the step-2 line,
+  which the unit file and `R24` pin. Naming the rule that refused the pair, on the add line, at
+  `--report-begin` or in a `/zensu:doctor` row, is an open decision. Until it is taken, section 7
+  of `docs/verify-feature.md` tells a reader what the lookup requires.
+- `dwebp` decodes `target.webp` by its path after the core read that file's bytes for storing, so
+  the verified file and the stored bytes are two reads of one file in the call's private scratch
+  directory.
 - A user-level `evidence.report.webp` of `off` is lost while that configuration file cannot be
   parsed, like every setting in it. Reading an unreadable layer as `off` would need the shell to
   tell a missing file from a broken one; it is not built.
@@ -491,10 +521,13 @@ moves. That the module now starts two programs is not on the breaking list.
   manifest link, an icon link and `prefetch` fired in too few browsers to count as measured.
 - `file:` in `img-src` rests on a source reading, not on a measurement, and is redundant today.
   Dropping it is a one-token change that moves every rendering digest.
-- Windows is unmeasured for step 3: the `.exe` lookup, Git Bash's conversion of
-  `ZENSU_ERP_TOOL_PATH`, which variables a tool started with an empty environment still receives
-  there, the policy and a `file:` URL with a host. No writability check runs there. Six unit cases
-  that drive stand-in tools skip there, because a stand-in is a script with an interpreter line.
+- Windows keeps every PNG: `findWebpTools` answers no pair there, because nothing of the
+  transcode was measured on that platform: a lookup of `.exe` names, Git Bash's conversion of
+  `ZENSU_ERP_TOOL_PATH`, which variables a tool started with an empty environment still receives,
+  and a writability rule for its access lists. Switching the transcode on there needs those
+  measurements first. The policy and a `file:` URL with a host are unmeasured on Windows too. Six
+  unit cases that drive stand-in tools skip there, because a stand-in is a script with an
+  interpreter line.
 - Chain mode needs an edit-landing receipt, like the acceptance verbs.
 - The sidecar and the store are session-writable files, like every plugin store: the integrity
   checks catch an altered evidence file, not a rewritten binding.
