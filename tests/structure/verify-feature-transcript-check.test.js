@@ -583,7 +583,7 @@ test('a read-only CLI probe that names no session passes, while a probe that cou
   ]) {
     assert.equal(reportOnlyCommand(command), false, command);
   }
-  const probed = localRun({ skill: localParts().skill + bash('probe', 'command -v playwright-cli && playwright-cli --version', '/opt/homebrew/bin/playwright-cli\n0.1.24') });
+  const probed = localRun({ skill: localParts().skill + bash('probe', 'command -v playwright-cli && playwright-cli --version', '/opt/homebrew/bin/playwright-cli\n0.1.25') });
   for (const name of ['localBrowserTools', 'localEvidence', 'localTeardown', 'reportOnly']) {
     assert.equal(check(probed, name).pass, true, name);
   }
