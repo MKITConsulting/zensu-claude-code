@@ -7215,12 +7215,34 @@ else
   rm -f "$WR_SRC_WT/.zensu/state/worktree-anchor-$WR_STRAY.json"
   WR_TXT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" 2>/dev/null)"
   printf '%s\n' "$WR_TXT" | grep -qF 'would also end the keep anchor of session f3000000, which is not running' || WR_BAD="$WR_BAD dry-run-names-no-other-session"
+  WR_HOLD_ENDED_BEFORE="$(wr_anchor_ended)"
+  wr_rel "$WR_SRC" "$WR_SRC_WT" "$$" 30 "$WR_ACCT"
+  WR_HOLD_TXT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" 2>/dev/null)"
+  WR_HOLD_JSON="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"
+  WR_HOLD_FORCED="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --force 2>/dev/null)"
+  WR_HOLD_MARKER=gone
+  [ -f "$WR_SRC_WT/.worktree-keep" ] && WR_HOLD_MARKER=kept
+  WR_HOLD_ENDED="$(wr_anchor_ended)"
+  wr_rel "$WR_SRC" "$WR_SRC_WT" "$WR_DEAD" 7200 "$WR_ACCT"
   WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json --apply 2>/dev/null)"
   [ "$(wr_json "$WR_OUT" 'o.verdict + ":" + o.ended.length')" = "released:2" ] || WR_BAD="$WR_BAD apply=$(wr_json "$WR_OUT" 'o.verdict + " " + JSON.stringify(o.blockers)')"
   [ "$(wr_json "$WR_OUT" 'o.anchors.map((a) => a.owner).sort().join(",")')" = "ended-session,source" ] || WR_BAD="$WR_BAD owners=$(wr_json "$WR_OUT" 'JSON.stringify(o.anchors)')"
   wr_json "$WR_OUT" 'o.message' | grep -qF 'Session f3000000 also worked in this worktree recently and is not running' || WR_BAD="$WR_BAD message-names-no-other-session"
   [ -e "$WR_SRC_WT/.worktree-keep" ] && WR_BAD="$WR_BAD marker-still-there"
   [ -z "$WR_BAD" ] && check "WR9 an anchor no known session owns blocks the release, while one left by a session that is no longer running is ended with the source's and named in both the dry run and the archive message" PASS || check "WR9 anchor ownership:$WR_BAD" FAIL
+
+  WR_BAD=""
+  printf '%s\n' "$WR_HOLD_TXT" | grep -q '^BLOCKED ' || WR_BAD="$WR_BAD unforced-text-not-blocked"
+  printf '%s\n' "$WR_HOLD_TXT" | grep -qF 'The old session is busy' || WR_BAD="$WR_BAD unforced-text-names-no-busy-source"
+  printf '%s\n' "$WR_HOLD_TXT" | grep -qF 'run release again with --force, first without --apply' || WR_BAD="$WR_BAD busy-blocker-lacks-the-dry-run-first"
+  printf '%s\n' "$WR_HOLD_TXT" | grep -qF 'would also end' && WR_BAD="$WR_BAD blocked-text-names-the-other-session"
+  [ "$(wr_json "$WR_HOLD_JSON" 'o.verdict + ":" + o.blockers.map((b) => b.code).join(",") + ":" + o.anchors.filter((a) => a.owner === "ended-session" && a.action === "end").map((a) => a.sessionId).join(",")')" = "blocked:source-busy:$WR_ENDED" ] || WR_BAD="$WR_BAD blocked-json=$(wr_json "$WR_HOLD_JSON" 'o.verdict + " " + JSON.stringify(o.blockers.map((b) => b.code)) + " " + JSON.stringify(o.anchors)')"
+  printf '%s\n' "$WR_HOLD_FORCED" | grep -q '^RELEASABLE ' || WR_BAD="$WR_BAD forced-text-not-releasable"
+  printf '%s\n' "$WR_HOLD_FORCED" | grep -qF 'would also end the keep anchor of session f3000000, which is not running' || WR_BAD="$WR_BAD forced-dry-run-names-no-other-session"
+  printf '%s\n' "$WR_HOLD_FORCED" | grep -qF 'Run release again with --apply --force.' || WR_BAD="$WR_BAD forced-dry-run-hint"
+  [ "$WR_HOLD_MARKER" = "kept" ] || WR_BAD="$WR_BAD dry-runs-removed-the-marker"
+  [ "$WR_HOLD_ENDED" = "$WR_HOLD_ENDED_BEFORE" ] || WR_BAD="$WR_BAD dry-runs-ended-anchors=$WR_HOLD_ENDED_BEFORE/$WR_HOLD_ENDED"
+  [ -z "$WR_BAD" ] && check "WR9c while the old session is busy and another session's anchor holds its worktree, the dry run answers BLOCKED, its busy blocker asks for the forced run without --apply first and its text names no other session, its --json form lists that session as an ended-session anchor with the action end, and the dry run repeated with --force answers RELEASABLE, names that session and changes nothing" PASS || check "WR9c busy source beside another session's anchor:$WR_BAD" FAIL
 
   wr_anchor "$WR_SRC" 60 "$WR_HOME/elsewhere" >/dev/null
   WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"

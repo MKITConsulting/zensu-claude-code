@@ -98,26 +98,71 @@ four things hold together:
   on 2026-11-24 and not driven live, says that archiving a session also archives its side
   sessions that share its worktree or have finished; whether the sidebar's archive does the
   same is unmeasured. `references/archive.md` carries that fact with its source.
-- **A shared checkout holds the release itself back.** A linked session that shared its
-  parent's checkout (`sharedCheckout` in `linked-sessions-v1.mjs`) has its tree in the old
-  worktree. `release --apply` there also ends the keep anchor of a session that is not running
-  and removes the marker (`WR9`), and that session's continuation gets `session-inside` from
-  its own `release` while the old session's process is registered in the shared tree. So the
-  taker releases only once that continuation reports its carry-over or the user leaves the
-  session behind, and for that continuation a `release` that refuses for that process alone
-  counts as its report.
+- **A tree that other sessions worked in holds the release itself back, whichever session
+  releases it.** `release --apply` ends the source's keep anchor and the anchor of every known
+  session that is not running, and removes the marker (`WR9`), so the first release of a
+  shared tree lifts the protection for all of them. The brief points the taker of a parent at
+  one such case: a linked session that shared its parent's checkout (`sharedCheckout` in
+  `linked-sessions-v1.mjs`). The brief alone cannot carry the hold, because it reaches only
+  that taker, while the continuation of such a linked session releases the same tree. The dry
+  run names, to whichever session runs it, each session whose live keep anchor the release
+  would end: its `RELEASABLE` text answer prints one `would also end the keep anchor of
+  session …, which is not running` line per session (`otherNotes` in `cmdRelease`), and its
+  `--json` payload lists the same sessions as `anchors` entries with `owner` `ended-session`
+  and `action` `end`, under a `blocked` verdict too, because the anchors are walked before
+  the verdict is chosen. To the continuation of a linked session they name the parent and the
+  linked sessions beside it. So steps 0 and 1 keep them for the plan confirmation, which names
+  each session, and step 4 releases only once each named session's work is carried over, by
+  its continuation's report or the user's word, or the user leaves it behind. A `BLOCKED`
+  text answer prints none of those lines, and an old session that is `BUSY` or unmeasured
+  blocks every dry run without `--force` (`WR8`), the plan pass included. So `--apply`
+  follows only a dry run that answered `RELEASABLE` or `READY`: after a `BLOCKED` one the dry
+  run is repeated, with `--force` when the old session itself is what still blocks it. The
+  script's `source-busy` and `source-unmeasured` blockers ask for the same order, `run release
+  again with --force, first without --apply`, because a reader of a blocked `--apply` would
+  otherwise repeat it with `--force` and end anchors no dry run had named. The `release` row
+  says that the script does not wait for those sessions, so no reader takes the hold for
+  something `--apply` does. A later `READY` answer ends the hold: once a release
+  lifted the marker, no anchor and no marker is left there for another release to end. A
+  session whose process is still registered in the tree is a `session-inside` blocker
+  instead. For the continuation of a linked session, a `release` that refuses for the old
+  session's process alone counts as its report of the carry-over, and so does the line in
+  which it says that it holds its release back. On the move route nothing is held: the tree
+  travels whole and `release` is ready at once (`WR12`), so the confirmation names such a
+  session as a cost of the move.
 
 Pins: the unit case `every arm on both legs closes with the release step, whichever form
 renders it` in `tests/structure/worktree-advice-v1.test.js` holds the lead, its place, the
-at-once report, the wait, the hold and that no line opens with `LAST,`; `T41` and its eight
-`T41-control` mutants in `tests/structure/test-session-trail-skill.sh` grade both copies'
-takeover, handoff, archive and command references and each script's release step; and the
-step-order needles of `CH6` and `LS14` in `tests/structure/test-session-trail-verdict.sh` name
-the heading. Known gaps: the order, the wait and the hold are prose, so nothing checks that a
-session released before it continued the work, or waited; the taker learns of a carry-over
-only from that continuation's own report; the report reaches a user who reads the session, and
-the Zensu Session Hub shows no release state; and the wait for linked sessions rests on one
-tool description.
+at-once report, the wait, the hold and that no line opens with `LAST,`; `T41` in
+`tests/structure/test-session-trail-skill.sh` grades both copies' takeover, handoff, archive
+and command references and each script's release step, and holds the quoted dry-run line to
+`otherNotes('would also end', null)` and its line template in the script, the `--json` form
+to the owner expression, the `anchors.push` statement and the payload key of `cmdRelease`,
+and both busy-source blocker texts to their `first without --apply` wording; each
+`T41-control` mutant removes or rewords one pinned site in the takeover, handoff or command
+reference or in the script, three of them plant the retired wording beside the current one,
+in the takeover reference, the handoff reference and the script, and those three, the step-0
+and flow-5 `--json` mutants, the three mutants of the `--json` sites in the script and the
+blocker-text mutant must fail as their own arm and as nothing else; `WR9c` in
+`tests/structure/test-session-trail-verdict.sh` runs the companion's `release` against a busy
+old session beside another session's anchor: the dry run answers `BLOCKED`, its blocker asks
+for the forced run without `--apply` first and its text names no other session, its `--json`
+form lists that session as an `ended-session` anchor with the action `end`, and the dry run
+repeated with `--force` answers `RELEASABLE`, names that session and changes nothing; and the
+step-order needles of `CH6` and `LS14` in the same suite name the heading. Known gaps: the order, the wait and the hold are prose, so nothing checks that a
+session released before it continued the work, waited, or applied only after a dry run that
+named the other sessions; `cmdRelease` itself still ends the anchor of every session that is
+not running, and a refusal there would change what `WR9` pins; a session whose keep anchor is
+no longer live, aged by its SessionEnd or past its idle window, is named by neither form of
+the dry run although its work may still lie in the tree, so the release waits for it only
+where the brief names it as a linked session that shared the checkout; `WR9c` grades the
+companion's copy alone, and PLM's `cmdRelease` is held to it only by the `T41` text pins; a
+session whose process ends between the dry run and the `--apply` is named only afterwards, by
+the `also ended` line and the `ARCHIVE` line; a session learns of another's carry-over only
+from that session's own report or from the user, and the continuation of a linked session
+gets no report from the sessions beside it; the report reaches a user who reads the session,
+and the Zensu Session Hub shows no release state; and the wait for linked sessions rests on
+one tool description.
 
 **ONE ALTERNATIVE exists and it is NOT an arm, which is the whole reason it took this
 long to ship.** `MOVE_ALTERNATIVE` offers `git worktree move` on the PRESENT leg, and the

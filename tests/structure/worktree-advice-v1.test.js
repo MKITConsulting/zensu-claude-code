@@ -1635,7 +1635,7 @@ test('every arm on both legs closes with the release step, whichever form render
         assert.ok(step.join(' ').includes('That is the takeover\'s last step, not the work\'s'), 'the release step no longer separates the takeover from the work');
         assert.ok(step.join(' ').includes('can now be archived or removed: tell the user at once'), 'the release step lost its promise or its at-once report');
         assert.ok(step.join(' ').includes('While linked sessions of the old session are still to be continued, say instead that its archive waits until each has carried its work over'), 'the release step lost the archive wait for linked sessions');
-        assert.ok(step.join(' ').includes('while one of them shared this worktree, hold this release back until then'), 'the release step lost the hold for a shared checkout');
+        assert.ok(step.join(' ').includes('Hold this release back while one of them shared this worktree, or while its dry run says that it would also end the keep anchor of another session, until the work of that session is carried over or the user leaves it behind.'), 'the release step lost the hold for a tree another session worked in');
         assert.ok(step.join(' ').includes('only needs --force on the re-run'), 'the release step lost its --force note');
         assert.ok(body[body.length - 1].endsWith('an archive deletes them with the worktree.'), 'the release step is not the closing block');
       }

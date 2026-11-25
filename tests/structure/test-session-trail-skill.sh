@@ -2729,9 +2729,16 @@ release_timing_sites() {
   fi
   for n in "The release is the takeover's last step, not the work's" \
     'before you edit, test, commit or push anything of the remaining work' \
-    "when the brief says of a linked session still to be continued that it shared its parent's checkout" \
-    'Release then only once its continuation reports that it carried its work over, or the user has decided to leave it behind' \
+    "The brief points at it when it says of a linked session still to be continued that it shared its parent's checkout" \
+    'The dry run states it for each session it names in a `would also end the keep anchor of session …, which is not running` line, whichever session you continue' \
+    "Release then only once each such session's continuation reports that it carried its work over, or the user has said that its work is carried over or has decided to leave it behind" \
+    'in one line that names each session the release waits for' \
+    'A dry run that answers `BLOCKED` prints no such line, whatever blocks it, and an old session that is `BUSY`, or registered with a queue it could not measure, blocks every dry run without `--force`, the one of the plan pass included' \
+    'So never apply on a `BLOCKED` answer: once its other blockers are resolved, run the dry run again without `--apply`, with `--force` when the old session being busy or its queue being unmeasured is what still blocks it' \
+    '`--apply` follows only a dry run that answered `RELEASABLE` or `READY`, with `--force` where that dry run took it' \
+    'A later dry run that answers `READY` ends the hold' \
     'The plan confirmation of step 1 carried the blockers the dry run named' \
+    'say so in one line and re-run with `--force`, the dry run first as described above' \
     'costs no question of its own either' \
     'Tell the user at once, in their own language and in a line of its own before the remaining work starts' \
     'say it again in the closing message of that turn' \
@@ -2739,6 +2746,7 @@ release_timing_sites() {
     'Still to be continued is every linked session this takeover started, every one it keeps **later**, and every one it listed for a takeover by hand' \
     'when its continuation has carried its work over, which its own `release` reports with its `ARCHIVE` line, or when the user has decided to leave it behind' \
     'so for it a `release` that refuses for that process alone reports the same' \
+    'So does a release that it holds back as described above' \
     'When a later turn of this session shows that the wait has ended for the last of them' \
     'Archive or delete it yourself only when the user explicitly names that session'; do
     case "$para" in (*"$n"*) ;; (*) bad="$bad [release:$n]" ;; esac
@@ -2752,10 +2760,22 @@ release_timing_sites() {
     (*'before the yes you neither relay its `ARCHIVE` line nor follow its `--apply` or `--force` hint'*) ;;
     (*) bad="$bad step0-dry-run-unbounded" ;;
   esac
+  case "$step0" in
+    (*'each line that reads `would also end the keep anchor of session …, which is not running` names another session that worked in the old worktree, and the plan confirmation of step 1 names it'*) ;;
+    (*) bad="$bad step0-other-sessions-absent" ;;
+  esac
+  case "$step0" in
+    (*'Under `--json` the dry run prints no such line and lists the same sessions as the `anchors` entries whose `owner` is `ended-session` and whose `action` is `end`. It lists them under a `blocked` verdict too, where the text answer names none, so after a `BLOCKED` answer run the dry run again with `--json` and read them there for the plan confirmation'*) ;;
+    (*) bad="$bad step0-json-form-absent" ;;
+  esac
   grep -qF 'leave it out of `release`, which refuses it' "$tk" || bad="$bad step0-receipt-sentence"
   confirm="$(grep -F "It names the brief's linked sessions too" "$tk" | head -1)"
   for n in 'It carries what the `release` dry run names as blocking as well' \
     'so that the release of step 4 costs no question after the yes' \
+    'It names each session of a `would also end the keep anchor of session …, which is not running` line too' \
+    'or of the `anchors` entries step 0 names, although the dry run counts none of them among its blockers' \
+    "so the release of step 4 waits for it unless the user's answer says that its work is carried over or that it stays behind" \
+    'another live session inside the old worktree or a session of such a line as a cost of the move' \
     'so what it names about that tree binds the create route' \
     'as a cost of the move instead of a blocker to resolve' \
     'is no such blocker: the hazard line already states it, and `--force` on the release answers it'; do
@@ -2782,9 +2802,21 @@ release_timing_sites() {
     (*'before the confirmation you neither relay its `ARCHIVE` line nor follow its `--apply` or `--force` hint'*) ;;
     (*) bad="$bad handoff-dry-run-unbounded" ;;
   esac
+  case "$dry_line" in
+    (*'and you keep each session it names in a `would also end the keep anchor of session …, which is not running` line for the confirmation'*) ;;
+    (*) bad="$bad handoff-dry-run-drops-other-sessions" ;;
+  esac
+  case "$dry_line" in
+    (*'after a `BLOCKED` answer, which prints no such line, its `--json` form lists them'*) ;;
+    (*) bad="$bad handoff-dry-run-lacks-json-form" ;;
+  esac
   case "$wait_line" in
     (*"each blocker the \`release\` dry run named that needs the user's decision, with what resolves it"*) ;;
     (*) bad="$bad handoff-confirmation-lacks-blockers" ;;
+  esac
+  case "$wait_line" in
+    (*'together with each session step 3 kept from it, which the release waits for'*) ;;
+    (*) bad="$bad handoff-confirmation-lacks-other-sessions" ;;
   esac
   case "$wait_line" in
     (*'binds the create route and is a cost to name on the move route'*) ;;
@@ -2793,7 +2825,8 @@ release_timing_sites() {
   for n in "it is the takeover's last step, not the work's" \
     'Relay its `ARCHIVE` line to the user at once, before the remaining work starts' \
     'While linked sessions of the old session are still to be continued, say instead that its archive waits for them' \
-    "hold the release itself back while one of them shared its parent's checkout"; do
+    'Apply only after a dry run that answered `RELEASABLE` or `READY`: a `BLOCKED` answer, the one of step 3 included, prints no `would also end` line, so run `release <selector> --all` again without `--apply` first, with `--force` when the old session being busy or its queue being unmeasured is what still blocks it, and read that answer for those lines' \
+    "Hold the release itself back while one of them shared its parent's checkout, or while a dry run names another session whose keep anchor the release would also end"; do
     case "$rel_line" in (*"$n"*) ;; (*) bad="$bad [handoff:$n]" ;; esac
   done
   linked="$(grep -F -- '- **Linked sessions**: can be archived with it.' "$ar" | head -1)"
@@ -2807,7 +2840,12 @@ release_timing_sites() {
   row="$(grep -F '| `release <selector>` |' "$cm" | head -1)"
   for n in "run before that session's remaining work is continued" \
     'the plan pass of a takeover runs it to learn what would block the release' \
+    'before the plan is confirmed only its blockers and its `would also end` lines count, which the plan confirmation names' \
+    '(re-run with `--force`, the dry run first, as on `takeover`' \
     'its `ARCHIVE` line is not relayed and its `--apply` and `--force` hints are not followed' \
+    'A dry run names each such other session in a line that reads `would also end the keep anchor of session …, which is not running`' \
+    'a `BLOCKED` one prints none, and under `--json` no such line is printed: there the same sessions are the `anchors` entries whose `owner` is `ended-session` and whose `action` is `end`, under a `blocked` verdict too' \
+    '`release` does not wait for those sessions itself: `--apply` ends their anchors at once, so run it only after a dry run that answered `RELEASABLE` or `READY`, and only once the work of each session so named is carried over or the user leaves it behind' \
     'Relay all of it to the user after the release that closes the takeover' \
     'say instead that its archive waits for them'; do
     case "$row" in (*"$n"*) ;; (*) bad="$bad [commands:$n]" ;; esac
@@ -2819,19 +2857,26 @@ release_timing_sites() {
     'says that the old session can now be archived or removed: tell the user at once' \
     'While linked sessions of the old session are still to be continued, say instead that' \
     'its archive waits until each has carried its work over, which its own release reports, or the user leaves it behind' \
-    'while one of them shared this worktree, hold this release'; do
+    'Hold this release back while one of them shared this worktree, or while its dry run' \
+    'says that it would also end the keep anchor of another session, until the work of that session is carried over or the user leaves it behind'; do
     printf '%s\n' "$code" | grep -qF -- "$n" || bad="$bad [trail:$n]"
   done
+  printf '%s\n' "$code" | grep -qF -- "...otherNotes('would also end', null)," || bad="$bad trail-dry-run-note-call"
+  printf '%s\n' "$code" | grep -qF -- '${verb} the keep anchor of session ${sessionTag(a.sessionId)}, which is not running`' || bad="$bad trail-dry-run-note-text"
+  printf '%s\n' "$code" | grep -qF -- "known ? (known.live ? 'live-session' : 'ended-session') : 'unattributed';" || bad="$bad trail-json-anchor-owner"
+  printf '%s\n' "$code" | grep -qF -- "anchors.push({ key: entry.key, owner, sessionId: ownerId, state: 'live', lastSeenAt: new Date(entry.record.lastSeenAt).toISOString(), action: ends ? 'end' : 'keep' });" || bad="$bad trail-json-anchor-entry"
+  printf '%s\n' "$code" | grep -qxF -- '    anchors,' || bad="$bad trail-json-anchor-key"
+  [ "$(printf '%s\n' "$code" | grep -cF -- 'Say so to the user in one line and run release again with --force, first without --apply: their request to release, or the takeover they confirmed, is the go.')" = "2" ] || bad="$bad trail-blocker-dry-run-first"
   printf '%s\n' "$code" | grep -qF "'LAST, whichever route you took" && bad="$bad trail-retired-lead-is-back"
   printf '%s' "$bad"
 }
 T41_BAD="$(release_timing_sites "$REF_TAKEOVER" "$REF_HANDOFF" "$REF_ARCHIVE" "$REF_COMMANDS" "$TRAIL_MJS")"
 [ -z "$T41_BAD" ] \
-  && check "T41 [hub] the takeover reference releases the old session after the linked sessions, the chips and the Autopilot hand-over and before its remaining work, its plan pass runs the release dry run and the plan confirmation carries the blockers, the archive is reported at once with the wait for linked sessions, and flow 5, the archive reference, the release row and the script's lead follow" PASS \
+  && check "T41 [hub] the takeover reference releases the old session after the linked sessions, the chips and the Autopilot hand-over and before its remaining work, its plan pass runs the release dry run and the plan confirmation carries the blockers, the archive is reported at once with the wait for linked sessions, the release is held back for every session the brief or the dry run names as sharing the old worktree and applied only after a dry run that answered RELEASABLE or READY, and flow 5, the archive reference, the release row and the script's release step follow and quote the dry-run line and the --json anchor entry as the script writes them" PASS \
   || check "T41 [hub] release timing:$T41_BAD" FAIL
 T41_BAD="$(release_timing_sites "$PLM_REF_TAKEOVER" "$PLM_SKILL_DIR/references/handoff.md" "$PLM_SKILL_DIR/references/archive.md" "$PLM_REF_COMMANDS" "$PLM_TRAIL_MJS")"
 [ -z "$T41_BAD" ] \
-  && check "T41 [plm] PLM's frozen copy carries the same release timing in its takeover, handoff, archive and command references and in its script's lead" PASS \
+  && check "T41 [plm] PLM's frozen copy carries the same release timing and the same hold in its takeover, handoff, archive and command references and in its script's release step" PASS \
   || check "T41 [plm] release timing:$T41_BAD" FAIL
 T41_SANDBOX="$(mktemp -d -t session-trail-t41-XXXXXX)"
 for spec in \
@@ -2842,13 +2887,33 @@ for spec in \
   "narrow|[release:While linked sessions|a release paragraph whose archive wait covers only started sessions" \
   "shared|[release:so for it|a release paragraph without the shared-checkout end of the wait" \
   "advice|[trail:While linked sessions|a script whose release step lacks the archive wait" \
-  "trail|trail-lead|a script whose release step opens with the retired lead"; do
+  "trail|trail-lead|a script whose release step opens with the retired lead" \
+  "others|[release:The dry run states it|a release paragraph whose hold covers only the linked sessions the brief names" \
+  "advice-others|[trail:says that it would also end|a script whose release step holds the release for a shared worktree alone" \
+  "note-call|trail-dry-run-note-call|a script whose dry run announces the other sessions in other words" \
+  "note-text|trail-dry-run-note-text|a script whose dry run describes the other sessions in other words" \
+  "last-takeover|=retired-last-is-back|a takeover reference that says the retired wording beside the current heading" \
+  "last-handoff|=retired-last-is-back|a handoff reference that says the retired wording" \
+  "lead-back|=trail-retired-lead-is-back|a script whose release step carries the retired lead beside the current one" \
+  "forced|[release:So never apply|a release paragraph that repeats a blocked dry run without the force the busy old session needs" \
+  "apply-after|[release:\`--apply\` follows only|a release paragraph that lets the release be applied on a blocked dry run" \
+  "json|=step0-json-form-absent|a step 0 that names the other sessions by their text line alone" \
+  "handoff-forced|[handoff:Apply only after|a flow 5 that lets the release be applied on a blocked dry run" \
+  "blocker-text|=trail-blocker-dry-run-first|a script one of whose busy-source blockers asks for the forced run without the dry run first" \
+  "handoff-json|=handoff-dry-run-lacks-json-form|a flow 5 whose plan pass keeps the other sessions from the text line alone" \
+  "row-waits|[commands:\`release\` does not wait|a release row that says the script waits for the sessions its dry run names" \
+  "row-json|[commands:a \`BLOCKED\` one prints none|a release row that names the other sessions by their text line alone" \
+  "json-owner|=trail-json-anchor-owner|a script whose release payload names the owner of an ended session's anchor in other words" \
+  "json-entry|=trail-json-anchor-entry|a script whose release payload names the action of an anchor it would end in other words" \
+  "json-key|=trail-json-anchor-key|a script whose release payload carries the anchors under another key"; do
   mode="${spec%%|*}"; rest="${spec#*|}"; want="${rest%%|*}"; what="${rest#*|}"
   T41_ERR="$(node -e '
     const fs = require("fs");
-    const [takeover, trail, mode, dir] = process.argv.slice(1);
+    const [takeover, trail, handoff, commands, mode, dir] = process.argv.slice(1);
     let t = fs.readFileSync(takeover, "utf8");
     let s = fs.readFileSync(trail, "utf8");
+    let h = fs.readFileSync(handoff, "utf8");
+    let c = fs.readFileSync(commands, "utf8");
     const swap = (text, from, to) => { if (!text.includes(from)) throw new Error("anchor missing: " + from); return text.replace(from, to); };
     if (mode === "heading") t = swap(t, "release the old session before its remaining work", "release the old session last");
     if (mode === "order") {
@@ -2866,16 +2931,46 @@ for spec in \
     if (mode === "shared") t = swap(t, "so for it a `release` that refuses for that process alone reports the same", "so nothing more is needed");
     if (mode === "advice") s = swap(s, "While linked sessions of the old session are still to be continued, say instead that", "Say that");
     if (mode === "trail") s = swap(s, "BEFORE THE REMAINING WORK, whichever route you took: once", "LAST, whichever route you took: once");
+    if (mode === "others") t = swap(t, "The dry run states it for each session it names in a", "The dry run can also name sessions in a");
+    if (mode === "advice-others") s = swap(s, "says that it would also end the keep anchor of another session, until the work of that session is carried over or the user leaves it behind. ", "");
+    if (mode === "note-call") s = swap(s, "otherNotes(\x27would also end\x27, null)", "otherNotes(\x27would end as well\x27, null)");
+    if (mode === "note-text") s = swap(s, "}, which is not running`", "}, which has ended`");
+    if (mode === "last-takeover") t += "\nAn earlier wording said: release the old session last.\n";
+    if (mode === "last-handoff") h += "\nAn earlier wording said: release the old session last.\n";
+    if (mode === "lead-back") s = swap(s, "const RELEASE_AFTER = [\n", "const RELEASE_AFTER = [\n  \x27LAST, whichever route you took: once your own worktree holds everything you still need from the old one,\x27,\n");
+    if (mode === "forced") t = swap(t, ", with `--force` when the old session being busy or its queue being unmeasured is what still blocks it, which the takeover the user confirmed covers, and read that answer for those lines", ", and read that answer for those lines");
+    if (mode === "apply-after") t = swap(t, "`--apply` follows only a dry run that answered `RELEASABLE` or `READY`, with `--force` where that dry run took it. ", "");
+    if (mode === "json") t = swap(t, "Under `--json` the dry run prints no such line and lists the same sessions as the `anchors` entries whose `owner` is `ended-session` and whose `action` is `end`. It lists them under a `blocked` verdict too, where the text answer names none, so after a `BLOCKED` answer run the dry run again with `--json` and read them there for the plan confirmation. ", "");
+    if (mode === "handoff-forced") h = swap(h, "Apply only after a dry run that answered `RELEASABLE` or `READY`: a `BLOCKED` answer, the one of step 3 included, prints no `would also end` line, so run `release <selector> --all` again without `--apply` first, with `--force` when the old session being busy or its queue being unmeasured is what still blocks it, and read that answer for those lines. ", "");
+    if (mode === "blocker-text") s = swap(s, "run release again with --force, first without --apply: their request", "run release again with --force: their request");
+    if (mode === "handoff-json") h = swap(h, "; after a `BLOCKED` answer, which prints no such line, its `--json` form lists them", "");
+    if (mode === "row-waits") c = swap(c, "`release` does not wait for those sessions itself: `--apply` ends their anchors at once, so run it only after", "`--apply` waits for each session so named, so run it only after");
+    if (mode === "row-json") c = swap(c, ", and under `--json` no such line is printed: there the same sessions are the `anchors` entries whose `owner` is `ended-session` and whose `action` is `end`, under a `blocked` verdict too", "");
+    if (mode === "json-owner") s = swap(s, "(known.live ? \x27live-session\x27 : \x27ended-session\x27)", "(known.live ? \x27live-session\x27 : \x27ended\x27)");
+    if (mode === "json-entry") s = swap(s, "action: ends ? \x27end\x27 : \x27keep\x27 });", "action: ends ? \x27retire\x27 : \x27keep\x27 });");
+    if (mode === "json-key") s = swap(s, "\n    anchors,\n", "\n    keepAnchors: anchors,\n");
     fs.writeFileSync(dir + "/takeover.md", t);
     fs.writeFileSync(dir + "/trail.mjs", s);
-  ' "$REF_TAKEOVER" "$TRAIL_MJS" "$mode" "$T41_SANDBOX" 2>&1)"
+    fs.writeFileSync(dir + "/handoff.md", h);
+    fs.writeFileSync(dir + "/commands.md", c);
+  ' "$REF_TAKEOVER" "$TRAIL_MJS" "$REF_HANDOFF" "$REF_COMMANDS" "$mode" "$T41_SANDBOX" 2>&1)"
   if [ -n "$T41_ERR" ]; then
     check "T41-control $what could not be built ($T41_ERR)" FAIL
     continue
   fi
-  case "$(release_timing_sites "$T41_SANDBOX/takeover.md" "$REF_HANDOFF" "$REF_ARCHIVE" "$REF_COMMANDS" "$T41_SANDBOX/trail.mjs")" in
-    (*"$want"*) check "T41-control $what fails the release-timing check as $want" PASS ;;
-    (*) check "T41-control $what passes the release-timing check" FAIL ;;
+  T41_OUT="$(release_timing_sites "$T41_SANDBOX/takeover.md" "$T41_SANDBOX/handoff.md" "$REF_ARCHIVE" "$T41_SANDBOX/commands.md" "$T41_SANDBOX/trail.mjs")"
+  case "$want" in
+    (=*)
+      [ "$T41_OUT" = " ${want#=}" ] \
+        && check "T41-control $what fails the release-timing check as ${want#=} and as nothing else" PASS \
+        || check "T41-control $what does not fail the release-timing check as ${want#=} alone: ${T41_OUT:-<it passes>}" FAIL
+      ;;
+    (*)
+      case "$T41_OUT" in
+        (*"$want"*) check "T41-control $what fails the release-timing check as $want" PASS ;;
+        (*) check "T41-control $what passes the release-timing check" FAIL ;;
+      esac
+      ;;
   esac
 done
 rm -rf "$T41_SANDBOX"
