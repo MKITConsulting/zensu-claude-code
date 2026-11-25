@@ -16,7 +16,7 @@ const CONSENT_TOOLS = Object.freeze(['Bash', 'PowerShell']);
 const CONSENT_HOOK_FILE = 'pre-browser-navigation-consent.sh';
 const CONSENT_RECORDER_FILE = 'post-browser-navigation-consent.sh';
 const { REGISTRATION } = hookRegistration;
-const PLAYWRIGHT_CLI_SOURCE_VERSION = '0.1.24';
+const PLAYWRIGHT_CLI_SOURCE_VERSION = '0.1.25';
 const CLI_BASENAMES = cliVersion.BINARY_NAMES;
 const CLI_PACKAGE = cliVersion.PACKAGE_NAME;
 const SESSION_PREFIX = 'zensu-verify-';
@@ -61,7 +61,7 @@ const MAX_NEST = 4;
 const CLI_BOOLEAN_OPTIONS = Object.freeze([
   'headed', 'mobile', 'persistent', 'submit', 'boxes', 'clear', 'full-page', 'hires', 'httpOnly', 'secure',
   'static', 'global', 'with-deps', 'dry-run', 'list', 'force', 'only-shell', 'no-shell', 'cursor', 'annotate',
-  'kill', 'hide', 'all', 'g', 'help', 'json', 'raw', 'version',
+  'kill', 'hide', 'all', 'no-tab-group', 'close-tabs', 'g', 'help', 'json', 'raw', 'version',
 ]);
 
 const CLI_STRING_OPTIONS = Object.freeze(['_']);
