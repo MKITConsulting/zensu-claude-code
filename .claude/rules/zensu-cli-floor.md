@@ -33,14 +33,14 @@ paths:
 **One module owns the floor and the install commands.** `MIN_VERSION` is the oldest zensu-cli
 release the plugin supports: 0.22.0, because the skills pass long free text through the file
 flags `--content-file`, `--description-file`, `--candidates-file`, `--result-file`,
-`--findings-file` and `--conditions-file`, which zensu-cli 0.22.0 (`d466f49`, #52) is the first
+`--findings-file` and `--conditions-file`, which zensu-cli 0.22.0 is the first
 release to declare, and an older CLI refuses each such call with `unknown flag`
-(`.claude/rules/skill-argument-placeholders.md`). The floor before it, 0.18.0, came from
-`REQUIRED` in `hooks/lib/ai-work-preflight-v1.js`, which asks for `ai-work context --feature`,
+(`.claude/rules/skill-argument-placeholders.md`). The AI-work capture preflight needs 0.18.0:
+`REQUIRED` in `hooks/lib/ai-work-preflight-v1.js` asks for `ai-work context --feature`,
 `ai-work start --feature` and `--maintenance-reason`; `hooks/lib/ai-work-capture-v1.js` runs that
 check before every `begin`, so a CLI older than 0.18.0 answers `cli_incompatible` for every goal.
-The floor before that, 0.10.0, came from ghost-scan pagination (zensu-monorepo#954) and wiki list
-pages. 0.22.0 covers all three. Two lower bounds have a case, and both read one fixture: the help
+Ghost-scan pagination and wiki list pages need 0.10.0.
+0.22.0 covers all three. Two lower bounds have a case, and both read one fixture: the help
 of the floor release, recorded from its release archive in
 `tests/structure/fixtures/zensu-cli-<MIN_VERSION>-floor-help.json`. The unit case `the floor
 release declares every flag the AI-work capture preflight requires` replays its `ai-work` help
@@ -95,10 +95,11 @@ names verbatim. `brew upgrade` runs `brew update` only once `HOMEBREW_AUTO_UPDAT
 is the one `INSTALL.homebrew` installs. The unit file pins the value, and its floor-release case
 requires the preflight's refusal guidance to name it and the install guide's absolute path, and the
 guidance for an absent CLI to name the three install commands. `P10a` proves only that the current
-spelling is present, so the earlier `brew upgrade --cask zensu` could return beside it; `P10f`
+spelling is present, so a spelling without `brew update &&` and the tap-qualified name,
+`brew upgrade --cask zensu`, could return beside it; `P10f`
 fails when that spelling appears in `README.md` or in any file under `docs/`, `skills/` or `hooks/`,
-and when its scan cannot read the tree. It is the only earlier spelling the history holds.
-`CHANGELOG.md` keeps it as release history, and `P10f` does not read it.
+and when its scan cannot read the tree. `CHANGELOG.md` keeps it as release history, and `P10f`
+does not read it.
 
 **Warn, never block.** No gate compares the version with the floor. An older CLI still runs, but
 every skill call that passes free text through a `-file` flag fails with `unknown flag`, which
@@ -149,8 +150,8 @@ so the skill carries only a pointer to the reference. `P8z15` holds every row ph
 report and the reference, and the pointer against the skill.
 
 **ghost-scan is the exception among the seven skills.** Its body sits on the same allowlist at its
-exact size, so its prerequisite line keeps the old line's length and names the floor and
-`/zensu:doctor` instead of the commands. Moving detail from that body into `references/` is what
+exact size, so its prerequisite line cannot take the commands: it names the floor and
+`/zensu:doctor` instead. Moving detail from that body into `references/` is what
 would make room for the full line.
 
 **Coupled sites.** The module and its unit file; the lookup, the auth probe and the header of

@@ -20,8 +20,8 @@ worktree registry (`~/Library/Application Support/Claude/git-worktrees.json`). E
 only its own account's sessions and leases, so its `WorktreePool` treats a worktree that another
 account's session is working in as `(was leased by none)`, re-leases it, and checks the taker's
 branch out IN PLACE — the displaced session's directory changes branch under it. Measured
-2026-09-20 on Claude Desktop **2.2553.1** against `.claude/worktrees/plugin-clarity-refinement-15ca39`
-(the session behind PR #313), with the app's own `main.log` and the directory's reflog as the
+2026-09-20 on Claude Desktop **2.2553.1** against `.claude/worktrees/plugin-clarity-refinement-15ca39`,
+with the app's own `main.log` and the directory's reflog as the
 evidence; every one of the eight rebinds of that directory since 2026-09-09 crossed an account
 boundary. The root cause is the app's — per-instance lease visibility plus last-writer-wins
 registry writes — and nothing here changes it.
@@ -328,9 +328,8 @@ a new session's model about another worktree. The premise was re-read in the ins
 `git status --porcelain --untracked-files=all` with `:(exclude).worktree-keep` and no
 `--ignored`.
 
-**The cost that kept (a) out was mis-located, and a measurement is what moved it.** The gap
-this replaces said the hold would put a tree walk "on the reconcile path, which runs on every
-prompt". The walk sits only in the branch that would UNLINK the marker, after the live-anchor
+**The hold's tree walk stays off the per-prompt path, and its cost is measured.** The walk sits
+only in the branch that would UNLINK the marker, after the live-anchor
 return, and a prompt writes its own anchor before it reconciles, so the prompt path reaches the
 walk only when the session's own anchor cannot be written. The unit case `an unfinished nested
 scan keeps the marker, and a live anchor decides before any scan runs` holds that order.
@@ -365,11 +364,11 @@ deadline across its siblings. Library callers — `retireAnchors`, `cmdRelease`,
 pass none and are bounded by entries alone. `WK_SCAN_DEADLINE_MS` overrides it only in the
 JSON test mode, the `WK_NOW` rule, and a blank value falls back.
 
-**The taker's own worktree, and why no special case was needed.** The move route of
+**The taker's own worktree, and why it needs no special case.** The move route of
 `/zensu:session-trail` (§"Takeover Destination") runs `git worktree move` with `<path>` inside
-the taker's anchor, which nests the old worktree in the taker's. Before the hold, the taker's
-SessionEnd dropped its marker and the next archive of the TAKING session deleted the moved tree
-with it. The moved tree is a nested worktree of the same repository, so the hold covers it;
+the taker's anchor, which nests the old worktree in the taker's. Without the hold, the taker's
+SessionEnd would drop its marker and the next archive of the TAKING session would delete the moved
+tree with it. The moved tree is a nested worktree of the same repository, so the hold covers it;
 the unit case `a whole-tree worktree move into the taker keeps the taker's marker at SessionEnd
 until the moved tree leaves` performs exactly that move.
 
@@ -490,8 +489,8 @@ gap below rather than a lineage break.
   worktrees, where `core.fsmonitor` and its kin execute that repository's configuration, and it
   costs several `git` spawns per nested repository at every sweep that re-checks a held one.
 - **A build without the hold still drops the marker.** Under the lineage rule several builds can
-  serve sessions of one repository at once; while any of them predates this change, its
-  SessionEnd and its sibling sweep remove a marker over a nested repository the old way.
+  serve sessions of one repository at once; while any of them predates the hold, its
+  SessionEnd and its sibling sweep remove a marker over a nested repository regardless.
 - **The sweep shares one deadline in name order.** A sibling whose scan cannot finish inside
   `NESTED_SCAN_DEADLINE_MS` keeps its marker, and so does every sibling after it until a later
   SessionStart has time left; a sibling whose full walk alone exceeds the budget therefore holds

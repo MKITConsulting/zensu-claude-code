@@ -9,6 +9,7 @@ const {
   writableOnlyByCaller,
   anyOwnerOrMode,
   realDirectory,
+  ownedDirectoryRefusal,
   readBoundedFile,
 } = require('./desktop-store-read-v1.js');
 
@@ -62,6 +63,27 @@ const REASONS = Object.freeze({
   RESOLVER_FAILED: 'resolver-failed',
 });
 
+const STORE_SOURCES = Object.freeze({
+  OVERRIDE: 'override',
+  NAMED: 'named',
+  DEFAULT: 'default',
+  HUB_PROFILE: 'hub-profile',
+});
+
+const STORE_STATES = Object.freeze({
+  NO_FOLDER: 'no-folder',
+  REFUSED: 'refused',
+  SAME_FOLDER: 'same-folder',
+  NO_RECORD: 'no-record',
+  HOLDS_RECORD: 'holds-record',
+});
+
+const STORE_FOLDERS = Object.freeze({
+  STORE: 'store',
+  ACCOUNT: 'account',
+  ORGANIZATION: 'organization',
+});
+
 function verdict(kind, reason, extra = {}) {
   return Object.freeze({
     kind,
@@ -106,11 +128,15 @@ function hubProfileStores(platform, home) {
     .map((name) => path.join(profiles, name, STORE_SEGMENTS[STORE_SEGMENTS.length - 1]));
 }
 
-function storeCandidates(platform, env) {
-  const override = typeof env.ZENSU_CCD_STORE === 'string' ? env.ZENSU_CCD_STORE.trim() : '';
+function storeOverride(env) {
+  return typeof env.ZENSU_CCD_STORE === 'string' ? env.ZENSU_CCD_STORE.trim() : '';
+}
+
+function taggedStoreCandidates(platform, env) {
+  const override = storeOverride(env);
   if (override !== '') {
     const store = absoluteStore(override, platform);
-    return store ? [store] : [];
+    return store ? [{ store, source: STORE_SOURCES.OVERRIDE }] : [];
   }
   const home = typeof env.HOME === 'string' && env.HOME !== '' ? env.HOME : '';
   const bases = [];
@@ -127,7 +153,21 @@ function storeCandidates(platform, env) {
     if (home) bases.push(path.join(home, '.config'));
   }
   const defaults = bases.filter((base) => path.isAbsolute(base)).map((base) => path.join(base, ...STORE_SEGMENTS));
-  return [...new Set([...namedStores(platform, env), ...defaults, ...hubProfileStores(platform, home)])];
+  const tagged = [
+    ...namedStores(platform, env).map((store) => ({ store, source: STORE_SOURCES.NAMED })),
+    ...defaults.map((store) => ({ store, source: STORE_SOURCES.DEFAULT })),
+    ...hubProfileStores(platform, home).map((store) => ({ store, source: STORE_SOURCES.HUB_PROFILE })),
+  ];
+  const seen = new Set();
+  return tagged.filter((candidate) => {
+    if (seen.has(candidate.store)) return false;
+    seen.add(candidate.store);
+    return true;
+  });
+}
+
+function storeCandidates(platform, env) {
+  return taggedStoreCandidates(platform, env).map((candidate) => candidate.store);
 }
 
 function realFolder(directory) {
@@ -138,19 +178,52 @@ function realFolder(directory) {
   }
 }
 
-function sessionDirectories(platform, env, account, organization) {
-  const seen = new Set();
+function storeFolderState(directory) {
+  try {
+    fs.lstatSync(directory);
+  } catch (error) {
+    if (error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) return { state: STORE_STATES.NO_FOLDER };
+  }
+  return { state: STORE_STATES.REFUSED, cause: ownedDirectoryRefusal(directory) || 'uninspectable' };
+}
+
+function searchStores(platform, env, account, organization, hostSession, detail) {
+  const seen = new Map();
   const directories = [];
-  for (const store of storeCandidates(platform, env)) {
+  const stores = detail ? [] : null;
+  const searched = [];
+  for (const candidate of taggedStoreCandidates(platform, env)) {
+    const store = candidate.store;
     const accountDir = path.join(store, account);
     const organizationDir = path.join(accountDir, organization);
-    if (![store, accountDir, organizationDir].every((directory) => realDirectory(directory, writableOnlyByCaller))) continue;
+    const folders = [
+      [store, STORE_FOLDERS.STORE],
+      [accountDir, STORE_FOLDERS.ACCOUNT],
+      [organizationDir, STORE_FOLDERS.ORGANIZATION],
+    ];
+    const failed = folders.find(([directory]) => !realDirectory(directory, writableOnlyByCaller));
+    if (failed !== undefined) {
+      if (stores) stores.push(Object.assign({ store, source: candidate.source, folder: failed[1] }, storeFolderState(failed[0])));
+      continue;
+    }
     const real = realFolder(organizationDir);
-    if (seen.has(real)) continue;
-    seen.add(real);
+    if (seen.has(real)) {
+      if (stores) stores.push({ store, source: candidate.source, state: STORE_STATES.SAME_FOLDER, sameAs: seen.get(real) });
+      continue;
+    }
+    seen.set(real, store);
     directories.push(organizationDir);
+    if (stores) {
+      const entry = { store, source: candidate.source, state: STORE_STATES.NO_RECORD };
+      stores.push(entry);
+      searched.push({ directory: organizationDir, entry });
+    }
   }
-  return directories;
+  const holding = directories.filter((directory) => holdsRecord(directory, hostSession));
+  for (const { directory, entry } of searched) {
+    if (holding.includes(directory)) entry.state = STORE_STATES.HOLDS_RECORD;
+  }
+  return { directories, holding, stores, override: storeOverride(env) !== '' };
 }
 
 function holdsRecord(directory, hostSession) {
@@ -262,6 +335,18 @@ function defaultDeps() {
 }
 
 function resolveLinkedSession(input = {}) {
+  const detail = input.detail === true ? { stores: [], override: false, ownStore: null, parentSession: null } : null;
+  const result = resolveVerdict(input, detail);
+  if (!detail) return result;
+  return Object.freeze(Object.assign({}, result, {
+    stores: Object.freeze(detail.stores.map((entry) => Object.freeze(entry))),
+    override: detail.override,
+    ownStore: detail.ownStore,
+    parentSession: detail.parentSession,
+  }));
+}
+
+function resolveVerdict(input, detail) {
   const env = input.env || process.env;
   const platform = input.platform || process.platform;
   const deps = Object.assign(defaultDeps(), input.deps || {});
@@ -275,16 +360,19 @@ function resolveLinkedSession(input = {}) {
   }
   const sessionId = input.sessionId;
   if (typeof sessionId !== 'string' || sessionId === '') return verdict(KINDS.NONE, REASONS.NO_SESSION_ID);
-  const directories = sessionDirectories(platform, env, account, organization);
-  if (!directories.length) return verdict(KINDS.NONE, REASONS.NO_SESSION_STORE);
-  const holding = directories.filter((candidate) => holdsRecord(candidate, hostSession));
-  if (holding.length > 1) return verdict(KINDS.NONE, REASONS.OWN_RECORD_AMBIGUOUS);
-  if (!holding.length) return verdict(KINDS.UNRESOLVED, REASONS.OWN_RECORD_MISSING);
-  const directory = holding[0];
+  const search = searchStores(platform, env, account, organization, hostSession, detail !== null);
+  if (detail) {
+    detail.stores = search.stores;
+    detail.override = search.override;
+  }
+  if (!search.directories.length) return verdict(KINDS.NONE, REASONS.NO_SESSION_STORE);
+  if (search.holding.length > 1) return verdict(KINDS.NONE, REASONS.OWN_RECORD_AMBIGUOUS);
+  if (!search.holding.length) return verdict(KINDS.UNRESOLVED, REASONS.OWN_RECORD_MISSING);
+  const directory = search.holding[0];
+  if (detail) detail.ownStore = path.dirname(path.dirname(directory));
 
   const own = readDesktopRecord(directory, hostSession);
-  if (own.state === 'missing') return verdict(KINDS.UNRESOLVED, REASONS.OWN_RECORD_MISSING);
-  if (own.state === 'unreadable') return verdict(KINDS.UNRESOLVED, REASONS.OWN_RECORD_UNREADABLE);
+  if (own.state === 'missing' || own.state === 'unreadable') return verdict(KINDS.UNRESOLVED, REASONS.OWN_RECORD_UNREADABLE);
   if (own.state !== 'read') return verdict(KINDS.NONE, REASONS.OWN_RECORD_REFUSED);
   if (own.record.sessionId !== hostSession) return verdict(KINDS.NONE, REASONS.OWN_RECORD_MISMATCH);
   const ownCli = own.record.cliSessionId;
@@ -299,6 +387,7 @@ function resolveLinkedSession(input = {}) {
   if (typeof parentSession !== 'string' || !HOST_SESSION_RE.test(parentSession) || parentSession === hostSession) {
     return verdict(KINDS.NONE, REASONS.MALFORMED_PARENT);
   }
+  if (detail) detail.parentSession = parentSession;
   const turn = turnOf(own.record);
 
   const parent = readDesktopRecord(directory, parentSession);
@@ -364,6 +453,9 @@ module.exports = {
   REPOSITORY,
   REASONS,
   TURNS,
+  STORE_SOURCES,
+  STORE_STATES,
+  STORE_FOLDERS,
   HOST_SESSION_RE,
   DESKTOP_RECORD_MAX_BYTES,
   CONTEXT_RECORD_MAX_BYTES,

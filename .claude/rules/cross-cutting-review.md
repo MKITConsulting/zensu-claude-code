@@ -54,8 +54,7 @@ no identity.
   2026-09-28 cost measurement put the judge at 8.48 to 12.65 USD per benchmark run, summed over
   every round, in runs of 92.84 to 108.55 USD.
 - **Fail-open.** A second run that fails, answers `REVIEW PACKET INVALID` or returns no parseable
-  report logs `JUDGE SECOND RUN UNAVAILABLE — <reason>` and the first run stands alone, which is
-  the behavior before this change.
+  report logs `JUDGE SECOND RUN UNAVAILABLE — <reason>` and the first run stands alone.
 
 **2. Inherited guarantees.** The judge's `Check only` list and the `security` perspective of the
 aspect agent carry the same check: every guarantee a query or call inherits from session or
@@ -79,7 +78,8 @@ in verify mode. The rubric block stays byte-identical; `docs/review-severity.md`
 exception outside the block. Both rules reach every caller of the two agents, `/zensu:cover` and
 wargame audits of existing code included, on purpose.
 
-**The template is unchanged.** `templates/workflows/zensu-review-v1.js` receives levers 2 and 3
+**The template needs no edit for the levers.** `templates/workflows/zensu-review-v1.js`
+receives levers 2 and 3
 through the agent definition its finders and refuters run as, and in the product the judge pair
 runs after every import, so its digest and the import gate stay as they are.
 

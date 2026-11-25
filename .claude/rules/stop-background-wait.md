@@ -12,10 +12,9 @@ paths:
 # Stop Background Wait (`hooks/lib/stop-background-wait-v1.js`)
 
 The Stop guard blocks every turn end while an armed chain's review is open. A turn that only
-waits for a background run (an E2E reproduction, an affected suite, a background agent) was
-therefore forced to poll: a PROJEKTPRO fix round on 2026-10-21 polled about ten times at
-roughly 580k context tokens per call, and the self-review stage hit the same wall the day
-before. This wait releases such a Stop, explicitly and bounded.
+waits for a background run (an E2E reproduction, an affected suite, a background agent) is
+otherwise forced to poll, paying its whole context on every poll. This wait releases such a
+Stop, explicitly and bounded.
 
 **The protocol.** The turn names the task it waits for on a line of its own in its final
 message, `ZENSU-AWAIT: <task id>` (optionally in backticks). The hook reads the Stop input's
@@ -27,14 +26,14 @@ sentence for the user (`renderReleaseNote`): each task's screened description in
 `Zensu is waiting for "E2E reproduction run"; the review chain continues when it reports back.`
 It carries no release count: the `systemMessage` of a released Stop never reaches the model
 (measured on 2026-11-16, `.claude/rules/background-review-completion.md` §"Resumed reviewers"),
-so an instruction there reached nobody, and the bound is the hook's business. The machine head
+so an instruction there reaches nobody, and the bound is the hook's business. The machine head
 line `wait release= max= tasks= ids=` carries the bound for the hook. A reviewer the chain
 recorded at launch reaches this path only past the bounds of the background review wait, which
 runs first (see Placement). The first Stop that sees running tasks and no
 such line blocks once with a dedicated reason that names every task in flight (id, type,
 description) and the line; that hint also charges nothing, and it is shown once per new task id
 and at most `LIMITS.hintsPerGeneration` (3) times per chain generation, so a later Stop that
-sees no new task, or comes after the third hint, gets the ordinary directive, charged as before.
+sees no new task, or comes after the third hint, gets the ordinary directive, which is charged.
 
 **The vocabulary is MEASURED, statically, on Claude Code 2.1.299** (`MEASURED_HOST_BUILD`).
 The Stop input carries `background_tasks`, built by `hSn(taskRegistry.all())`: it keeps only
@@ -71,8 +70,8 @@ the counter with `CAP`, which the hook computes before the call, so a chain the 
 released by the cap path with its disclosure and never hinted or waited for again (`B20`). State
 lives in `<plugin data>/stop-background-wait/v1/<session key>.json`, pruned to the tasks in
 flight on every write and deleted by `--tdd-begin` (`zensu_stop_background_wait_reset`). The
-session's own state has no age limit: a 24-hour expiry renewed the per-task bound and the hint
-inside one generation. Another session's file is swept after `LIMITS.sweepAfterMs` (14 days)
+session's own state has no age limit: a 24-hour expiry would renew the per-task bound and the
+hint inside one generation. Another session's file is swept after `LIMITS.sweepAfterMs` (14 days)
 without a write. 5 and 3 are judgements, not measurements.
 
 **Placement.** `stop_background_wait` runs after the round-0 workflow wait of
@@ -108,7 +107,7 @@ also produces (`BR21` compares them, `BR21b` drives each refusal); `stop_backgro
 `docs/configuration.md`; §"Waiting for background work" of `docs/review-chain.md` and the
 pointer to it from the workflow-wait bullet; the unit file and
 `tests/structure/test-stop-background-wait.sh` with their registry and manifest entries; and
-X14, X15, X17 and X20 in `tests/structure/test-external-review-hook.sh`, which now expect the
+X14, X15, X17 and X20 in `tests/structure/test-external-review-hook.sh`, which expect the
 hint where a running task meets the limit of the implicit wait, a converged chain or a fix round;
 the release goes through `stop_notice` (`B4`), and `.claude/rules/stop-latency.md` lists it among
 the releases that return on `DECISION_EMITTED`.

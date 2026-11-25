@@ -14,19 +14,19 @@ paths:
 
 The Claude desktop app (Code tab, Claude Code 2.1.304) starts every `Agent` spawn in the
 background, and its Agent tool has no `run_in_background` parameter. The consume-mode
-`zensu:code-reviewer` therefore answers `tool_response.status: async_launched`, and the review
-chain used to demand a foreground re-spawn that this host cannot make: every `/zensu:build` chain in
-the desktop app stalled at the consume step and closed with `--tdd-reset`. The panel, the judge
-pair and a fix round's re-review aspect run in the background too, and a turn end while they ran
-was a blocked Stop that charged the chain-wide budget and ordered a fresh fan-out. The chain now
-records every background review launch, waits for it, and claims the ticket when the consume
-reviewer's report reaches the main thread, with the routing directive the foreground path gives.
+`zensu:code-reviewer` therefore answers `tool_response.status: async_launched`, and a chain that
+demanded a foreground re-spawn, which this host cannot make, would stall at the consume step. The
+panel, the judge pair and a fix round's re-review aspect run in the background too, and a turn end
+while they run would be a blocked Stop that charges the chain-wide budget and orders a fresh
+fan-out. The chain therefore records every background review launch, waits for it, and claims the
+ticket when the consume reviewer's report reaches the main thread, with the routing directive the
+foreground path gives.
 
-A claim the host cancelled used to be lost. On 2026-10-26 (desktop, plugin 0.29.0, load about
+A cancelled prompt hook would lose its claim. On 2026-10-26 (desktop, plugin 0.29.0, load about
 200) the host cancelled the prompt hook on the hand-back after 30082 ms and on a resend after
-30989 ms, no completion notification followed, and the ticket stayed unclaimed until a manual
-replay, which took 162 s. The arrival is now noted before the claim, and a later Stop or prompt
-completes the claim from that note.
+30989 ms, no completion notification followed, and a manual replay of the claim took 162 s. The
+arrival is therefore noted before the claim, and a later Stop or prompt completes the claim from
+that note.
 
 ## Measured (desktop 2.1.304, 2026-10-21)
 
@@ -201,7 +201,7 @@ armed review chain.
    `background_review_wait` asks `wait` while a record or a fan-out entry exists, and while the
    Stop input names a `"subagent"` inside `"background_tasks"` and the session's register holds an
    entry; it hands `wait` the Stop input on stdin. `wait` first renews a resumed reviewer
-   (§"Resumed reviewers"), then answers as before on its first line and prints the user-facing
+   (§"Resumed reviewers"), then answers on its first line and prints the user-facing
    note on a second line (`waitNote`): the reviewers' screened task descriptions in the host's
    order, at most `LIMITS.listedTasks` (3) of `stop-background-wait-v1.js` and a count of the rest,
    or a count alone, through that module's `waitingNote`, the one list renderer every wait note
@@ -237,12 +237,12 @@ armed review chain.
 Measured on 2026-11-16 (desktop, plugin 0.38.0): three aspect reviewers failed on the weekly rate
 limit, their failed notifications retired their fan-out entries, and the main thread resumed them
 with `SendMessage`, whose result names the agent as `resumedAgentId`. The next Stop's input listed
-all three under their agent ids as running `subagent` tasks with their spawn descriptions; with no
-entry left, the background review wait did not release, `stop_background_wait` blocked once with
-its explanation, the model answered with three `ZENSU-AWAIT:` lines, and the release notice named
-three raw agent ids. The user read all three as noise. The release `systemMessage` never reached
-the model: none of the 52 later API request records of that session holds it, while the blocking
-explanation does, so release notes are written for the user alone.
+all three under their agent ids as running `subagent` tasks with their spawn descriptions. The
+release `systemMessage` never reached the model: none of the 52 later API request records of that
+session holds it, while the blocking explanation does, so release notes are written for the user
+alone. Without a fan-out entry the background review wait does not release such a Stop, and it
+falls to the explicit `ZENSU-AWAIT:` path, which blocks once with the explanation of
+`stop_background_wait`.
 
 - **Renewed at the Stop, from the host's task list, never from a `SendMessage` hook.** A dispatched
   `PostToolUse` check would add a registry entry, an entry point and their enumerations, and the
@@ -296,12 +296,12 @@ explanation does, so release notes are written for the user alone.
   `claimContext` and `claimableTicket`. `_tdd_consume_review_ticket_critical` `require`s it through
   `_ZENSU_TDD_TICKET_STATE`, and `background-review-v1.js` `require`s it, so "the ticket the claim
   would accept" is decided by the same code at launch, at arrival and at Stop. A hand copy in the
-  module was the first draft; it accepted documents the claim refuses.
+  module can accept documents the claim refuses.
 - **An arrival counts only at column zero.** `scanLines` takes a hand-back only when a whole line
   equals `<agent-message from="<agentId>">` and the next line starts with `[Subagent hand-back]`,
   and a notification only inside a `<task-notification>` block whose tags each stand alone on a
-  column-zero line. Substring matching was the first draft and would have let any report that
-  quotes the reviewer's frame claim its ticket. `notificationReports` reads a notification's
+  column-zero line. Substring matching would let any report that quotes the reviewer's frame
+  claim its ticket. `notificationReports` reads a notification's
   report inside the same block grammar, `notificationBlocks`, which `scanLines` shares: the agent
   id and the status come from whole `<task-id>` and `<status>` lines, and the report runs from the
   line that opens with `<result>` to the first line that closes with `</result>`, decoded. The
@@ -356,9 +356,8 @@ explanation does, so release notes are written for the user alone.
   cleared, so a failed claim keeps both too, and a later event retries it; the ticket CAS keeps
   the claim exactly-once, the stale-ticket answer retires a pair whose ticket is spent, and a
   note whose record is gone or names another agent or ticket is removed by the next `arrive` or
-  `match`. The notification used to retire the record on a failed or killed claim, so that the
-  next Stop would not wait for a reviewer that had already reported; the note's recovery path
-  answers that Stop now. A preflight that could not read the Autopilot state, where
+  `match`. The next Stop does not wait for a reviewer that already reported: the note's recovery
+  path answers it. A preflight that could not read the Autopilot state, where
   `autopilot_read_active_strict` or `autopilot_read_workspace` answers 5 for a lease, storage or
   path fault, clears the EXIT trap like a kill and keeps both; every other preflight refusal
   still retires them (`.claude/rules/autopilot-active-read.md`).
@@ -413,18 +412,18 @@ explanation does, so release notes are written for the user alone.
   delegate and the Stop hook interpolate it rather than spelling the number. Records and notes
   idle past 24 hours are swept on the next launch.
 - **An Autopilot-bound chain is held, not released.** An owned run must not stop, so the Stop
-  blocks as before but skips `autopilot_increment_inner_stop_budget_capped` while a record or entry
-  is fresh. The hold costs one turn per Stop the model attempts, bounded by the wait bound; PR #483
-  made the same trade for the Autopilot stage budget while review seats run.
+  blocks but skips `autopilot_increment_inner_stop_budget_capped` while a record or entry is
+  fresh. The hold costs one turn per Stop the model attempts, bounded by the wait bound; the
+  Autopilot stage budget makes the same trade while review seats run.
 - **A Stop that is not released waits for an arrived claim at most `LIMITS.maxArrivalHolds` (3)
   times, and never past the wait bound.** A bound chain gets no prompt between its Stops, and on a
-  loaded host every recovery defers at its deadline, so the arrived hold used to loop on free
-  Stops until the wait bound, after which the arrived prefix of the resume reason replaced the
-  re-review with "end your turn again" until the inner budget moved the run to `BLOCKED`. The
-  note's `holds` field persists the count across Stops: `arrive` writes 0, `retire`,
-  stale-ticket and a new launch remove it with the note. The fourth such Stop retires the pair
-  and orders the review again, which is what an arrival that never claimed got before the note
-  existed, and a recovery that still fails past the wait bound does the same for every chain. A
+  loaded host every recovery defers at its deadline, so an uncounted arrived hold would loop on
+  free Stops until the wait bound, and past it the arrived lead of the resume reason would keep
+  asking the chain to end its turn instead of ordering the re-review, until the inner budget moved
+  the run to `BLOCKED`. The note's `holds` field persists the count across Stops: `arrive` writes
+  0, `retire`, stale-ticket and a new launch remove it with the note. The fourth such Stop retires
+  the pair and orders the review again, as for an arrival that left no note, and a recovery that
+  still fails past the wait bound does the same for every chain. A
   released Stop counts nothing, because the next prompt still claims with the prompt hook's
   budget. A standalone Stop the wait could not release is not a released one: it blocks with the
   arrived lead and counts, or the defer it runs spends the pair (`BR9g2`, `BR9j`);
@@ -445,8 +444,8 @@ explanation does, so release notes are written for the user alone.
 - **A fan-out reviewer's hand-back, or its notification with a result, starts the delegate.** The
   review packet gate completes a background reviewer's launch record from its hand-back, or outside
   auto mode from its notification's `<result>`, in the delegate's arrival branch, so a prompt hook
-  that started the delegate only for the consume reviewer left every background panel and judge
-  without a run, and with the gate on every consume review on this host was refused. A
+  that started the delegate only for the consume reviewer would leave every background panel and
+  judge without a run, and with the gate on every consume review on this host would be refused. A
   notification without a `<result>` carries no report, so it starts nothing (`BR12c`, `BR12d`). In
   auto mode the hand-back retires the entry first, so its notification starts nothing either,
   except in the order the known gaps name. The hook reads no config,
@@ -551,8 +550,8 @@ explanation does, so release notes are written for the user alone.
   has one owner.
 - The store is in both protected-root lists of `reviewer-capability-v1.js` (`BR1a`).
 - The prompt hook has a `budget()` row in `tests/structure/test-user-prompt-budget.sh` and a row in
-  the table of `.claude/rules/prompt-origin.md`; the hook count in `docs/configuration.md` moved
-  with it (`test-readme-hook-count-sync.sh`).
+  the table of `.claude/rules/prompt-origin.md`; the hook count in `docs/configuration.md` counts
+  it (`test-readme-hook-count-sync.sh`).
 - `S8c` in `tests/structure/test-post-review-tdd-scope.sh` pins the launch directive's wait
   wording.
 - `tests/structure/test-background-review.sh` drives the paths through `node` stubs keyed to the
@@ -601,8 +600,8 @@ explanation does, so release notes are written for the user alone.
   before it emits, and the next event finds a spent ticket and retires the pair. The deadline
   margin and the three post-claim children make that window small, not empty. A killed foreground
   post-review hook has the same window.
-- **A kill before `arrive` wrote the note** leaves only the record, as before this change: a
-  standalone Stop then waits out the bound, unless a later arrival names the reviewer again.
+- **A kill before `arrive` wrote the note** leaves only the record: a standalone Stop then waits
+  out the bound, unless a later arrival names the reviewer again.
 - **A fan-out notification that arrives before its hand-back** retires the entry, so the
   hand-back starts no delegate and the packet gate never reads that report; the consume check then
   refuses for a missing reviewer. The measured host sends the hand-back first. In that order the
@@ -655,11 +654,11 @@ explanation does, so release notes are written for the user alone.
   another way is not seen either.
 - **The frame position for a name was measured in stored transcripts**, not in a logged hook
   payload. A host that put another line above the frame would leave a named reviewer unmatched,
-  which is the behaviour before this change. An id frame keeps the column-zero rule, although the
+  as without a name binding. An id frame keeps the column-zero rule, although the
   census found every real frame in the host's position.
 - **A resumed reviewer is renewed at the next Stop, not at the resume.** A resumed reviewer whose
-  hand-back reaches the main thread before that Stop finds no fan-out entry, so, as before this
-  change, its hand-back starts no delegate unless another entry is pending, and the packet gate
+  hand-back reaches the main thread before that Stop finds no fan-out entry, so its hand-back
+  starts no delegate unless another entry is pending, and the packet gate
   does not read that report. A reviewer resumed more than `LIMITS.idleMs` after its last arrival, or
   for the fourth time, and a named reviewer whose binding is gone take the explicit `ZENSU-AWAIT:`
   path.

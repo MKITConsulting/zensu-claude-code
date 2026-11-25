@@ -11,9 +11,7 @@ paths:
 # Evidence Runner and Full-Suite Gate (`hooks/lib/evidence-run-v1.js` + `zensu-log.sh --evidence-run` / `--chain-done`)
 
 The plugin runs the full suite itself, records the real exit code bound to the exact
-working tree, and a reviewed chain cannot close on a missing, red or stale record. It
-replaced the Bash witness, whose claims were hand-copied strings matched by equality
-against a log that never carried an exit code.
+working tree, and a reviewed chain cannot close on a missing, red or stale record.
 
 **One owner.** `evidence-run-v1.js` owns the record schema (`RECORD_KEYS`, an exact key
 set), the ids, the store layout, the tree fingerprint, the closed verdict-state list,
@@ -21,8 +19,8 @@ retention and every display string. `zensu-log.sh` only transports: native paths
 `zensu-host-path.sh`, values in `ZENSU_EVR_*` variables that `zensu_msys_env_exclusions`
 keeps out of MSYS conversion, and the command and config values as files in a temporary
 transport directory. Neither the command nor the plugin root ever travels in argv. A
-second hand-copied schema site is the failure this avoids: the edit-landing receipt
-schema drifted across four of them.
+second hand-copied schema site is the failure this avoids: hand copies of one schema drift
+apart.
 
 **The command runs from a script file** under `set -o pipefail` in
 `bash --noprofile --norc`, in its own process group, with stdin on the null device. The
@@ -66,7 +64,7 @@ and the `--tdd-begin` full-suite snapshot (through `_zensu_full_suite_work_tree`
 `.claude/rules/full-suite-ci-deferral.md`) read the workflow
 document once, a standalone chain's included, and ask the resolver only when it carries an
 Autopilot binding whose chain is still open (`active` and not `chainDone`), so a standalone
-chain, and every call after a bound chain's terminus, runs its command where it ran before, and
+chain, and every call after a bound chain's terminus, runs its command against the project root, and
 `--chain-work-tree` then prints the anchor's top. With `hooks.selfReview` on, a bound chain stays
 open through every review and self-review round, because the bound max-rounds handoff keeps
 `chainDone` false. With it off, the bound max-rounds arm of `post-review-tdd-delegate.sh` closes
@@ -120,12 +118,13 @@ write is checked as well, through `_zensu_transport_put`: the six files of `_zen
 `ci-config.json`), the `gate-mode` of `_zensu_avr_prepare`, and `command` and `caller-project-dir`
 of `--evidence-run`, while `--acceptance-record` checks its `evidence` write with the same line,
 `<verb>: the <file> transport file could not be written to the temporary directory; check that
-<TMPDIR> is writable and has free space.` A lost write read as an absent file and changed the
-answer: an unwritten `full-suite-command` read as no configured command, so `decide()` skipped
-`command-mismatch` and passed a green run of another command; an unwritten `command` let a full
-run fall back to `evidence.fullSuiteCommand` (`E28b`); an unwritten `caller-project-dir` ran the
-command without the caller's `CLAUDE_PROJECT_DIR`, which the module scrubs and restores only from
-that file. A failed write in either preparation is a failed preparation (`E28`, `A33`, `F29`). The
+<TMPDIR> is writable and has free space.` An unchecked lost write would read as an absent file and
+change the answer: an unwritten `full-suite-command` would read as no configured command, so
+`decide()` would skip `command-mismatch` and pass a green run of another command; an unwritten
+`command` would let a full run fall back to `evidence.fullSuiteCommand` (`E28b`); an unwritten
+`caller-project-dir` would run the command without the caller's `CLAUDE_PROJECT_DIR`, which the
+module scrubs and restores only from that file. A failed write in either preparation is a failed
+preparation (`E28`, `A33`, `F29`). The
 `work-tree-fault` writes keep their own longer lines, which `E26`, `A32` and `F25` pin. The
 ticket-bound terminus, standalone or bound, takes the decision of a failed transport preparation
 for the same failure (`_zensu_full_suite_gate_unjudged`), in the order `verdict()` decides. A
@@ -150,7 +149,7 @@ modules read the file through `readWorkTreeFault` of `evidence-run-v1.js`: a mis
 fault, while an empty file and one that exists but cannot be read are a fault whose cause is the
 fixed `WORK_TREE_FAULT_UNREAD`, through the `workTreeFaultCause` that `run()`, `verdict()` and
 `workTreeRefusal()` share. The lookup reads an empty `bwt-tree` answer as a fault at stage
-`work-tree` and an empty `bwt-dir` answer as a project-directory fault, as it already read empty
+`work-tree` and an empty `bwt-dir` answer as a project-directory fault, as it does for empty
 `bwt-fault` and `bwt-dir-fault` files. **The project-directory fault folds into the tree fault on
 purpose.** `_zensu_evr_work_tree` needs the directory, because the command runs there.
 `_zensu_avr_work_tree` does not, and refuses anyway: an observed acceptance record cites an
@@ -167,13 +166,13 @@ run in the anchor never passes there as `pass-tree-unverified`. `_evr_work_tree`
 `_evr_work_dir` and `_avr_work_tree` start empty like `_evr_dir`, so a variable inherited from
 the caller never points a standalone chain at a work tree.
 `zensu-log.sh --chain-work-tree --project-dir` prints the work directory, the path the skills'
-`cd` rule uses. No state file and no second resolver were added.
+`cd` rule uses. It uses no state file and no second resolver.
 
 **The tree fingerprint never touches the real index.** It copies the index, runs
 `git add -A -- .` and then `git rm -r --cached .zensu` on the copy, and writes the tree.
 Never exclude `.zensu` with a `:(exclude)` pathspec on `add`: once `.zensu/` is
 gitignored, which is the normal case, `add` fails with "paths are ignored" and every
-tree came out unverified. Git runs with the `_tc_git` scrub list and `LC_ALL=C`, because
+tree comes out unverified. Git runs with the `_tc_git` scrub list and `LC_ALL=C`, because
 its reason text reaches committed run-log lines. Over 20000 untracked files or 512 MiB,
 or on a git failure, the record carries no tree and names the reason. The two size limits also
 answer `limited: true`, so the edit-landing receipt and the review packet can seal such a tree as
@@ -195,8 +194,8 @@ excludes the whole top-level `.zensu`.
 
 **The copy keeps the real index's atime and mtime.** git trusts a stat match only when the
 entry's mtime is older than the index file's own mtime (the racy-git check), so a copy with a
-fresh mtime made git trust a stale stat: a same-size edit in the second of the last index write
-fingerprinted the committed blob, and `test-acceptance-gate.sh` A9 caught it. The copied
+fresh mtime would make git trust a stale stat: a same-size edit in the second of the last index
+write would fingerprint the committed blob (`test-acceptance-gate.sh` A9). The copied
 timestamps have millisecond precision, which rounds toward earlier and only makes more entries
 racy. The stat is taken BEFORE the copy: a concurrent git that replaces the index between the
 two would otherwise give the old content the newer mtime, so fewer entries would count as racy.
@@ -218,9 +217,9 @@ in.** For `full` and `scoped` runs (`TEST_SCOPES`) the run directory is the dire
 expansion-free double-quoted or plain token followed by `&&`, `;` or a newline, optionally
 inside a subshell, and keeps the cwd for anything it cannot read literally (`~`, `$VAR`, a
 glob, `cd -`, an option). That is the shape of the benchmark run in
-`docs/superpowers/specs/2026-09-28-review-cost-levers-design.md`: the runner started at the
+`docs/superpowers/specs/2026-09-28-review-cost-levers-design.md`: the runner starts at the
 project root with `--cmd 'cd <project>/.claude/worktrees/<name>/<dir> && …'`, so a fingerprint
-that followed only the cwd never saw the worktree it tested. `fingerprintRoot` answers the work
+that followed only the cwd would never see the worktree it tested. `fingerprintRoot` answers the work
 tree that contains the run directory when `git rev-parse --show-toplevel` puts it strictly
 inside the project root's own work tree, and the project root otherwise. It follows any
 repository nested there, whether or not it shares the project's history, which is what the
@@ -270,7 +269,7 @@ is `unavailable` and blocks under `required`: a `safe.directory` refusal also ex
 and reading it as "not a repository" would open the gate on a real repository. The probe's
 answer must be exactly `true` or `false`: any other output on exit 0, such as a line that a
 `GIT_TRACE` variable naming standard output adds before the `true`, is `unavailable` as well,
-because the exact-`true` test that read it as outside git passed a real work tree.
+because reading it as outside git would pass a real work tree.
 `_zensu_unqualified_change_count` in `hooks/lib/zensu-log.sh` copies this split in shell, under
 `LC_ALL=C`, for the unqualified `--chain-done` and `--code-review-done`, for the count a minted
 `zc_` ticket takes and for the scope of `--tdd-complete`'s two preconditions; it reads a printed
@@ -411,7 +410,7 @@ set, record field or config key moves.
 **Known gaps**: on Windows the group kill is a best-effort `taskkill /T /F` and stays
 unverified until a Windows run measures it. `mutated-during-run` lists paths only when
 both trees exist. A bound chain whose `workspaceRoot` the resolver refuses (a tree outside the
-anchor, a clone, a submodule) can record no run at all, where it used to run in the anchor;
+anchor, a clone, a submodule) can record no run at all rather than run in the anchor;
 `--tdd-complete` already refuses such a chain, so the refusal only arrives earlier. The bound
 work tree is unmeasured on Windows: none of the three suites that drive it is in a blocking
 Windows profile. Every write the shell makes into the evidence and acceptance transports is checked

@@ -1,5 +1,6 @@
 #!/bin/bash
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 # Structure + functional test for /zensu:doctor read-only diagnostics.
 # Structure pins: helper .sh (+ shebang), report .js, skill frontmatter,

@@ -1947,6 +1947,279 @@ function deliveryRouteRow() {
   }
 }
 
+var LINKED_MISSING_CHECK = '; a missing check rather than an all-clear';
+var LINKED_STORE_REMEDY = 'If this Claude Desktop keeps its records in a data folder of its own, name that folder\'s '
+  + 'claude-code-sessions directory in ZENSU_CCD_EXTRA_STORES; a set ZENSU_CCD_STORE replaces every other store';
+var LINKED_OVERRIDE_REMEDY = 'ZENSU_CCD_STORE is set, so it is the only store searched and ZENSU_CCD_EXTRA_STORES is '
+  + 'not read: point it at the claude-code-sessions directory that holds this session\'s record, or unset it';
+var LINKED_REMEDY_REACH = '; a changed store variable helps only a session whose lineage is still open when the '
+  + 'change reaches its hooks';
+var LINKED_ROUTE_REMEDY = '/zensu:delivery-route --build records the workflow route for this session';
+var LINKED_NOTHING_NOW = 'a resolution made now inherits nothing';
+var LINKED_OWN_ROUTE_RE = /^(?:build|direct) \((?:session marker|hooks\.defaultDeliveryRoute)\)$/;
+var LINKED_INHERITED_FIELD = 'build (inherited from parent session)';
+var LINKED_REFUSAL_PREDICATE = {
+  'symlink': 'is a symbolic link',
+  'not-directory': 'is not a directory',
+  'foreign-owner': 'is owned by another account',
+  'shared-write': 'is writable by group or others',
+  'uninspectable': 'could not be inspected',
+};
+var LINKED_KEPT_STATES = ['linked', 'none', 'unresolved', 'absent'];
+var LINKED_PROFILE_NAME_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function linkedFolderSubject(resolver, folder) {
+  var F = resolver.STORE_FOLDERS;
+  if (folder === F.STORE) return 'the store folder';
+  if (folder === F.ACCOUNT) return 'its folder for this account';
+  if (folder === F.ORGANIZATION) return 'its folder for this organization';
+  return 'a folder in it';
+}
+
+function linkedStoreState(resolver, entry) {
+  var S = resolver.STORE_STATES;
+  if (entry.state === S.REFUSED) {
+    var known = Object.prototype.hasOwnProperty.call(LINKED_REFUSAL_PREDICATE, entry.cause);
+    return 'refused: ' + linkedFolderSubject(resolver, entry.folder) + ' '
+      + (known ? LINKED_REFUSAL_PREDICATE[entry.cause] : 'failed a check this report has no text for');
+  }
+  if (entry.state === S.NO_FOLDER) return 'no folder for this account and organization';
+  if (entry.state === S.SAME_FOLDER) return 'the same folder as an earlier store';
+  if (entry.state === S.NO_RECORD) return 'no record of this session';
+  if (entry.state === S.HOLDS_RECORD) return 'holds this session\'s record';
+  return 'a state this report has no text for';
+}
+
+function linkedStoreList(resolver, stores) {
+  var items = [];
+  var profilesDir = '';
+  for (var i = 0; i < stores.length; i += 1) {
+    var entry = stores[i];
+    var state = linkedStoreState(resolver, entry);
+    var folder = path.dirname(String(entry.store));
+    if (entry.source === resolver.STORE_SOURCES.HUB_PROFILE && LINKED_PROFILE_NAME_RE.test(path.basename(folder))
+      && (profilesDir === '' || profilesDir === path.dirname(folder))) {
+      profilesDir = path.dirname(folder);
+      items.push('Session Hub profile ' + path.basename(folder) + ' (' + state + ')');
+    } else {
+      items.push(foldPath(entry.store, ' (') + ' (' + state + ')');
+    }
+  }
+  var list = items.join('; ');
+  if (profilesDir !== '') list += '; the Session Hub profiles live under ' + foldPath(profilesDir, '. ');
+  return list;
+}
+
+function linkedStoreMiss(resolver, v, who, stores) {
+  var override = v.override === true;
+  if (stores.length === 0) {
+    return [WARN, who + '\'s own desktop record cannot be found: there is no desktop session store to search ('
+      + v.reason + '), because ' + (override
+        ? 'ZENSU_CCD_STORE names no absolute path, and while it is set no other store is searched'
+        : 'ZENSU_CCD_EXTRA_STORES names no absolute path and the platform\'s data directory is unknown (HOME on '
+          + 'macOS, XDG_CONFIG_HOME or HOME on Linux, APPDATA or LOCALAPPDATA on Windows)')
+      + ', so if another session started this one, a resolution made now cannot inherit that session\'s build route. '
+      + (override ? 'Point ZENSU_CCD_STORE at the claude-code-sessions directory that holds this session\'s record, '
+        + 'or unset it' : LINKED_STORE_REMEDY) + LINKED_REMEDY_REACH];
+  }
+  return [WARN, who + '\'s own desktop record is in none of the ' + stores.length + ' desktop session store'
+    + (stores.length === 1 ? '' : 's') + ' searched (' + v.reason + '), so if another session started this one, '
+    + 'a resolution made now cannot inherit that session\'s build route. Searched: ' + linkedStoreList(resolver, stores)
+    + '. '
+    + (override ? LINKED_OVERRIDE_REMEDY : LINKED_STORE_REMEDY) + LINKED_REMEDY_REACH];
+}
+
+function linkedParentRoot(v) {
+  return 'whose project root ' + parenthesizedPath(v.parentRoot, ')');
+}
+
+function linkedSnapshot(inherited, route) {
+  if (inherited === 'none') return 'none';
+  if (inherited !== 'build') return 'unread';
+  if (route === LINKED_INHERITED_FIELD) return 'applies';
+  if (route === 'ask' || LINKED_OWN_ROUTE_RE.test(route)) return 'set-aside';
+  return 'unknown';
+}
+
+function linkedOwnRoute(route) {
+  return 'the route this session has, ' + route + ', decides instead';
+}
+
+function linkedSameRepository(parent, v, cached, inherited, route, tail) {
+  var head = 'started from ' + parent + ', ' + linkedParentRoot(v) + ' is in the same repository';
+  if (cached === 'none') {
+    var snapshot = linkedSnapshot(inherited, route);
+    var nothing = snapshot === 'none' || snapshot === 'set-aside';
+    var keptNone = head + ', but this session settled its lineage as none on an earlier prompt and keeps that answer'
+      + (nothing ? ', so it inherits nothing' : '') + ', while a session started from now on resolves its parent';
+    if (LINKED_OWN_ROUTE_RE.test(route)) return [OK, keptNone + '; ' + linkedOwnRoute(route) + tail];
+    return [WARN, keptNone + (nothing ? '; ' + LINKED_ROUTE_REMEDY : '') + tail];
+  }
+  if (cached !== 'linked') {
+    return [OK, head + ', so the hooks inherit that session\'s build route if it has recorded one by the time they '
+      + 'settle this lineage' + tail];
+  }
+  if (inherited === 'build') {
+    return [OK, head + ', and this session inherited the build route that session had recorded' + tail];
+  }
+  if (inherited === 'none') {
+    return [OK, head + ', but nothing was inherited when this session settled its lineage, and a route that session '
+      + 'records later does not reach this one' + tail];
+  }
+  return [WARN, head + ', but whether this session inherited a route could not be read' + LINKED_MISSING_CHECK + tail];
+}
+
+function linkedSessionText(resolver, v, host, cached, inherited, route) {
+  var R = resolver.REASONS;
+  var REP = resolver.REPOSITORY;
+  var who = resolver.HOST_SESSION_RE.test(host) ? 'this Claude Desktop session (' + host + ')' : 'this Claude Desktop session';
+  var stores = Array.isArray(v.stores) ? v.stores : [];
+  var parent = typeof v.parentSession === 'string' && resolver.HOST_SESSION_RE.test(v.parentSession)
+    ? v.parentSession : 'another session';
+  var ownIn = function (followedBy) { return v.ownStore ? ' in ' + foldPath(v.ownStore, followedBy) : ''; };
+  switch (v.reason) {
+    case R.MALFORMED_HOST_SESSION:
+      return [WARN, 'not checked — CLAUDE_CODE_HOST_SESSION_ID is not in the form Claude Desktop writes (local_<uuid>), '
+        + 'so no desktop session store was searched' + LINKED_MISSING_CHECK];
+    case R.MALFORMED_ACCOUNT:
+      return [WARN, 'not checked — CLAUDE_CODE_ACCOUNT_UUID or CLAUDE_CODE_ORGANIZATION_UUID is missing or not a UUID, '
+        + 'so no desktop session store was searched' + LINKED_MISSING_CHECK];
+    case R.NO_SESSION_ID:
+      return [WARN, 'not checked — no CLAUDE_CODE_SESSION_ID reached this report, so the session\'s own desktop record '
+        + 'cannot be matched' + LINKED_MISSING_CHECK];
+    case R.NO_SESSION_STORE:
+    case R.OWN_RECORD_MISSING:
+      return linkedStoreMiss(resolver, v, who, stores);
+    case R.OWN_RECORD_AMBIGUOUS:
+      return [WARN, 'two desktop session stores hold ' + who + '\'s own record (own-record-ambiguous), so which copy is '
+        + 'its own cannot be told and ' + LINKED_NOTHING_NOW + '. Searched: ' + linkedStoreList(resolver, stores)
+        + '. Remove the stale copy, or set ZENSU_CCD_STORE to the store that is current'];
+    case R.OWN_RECORD_UNREADABLE:
+      return [WARN, who + '\'s own desktop record' + ownIn(' could') + ' could not be read: it vanished or changed '
+        + 'during the read, or it is not a JSON object (own-record-unreadable)'];
+    case R.OWN_RECORD_REFUSED:
+      return [WARN, who + '\'s own desktop record' + ownIn(' was') + ' was refused: it is not a regular file of at '
+        + 'most 8 MiB that only this account can write (own-record-refused), so ' + LINKED_NOTHING_NOW];
+    case R.OWN_RECORD_MISMATCH:
+      return [WARN, who + '\'s own desktop record' + ownIn(' names') + ' names another desktop session '
+        + '(own-record-mismatch), so ' + LINKED_NOTHING_NOW];
+    case R.CLI_SESSION_MISMATCH:
+      return [WARN, who + '\'s own desktop record' + ownIn(' names') + ' names another Claude Code session than this '
+        + 'one (cli-session-mismatch), so ' + LINKED_NOTHING_NOW + '; a desktop that has not yet recorded a new '
+        + 'session id answers this until it does'];
+    case R.NOT_LINKED:
+      return [OK, 'not started from another session' + (v.ownStore ? ' — ' + who + '\'s own desktop record is'
+        + ownIn('; ' + LINKED_NOTHING_NOW) : '') + '; ' + LINKED_NOTHING_NOW];
+    case R.MALFORMED_PARENT:
+      return [WARN, who + '\'s own desktop record' + ownIn(' names') + ' names its starting session in a form this '
+        + 'plugin does not accept (malformed-parent), so ' + LINKED_NOTHING_NOW];
+    case R.PARENT_RECORD_UNAVAILABLE:
+      return [WARN, 'started from ' + parent + ', whose desktop record is not readable beside this session\'s own'
+        + ownIn(' (') + ' (parent-record-unavailable), so ' + LINKED_NOTHING_NOW];
+    case R.PARENT_SESSION_UNKNOWN:
+      return [WARN, 'started from ' + parent + ', whose desktop record names no Claude Code session id '
+        + '(parent-session-unknown), so ' + LINKED_NOTHING_NOW];
+    case R.RECORDS_UNAVAILABLE:
+      return [WARN, 'started from ' + parent + '; whether a resolution made now inherits its build route was not '
+        + 'checked — this plugin\'s Session Control records could not be read (records-unavailable)'
+        + LINKED_MISSING_CHECK];
+    case R.PARENT_CONTEXT_UNAVAILABLE:
+      return [OK, 'started from ' + parent + ', whose Session Control record is not in this plugin\'s data '
+        + '(parent-context-unavailable), so ' + LINKED_NOTHING_NOW];
+    case R.PARENT_ROOT_UNAVAILABLE:
+      return [OK, 'started from ' + parent + ', whose recorded project root no longer exists '
+        + '(parent-root-unavailable), so ' + LINKED_NOTHING_NOW];
+    case R.RESOLVED:
+      if (v.repository === REP.SAME) {
+        return linkedSameRepository(parent, v, cached, inherited, route,
+          v.ownStore ? '; both desktop records are' + ownIn('') : '');
+      }
+      if (v.repository === REP.FOREIGN) {
+        return [OK, 'started from ' + parent + ', ' + linkedParentRoot(v) + ' is in another repository, and a route is '
+          + 'never inherited across repositories, so ' + LINKED_NOTHING_NOW];
+      }
+      return [WARN, 'started from ' + parent + ', ' + linkedParentRoot(v) + ' could not be compared with this '
+        + 'session\'s: git named no repository for at least one of the two roots, because it lies outside git or git '
+        + 'failed or timed out, so ' + LINKED_NOTHING_NOW + LINKED_MISSING_CHECK];
+    default:
+      return [WARN, 'the lineage resolver answered a reason this report has no row for' + LINKED_MISSING_CHECK];
+  }
+}
+
+function linkedKeptClause(resolver, v, cached, inherited, route) {
+  var K = resolver.KINDS;
+  var R = resolver.REASONS;
+  if (LINKED_KEPT_STATES.indexOf(cached) === -1) {
+    return [WARN, '; the answer the hooks kept for this session could not be read' + LINKED_MISSING_CHECK];
+  }
+  var sameResolved = v.reason === R.RESOLVED && v.repository === resolver.REPOSITORY.SAME;
+  if (cached === 'linked') {
+    if (sameResolved) return [OK, ''];
+    var kept = '; this session resolved its lineage as linked on an earlier prompt and keeps that answer';
+    if (inherited === 'build') return [OK, kept + ', and with it the build route it inherited from its parent then'];
+    if (inherited === 'none') return [OK, kept + ', and nothing was inherited then'];
+    return [WARN, kept + ', but whether it inherited a route then could not be read' + LINKED_MISSING_CHECK];
+  }
+  var snapshot = linkedSnapshot(inherited, route);
+  var nothing = snapshot === 'none' || snapshot === 'set-aside';
+  var text = '';
+  if (cached === 'none' && !sameResolved && v.reason !== R.NOT_LINKED) {
+    text = '; this session settled its lineage as none on an earlier prompt and keeps that answer'
+      + (nothing ? ', so it inherits nothing' + (LINKED_OWN_ROUTE_RE.test(route) ? '; ' + linkedOwnRoute(route)
+        : ', and ' + LINKED_ROUTE_REMEDY) : '');
+  } else if (cached === 'unresolved') {
+    text = '; the hooks found no readable record on an earlier prompt and look once more on a later one, then keep '
+      + 'that answer';
+  } else if (cached === 'absent' && v.kind === K.UNRESOLVED) {
+    text = '; the hooks have not settled this lineage yet, and on an answer like this one they look once more on a '
+      + 'later prompt, then keep that answer';
+  }
+  if (snapshot === 'set-aside') {
+    return [OK, text + '; the hooks also kept an inherited build route for this session although they kept no '
+      + 'linked lineage answer, and this session\'s own marker sets it aside'];
+  }
+  if (snapshot === 'applies' || snapshot === 'unknown') {
+    return [WARN, text + '; the hooks also kept an inherited build route for this session although they kept no '
+      + 'linked lineage answer, and the delivery route follows it unless this session\'s own marker decides'];
+  }
+  if (snapshot === 'unread') {
+    return [WARN, text + '; whether the hooks kept an inherited route for this session could not be read'
+      + LINKED_MISSING_CHECK];
+  }
+  return [OK, text];
+}
+
+function linkedSessionRow() {
+  var host = env.CLAUDE_CODE_HOST_SESSION_ID;
+  if (typeof host !== 'string' || host === '' || currentSessionKey() === '') return;
+  var resolver = null;
+  try {
+    resolver = require('./linked-session-v1.js');
+  } catch (e) {
+    resolver = null;
+  }
+  if (!resolver || typeof resolver.resolveLinkedSession !== 'function' || !resolver.REASONS || !resolver.REPOSITORY
+    || !resolver.KINDS || !resolver.STORE_STATES || !resolver.STORE_SOURCES || !resolver.STORE_FOLDERS
+    || !(resolver.HOST_SESSION_RE instanceof RegExp)) {
+    line(WARN, 'linked session: not checked — the lineage resolver hooks/lib/linked-session-v1.js could not be loaded'
+      + LINKED_MISSING_CHECK);
+    return;
+  }
+  var v = resolver.resolveLinkedSession({
+    env: env,
+    sessionId: env.CLAUDE_CODE_SESSION_ID,
+    projectRoot: stateProjectRoot(),
+    pluginData: env.CLAUDE_PLUGIN_DATA,
+    detail: true,
+  });
+  var cached = String(env.ZDOC_LINKED_SESSION || '');
+  var inherited = String(env.ZDOC_INHERITED_ROUTE || '');
+  var route = String(env.ZDOC_DELIVERY_ROUTE || '');
+  var row = linkedSessionText(resolver, v, host, cached, inherited, route);
+  var kept = linkedKeptClause(resolver, v, cached, inherited, route);
+  line(row[0] === WARN || kept[0] === WARN ? WARN : row[0], 'linked session: ' + row[1] + kept[1]);
+}
+
 var ZEN_YIELD = 'the user\'s own CLAUDE.md, output style or a style mode they chose outranks it';
 var ZEN_ROOT_SCOPE = 'the hook reads both zen-mode keys under each session\'s recorded project root, so the zen-mode: row says what this session resolves';
 
@@ -5916,6 +6189,11 @@ function stateBlock(nowMs) {
   // the marker AND the config key, so a project with no `.zensu/state` yet still has
   // an answer (config or `ask`), and the ENOENT return below must not swallow it.
   deliveryRouteRow();
+  try {
+    linkedSessionRow();
+  } catch (e) {
+    line(WARN, 'linked session: not checked — the lineage row failed while it was rendered' + LINKED_MISSING_CHECK);
+  }
   zenModeRow();
   var projectRoot = stateProjectRoot();
   var dir = path.join(projectRoot, '.zensu', 'state');

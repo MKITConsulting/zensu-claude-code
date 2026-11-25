@@ -53,7 +53,8 @@ refuses exclusivity instead of reading no record.
 Every git call into a code root takes both: the module's recipes, the audit's per-claim
 `check-ignore` (through the module's `ignored` verb) and rule (A)'s `tracked()` probe in the
 Bash gate. `trail.mjs` keeps a private `READ_ONLY_GIT` and `evidence-run-v1.js` a private
-`gitEnvironment` until PRs C and D move them; the unit file holds each copy equal to the leaf.
+`gitEnvironment` until the session-trail and evidence-per-root work moves them; the unit file
+holds each copy equal to the leaf.
 `hooks/lib/git-environment-v1.js` exports a `gitEnvironment` of its own, which `trail.mjs` and
 `worktree-keep-v1.js` load: its argument is the base environment, while the leaf's and the
 evidence runner's argument is an overlay applied after the scrub. Give the two contracts distinct
@@ -91,7 +92,8 @@ anchor; the terminus reads only `claimed-files=` and the doctor ignores unknown 
 **The fix-round verb stops.** `zensu-log.sh --round-prepare` reads the roots through the
 `--code-roots` reader right after its node check and stops with `ROUND PREPARE STOPPED —
 code-roots` while the chain declares one, because its snapshot, its landing attribution and its
-round diff cover the anchor alone. With the switch off it reads no root and runs as before.
+round diff cover the anchor alone. With the switch off it reads no root and runs as for a
+single-root chain.
 
 **The opt-in Bash gate reads the union from stdin alone.** The hook frames every parser call
 as `ZENSU-BSWG-FRAME-V1 <bytes>` plus the workflow document and the payload, with a zero-length

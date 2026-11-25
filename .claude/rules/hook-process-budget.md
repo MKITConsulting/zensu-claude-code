@@ -154,16 +154,16 @@ against Windows executables.
   on a refusal), which skills, other hooks and tests still use.
 - The function changes directory, so it refuses a call at a shell's top level (`BASH_SUBSHELL`
   0). Call it only as `"$(zensu_host_path "$dir")"`.
-- MSYS is detected from `OSTYPE`, as `_zensu_config_native_path` in `zensu-config.sh` already
-  did, not from `uname`. A drive spelling such as `/c/x` becomes `C:/x` in shell, the rule
+- MSYS is detected from `OSTYPE`, as `_zensu_config_native_path` in `zensu-config.sh` does,
+  not from `uname`. A drive spelling such as `/c/x` becomes `C:/x` in shell, the rule
   `msysDrivePrefix` in `claude-path-v1.js` applies, and is accepted only when `cd -P` of the result
   lands on the same canonical directory. Every other path, an MSYS mount such as `/tmp` included,
-  goes through `cygpath -am` and the round-trip checks as before.
+  goes through `cygpath -am` and the round-trip checks.
 - The `cygpath` refusal checks in `tests/structure/test-msys-runtime-boundaries.sh` source the file
   and stub `_zensu_host_path_drive` to decline, so they reach that branch whatever spelling the
   host gives a temporary directory. A fixture with a drive spelling takes the fast path, which runs
-  no `cygpath` and accepts it; a plain `/tmp` fixture failed this check on the Windows runner of run
-  40851239372. The same stub drives one real `cygpath -am` render on Git Bash. A rename of
+  no `cygpath` and accepts it; without the stub, a plain `/tmp` fixture fails this check on the
+  Windows runner (run 40851239372). The same stub drives one real `cygpath -am` render on Git Bash. A rename of
   `_zensu_host_path_drive` needs the same rename there.
 - Each loader unsets the three function names before it sources the file, because bash imports
   exported functions from the environment, and fails closed when `zensu_host_path` is undefined
@@ -178,7 +178,7 @@ no candidate file of `cfg()` names the key. Parsed JSON can carry the key only i
 that is not a readable regular file, or reads empty while non-empty, goes to node. `C1` in the
 budget suite holds the answers equal to the node reader over every config state it builds, a
 unicode-escaped key among them, and `C2` holds that the decided states start no `node`.
-`zensu_hook_enabled_strict` and the bounded getters are unchanged.
+`zensu_hook_enabled_strict` and the bounded getters take no such pre-check.
 
 - **The read is bounded.** Bash reads a file one byte per system call here, so the pre-check
   reads at most `_ZENSU_CONFIG_PRECHECK_BYTES` (16384) bytes and sends a longer file to node.

@@ -130,14 +130,15 @@ a shorter needle counts this arm as well.
 
 **Leases are swept by project root.** `discardSupersededLeases` takes an optional fourth
 argument; with it, an owned lease survives only when it names that project root, because the lease
-reader compares `project_root` strictly and one stale lease wedges every later lease operation. The
-three-argument callers are unchanged. The in-place repair of the adoption still sweeps with three
+reader compares `project_root` strictly and one stale lease wedges every later lease operation. A
+call without it does not scope the sweep by project root. The in-place repair of the adoption
+still sweeps with three
 arguments, so a lease stuck by an interrupted re-anchor is NOT repaired by
 `/zensu:adopt-session --confirm`; the re-anchor's own WARNING says to move it by hand.
 
 **Reviewer confinement follows by construction.** `reviewer-capability-v1.js` reads
-`project_root` from the record on every tool call. Nothing in the capability gate changed, and
-`test-session-reanchor.sh` E6 pins both directions end to end.
+`project_root` from the record on every tool call. The capability gate has no re-anchor code of
+its own, and `test-session-reanchor.sh` E6 pins both directions end to end.
 
 **Deny texts.** A bound session's rule (B) deny and the repository and designation arms of rule
 (C) name `/zensu:adopt-session --reanchor`, gated by `BSWG_REANCHOR=1` on the bound call site of
@@ -145,11 +146,11 @@ arguments, so a lease stuck by an interrupted re-anchor is NOT repaired by
 usable record cannot run the move. The worktree-operand arm does not name it (W204b): moving the
 anchor does not change which tree `git worktree remove` destroys. The hint says the move refuses a
 worktree in which it FINDS another live session — never that it refuses wherever another session
-works, because the probe does not see where a session edits. No remedy names the recorded root any more — rule (C) used to
-recommend `git -C '<recorded root>' <verb> …`, which stages into the wrong worktree. The parser's
+works, because the probe does not see where a session edits. No remedy names the recorded root,
+because a command aimed at it stages into the wrong worktree. The parser's
 `OPT_IN_NOTE` stays LAST and names `hooks.bashWriteGate`, never the escape prefix
 (`skills/session-trail` asserts that shape; W121, W121c and W163c pin it), `denies again` stays in
-the designation arm (W163), and the operand arm is unchanged (W204). `test-session-reanchor.sh`
+the designation arm (W163), and W204 pins the operand arm. `test-session-reanchor.sh`
 drives its `git add` and admission checks with the gate opted in through `gate-on-config.json`,
 because at the default the gate allows every one of them. `P5b` in
 `test-secret-scan-gate.sh` pins the literal `BSWG_MODE= PAYLOAD=`, so a new assignment goes AFTER
@@ -224,8 +225,8 @@ none of the characters a glob or word splitting acts on.
 **The skills paste the root into double-quoted shell source, so the verb refuses a root it cannot
 paste safely.** A root holding a double quote, a dollar sign, a backtick or a backslash exits 2 with
 the reason and prints nothing: inside double quotes the shell would re-parse it, so a skill command
-would expand a variable or run a command substitution instead of naming the directory. The
-ambient spelling it replaced was a parameter expansion and never re-parsed. Session Control itself
+would expand a variable or run a command substitution instead of naming the directory.
+Session Control itself
 rejects only control characters, and on Git Bash the verb prints the MSYS spelling, so a backslash
 never reaches it there. The move itself still accepts such a target, because rules (B) and (C)
 and the reviewer confinement need no pasted path; `unpastableRoot` in `session-reanchor-v1.js`
@@ -244,8 +245,8 @@ the caller's working directory when it lies in the git work tree of the bound ro
 command in the bound root with a notice on stderr otherwise. Work-tree identity decides first,
 because a nested worktree, an embedded clone or a submodule inside the root is another work tree
 that the fingerprint does not measure; path containment decides only for a root outside git. The
-tree fingerprint and the verdict were always bound to the record's root, so a run from the previous
-worktree would have certified the new tree with a suite that tested the old one. The same-work-tree
+tree fingerprint and the verdict are bound to the record's root, so a run from the previous
+worktree would certify the new tree with a suite that tested the old one. The same-work-tree
 rule keeps a session recorded in a subdirectory able to run its suite from the worktree top. A
 chain bound to an Autopilot run that drives a worktree nested below the anchor runs in that
 worktree instead, and its verdict measures it (`.claude/rules/evidence-runner.md`).
