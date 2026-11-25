@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-25
+
+### Added
+
+- **ai-work**: Search the bound product's features before the capture scope question (#667)
+- **verify-feature**: Fence the browser at the network level and let service workers run (#669)
+- **edit-landing**: Accept a supersede proof for a claim a later step replaced (#665)
+
+### Changed
+
+- Close the red-run issue when a scheduled run is green again (#678)
+- **vcs**: Pin glab 1.133.0 and GitLab CE 19.6.1-ce.0 in the live tier (#677)
+- **vcs**: Pin the host of the review-markers fake gh (#666)
+- **verify-feature**: Specify the network-level browser fence (#641)
+
+### Fixed
+
+- **verify-feature**: Measure the consent gate against playwright-cli 0.1.25 (#679)
+- **evals**: Close the remaining route short-line needle and README gaps (#672)
+- **session-trail**: Find Claude Desktop records in data folders of their own (#645)
+- **evals**: Harden the route short-line probe and session-memory needle (#658)
+- **hooks**: Let a linked session inherit build from desktop stores of their own (#648)
+
 ### Upgrade notes
 
 - **`/zensu:verify-feature` fences its browser at the network level**: the browser now connects
