@@ -1350,7 +1350,7 @@ esac
 printf '%s\n' "\$kind" >> "$BTRACE"
 if [ -n "\${ZT_HANG:-}" ] && [ "\$kind" = "\$ZT_HANG" ]; then
   printf '%s\n' "\$\$" >> "$BPIDS"
-  exec sleep 120
+  exec sleep "\${ZT_HANG_FOR:-120}"
 fi
 exec "$REAL_NODE" "\$@"
 SHIM_EOF
@@ -1436,6 +1436,16 @@ fb_run() {
 fb_ctx() { ctx < "$FB_DIR/$1.raw"; }
 fb_took() { cat "$FB_DIR/$1.took" 2>/dev/null || echo 99; }
 fb_has() { printf '%s' "$1" | grep -qF -- "$2"; }
+ledger_entries() { ls -A "$CLAUDE_PLUGIN_DATA/prompt-ledger/v1/$(key_of "$1")" 2>/dev/null | grep -c '^tdd-'; }
+SKILL_FALLBACK="$(bash -c 'source "$0"; printf "%s" "${ZENSU_DELIVERY_ROUTE_SKILL_FALLBACK:-}"' "$DIRECTIVE_LIB" 2>/dev/null)"
+SKILL_RENDERED="$(CLAUDE_PLUGIN_DATA= bash -c 'source "$0"; zensu_delivery_route_record_command' "$DIRECTIVE_LIB" 2>/dev/null)"
+fb_record_hit() {
+  local needle
+  for needle in 'zensu-delivery-route.sh' '__ZENSU_ROUTE_COMMAND__' ' --build' "$SKILL_FALLBACK"; do
+    fb_has "$1" "$needle" && { printf '%s' "$needle"; return 0; }
+  done
+  return 1
+}
 FB_PROMPT="add a function to foo.js"
 FB_CI_EVENT='<ci-monitor-event>CI failed on the pull request.</ci-monitor-event>'
 session "$WT" "$P_HOST"; FT_CLI="$CLI"
@@ -1462,9 +1472,12 @@ FB_TYPED="$(fb_ctx typed)"
   && fb_has "$FB_TYPED" 'offers no /zensu:autopilot, so never run it from this reminder' && fb_has "$FB_TYPED" 'TDD-MODE: strict' \
   && fb_has "$FB_TYPED" 'never states a preference' && fb_has "$FB_TYPED" "The user's own instructions outrank this advice" \
   && ! fb_has "$FB_TYPED" 'was not read' && ! fb_has "$FB_TYPED" 'No person is confirmed present' \
+  && [ -n "$SKILL_FALLBACK" ] && [ "$SKILL_RENDERED" = "$SKILL_FALLBACK" ] && ! fb_record_hit "$FB_TYPED" >/dev/null \
+  && fb_has "$BH_OUT" 'zensu-delivery-route.sh' && fb_has "$BH_OUT" ' --build' \
+  && [ "$(ledger_entries "$FT_CLI")" = 0 ] && [ "$(ledger_entries "$BH_CLI")" -ge 1 ] \
   && [ "$(fb_took typed)" -le 32 ] && [ "$FB_ALIVE" = 0 ]; } \
-  && check "L51 a reminder whose work outlives the deadline after reading the route still prints the ask field, the human-present field and the ask safeguards, and no hung child of the seven fallback runs survives ($(fb_took typed)s)" PASS \
-  || check "L51 deadline fallback (field='$(last_field "$FB_TYPED")' took=$(fb_took typed)s alive=$FB_ALIVE ctx='${FB_TYPED:0:80}')" FAIL
+  && check "L51 a reminder whose work outlives the deadline after reading the route still prints the ask field, the human-present field and the ask safeguards, names neither the route record command, its placeholder, its --build argument nor the skill sentence the directive library renders in its place, and marks no prompt ledger, while the full reminder of L49 names the command with --build and marks the ledger, and no hung child of the seven fallback runs survives ($(fb_took typed)s)" PASS \
+  || check "L51 deadline fallback (field='$(last_field "$FB_TYPED")' took=$(fb_took typed)s alive=$FB_ALIVE record='$(fb_record_hit "$FB_TYPED")' skill=$([ -n "$SKILL_FALLBACK" ] && [ "$SKILL_RENDERED" = "$SKILL_FALLBACK" ] && echo read || echo unread) ledger=$(ledger_entries "$FT_CLI")/$(ledger_entries "$BH_CLI") ctx='${FB_TYPED:0:80}')" FAIL
 FB_UNREAD="$(fb_ctx unread)"
 { [ "$(last_field "$FB_UNREAD")" = "$ASK" ] && fb_has "$FB_UNREAD" "The session's delivery route was not read" \
   && fb_has "$FB_UNREAD" 'ZENSU HUMAN PRESENT: unknown' && fb_has "$FB_UNREAD" 'No person is confirmed present, so the Yes option comes first' \
@@ -1517,7 +1530,16 @@ B_MAX="$(bash -c 'source "$0"; printf "%s" "$ZENSU_PROMPT_DEADLINE_MAX_SECONDS"'
 
 
 echo "== Budget: the deadline library supervises a worker =="
-PD="$T/prompt-deadline"; mkdir -p "$PD/mark" "$PD/tmp"
+PD="$T/prompt-deadline"; mkdir -p "$PD/mark" "$PD/tmp" "$PD/shim"
+PD_REAL_SLEEP="$(command -v sleep)"
+PD_SLACK=3
+cat > "$PD/shim/sleep" <<SHIM_EOF
+#!/bin/bash
+printf '%s\n' "\$\$" > "\${MARK_DIR:-$PD/mark}/sleep.\$1"
+printf '%s\n' "\$PPID" > "\${MARK_DIR:-$PD/mark}/parent.\$1"
+exec "$PD_REAL_SLEEP" "\$@"
+SHIM_EOF
+chmod +x "$PD/shim/sleep"
 cat > "$PD/driver.sh" <<'EOF'
 #!/bin/bash
 set -u
@@ -1563,16 +1585,56 @@ cat > "$PD/worker-fast.sh" <<'EOF'
 source "$PD_LIB"
 zensu_prompt_worker_enter "$@"
 cat >"$MARK_DIR/stdin.copy"
+seen() {
+  local i=0
+  while [ "$i" -le "$PD_SLACK" ]; do
+    [ -s "$MARK_DIR/sleep.$((PD_WATCH - i))" ] && return 0
+    i=$((i + 1))
+  done
+  return 1
+}
+tries=0
+while ! seen && [ "$tries" -lt 100 ]; do
+  sleep 0.1
+  tries=$((tries + 1))
+done
 printf 'fast stdout'
 printf 'fast stderr\n' >&2
 exit 2
 EOF
+cat > "$PD/worker-lineage.sh" <<'EOF'
+#!/bin/bash
+[ "${1:-}" = "--zensu-prompt-worker" ] || exit 97
+source "$PD_LIB"
+zensu_prompt_worker_enter "$@"
+printf '%s\n' "$$" >"$MARK_DIR/worker.pid"
+source "$PD_CONFIG_LIB"
+source "$PD_LINKED_LIB"
+answer="$(zensu_linked_session_resolve "$PD_ROOT" "$PD_KEY" "$PD_CLI" "$PD_BUDGET")"
+printf '%s\n' "$answer" >"$MARK_DIR/answer"
+sleep 600
+EOF
 pd_drive() {
   TMPDIR="$PD/tmp" DRIVER_DEADLINE="$1" MARK_DIR="$PD/mark" PD_LIB="$DEADLINE_LIB" PD_KIND="${4:-}" PD_RAW_KIND="${5:-}" \
-    bash "$PD/driver.sh" "$DEADLINE_LIB" "$2" "$3"
+    PD_WATCH="$1" PD_SLACK="$PD_SLACK" PATH="$PD/shim:$PATH" bash "$PD/driver.sh" "$DEADLINE_LIB" "$2" "$3"
 }
 pd_alive() { kill -0 "$(cat "$PD/mark/$1.pid" 2>/dev/null)" 2>/dev/null && echo yes || echo no; }
-pd_sleepers() { ps -ax -o command= 2>/dev/null | grep -cx "sleep $1"; }
+pd_watchdog() {
+  local i=0
+  while [ "$i" -le "$PD_SLACK" ]; do
+    cat "$PD/mark/sleep.$(($1 - i))" 2>/dev/null && return 0
+    i=$((i + 1))
+  done
+  return 1
+}
+pd_watchdog_state() {
+  local pid
+  pid="$(pd_watchdog "$1")"
+  if [ -z "$pid" ]; then echo never
+  elif kill -0 "$pid" 2>/dev/null; then echo alive
+  else echo gone
+  fi
+}
 pd_tmp_left() { ls -A "$PD/tmp" | wc -l | tr -d ' '; }
 pd_wait_for() {
   local tries=0
@@ -1591,19 +1653,27 @@ PD_TOOK=$((SECONDS - PD_T0))
   || check "L55 hung classified worker (rc=$PD_RC out='$(cat "$PD/d.out")' worker=$(pd_alive worker) grandchild=$(pd_alive grandchild) tmp=$(pd_tmp_left))" FAIL
 
 PD_NAMES="$(LC_ALL=en_US.UTF-8 bash -c '
+  shopt -u globasciiranges 2>/dev/null
   source "$1" >/dev/null 2>&1 || exit 9
-  for name in prompt ok-1 Bad "$2" bad_name "$3"; do
+  for name in prompt ok-1 "$4" Bad "$2" bad_name "$3" 1abc -abc a/b .. a.b "" "$5"; do
     if _zensu_prompt_name_ok "$name"; then printf a; else printf r; fi
   done
   case B in ([a-z]) printf :collating ;; (*) printf :ascii ;; esac
-' _ "$DEADLINE_LIB" "$(printf '\303\251')" "$(printf '%033d' 0 | tr 0 a)" 2>/dev/null)"
-case "$PD_NAMES" in
-  (aarrrr:collating)
-    check "L55b the kind and fact name screen refuses upper-case, accented, underscored and over-long names under a locale whose bracket ranges collate" PASS ;;
-  (aarrrr:ascii)
-    check "L55b the name screen holds, but bracket ranges did not collate under en_US.UTF-8 in this shell, so the locale probe could not discriminate" PASS ;;
+' _ "$DEADLINE_LIB" "$(printf '\303\251')" "$(printf '%033d' 0 | tr 0 a)" "$(printf '%032d' 0 | tr 0 a)" "a$(printf '\303\251')" 2>/dev/null)"
+PD_SCREEN="$(bash -c 'source "$1" >/dev/null 2>&1 && declare -f _zensu_prompt_name_ok' _ "$DEADLINE_LIB" 2>/dev/null)"
+PD_RANGES=unread
+case "$PD_SCREEN" in
+  (*'[abcdefghijklmnopqrstuvwxyz]'*)
+    case "$PD_SCREEN" in (*'[!abcdefghijklmnopqrstuvwxyz0123456789-]'*) PD_RANGES=no ;; esac ;;
+esac
+printf '%s' "$PD_SCREEN" | grep -qE '[[:alnum:]]-[[:alnum:]]' && PD_RANGES=yes
+case "$PD_RANGES:$PD_NAMES" in
+  (no:aaarrrrrrrrrrr:collating)
+    check "L55b the name screen spells both of its character classes out with no bracket range, accepts a 32-character name and refuses upper-case, accented, underscored, over-long, leading-digit, leading-hyphen, slash, dot, empty and accented-tail names, here also under a locale whose bracket ranges collate" PASS ;;
+  (no:aaarrrrrrrrrrr:ascii)
+    check "L55b the name screen spells both of its character classes out with no bracket range and accepts and refuses the same names; bracket ranges did not collate under en_US.UTF-8 in this shell, so only the parse check could tell a range from a spelled-out class here" PASS ;;
   (*)
-    check "L55b name screen under a collating locale (got '$PD_NAMES', want aarrrr)" FAIL ;;
+    check "L55b name screen (ranges=$PD_RANGES got '$PD_NAMES', want aaarrrrrrrrrrr)" FAIL ;;
 esac
 
 rm -f "$PD/mark/"*.pid
@@ -1618,12 +1688,13 @@ pd_drive 2 "$PD/worker-delivered.sh" '{}' >"$PD/d.out" 2>"$PD/d.err"; PD_RC=$?
   || check "L57 delivered worker (rc=$PD_RC out='$(cat "$PD/d.out")' tmp=$(pd_tmp_left))" FAIL
 
 PD_PAYLOAD='{"hook_event_name":"UserPromptSubmit","prompt":"tab	and \"quote\" and trailing spaces  "}'
+rm -f "$PD/mark/"sleep.*
 pd_drive 4271 "$PD/worker-fast.sh" "$PD_PAYLOAD" >"$PD/d.out" 2>"$PD/d.err"; PD_RC=$?
 sleep 1
 { [ "$PD_RC" = 2 ] && [ "$(cat "$PD/d.out")" = "fast stdout" ] && [ "$(cat "$PD/d.err")" = "fast stderr" ] \
-  && [ "$(cat "$PD/mark/stdin.copy")" = "$PD_PAYLOAD" ] && [ "$(pd_sleepers 4271)" = 0 ] && [ "$(pd_tmp_left)" = 0 ]; } \
-  && check "L58 a worker that finishes in time has stdin, stdout, stderr and its exit code passed through, and leaves no watchdog and no private directory behind" PASS \
-  || check "L58 pass-through (rc=$PD_RC out='$(cat "$PD/d.out")' err='$(cat "$PD/d.err")' sleepers=$(pd_sleepers 4271) tmp=$(pd_tmp_left))" FAIL
+  && [ "$(cat "$PD/mark/stdin.copy")" = "$PD_PAYLOAD" ] && [ "$(pd_watchdog_state 4271)" = gone ] && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L58 a worker that finishes in time has stdin, stdout, stderr and its exit code passed through, and the watchdog recorded while it ran is gone afterwards, with no private directory left behind" PASS \
+  || check "L58 pass-through (rc=$PD_RC out='$(cat "$PD/d.out")' err='$(cat "$PD/d.err")' watchdog=$(pd_watchdog_state 4271) tmp=$(pd_tmp_left))" FAIL
 
 rm -f "$PD/mark/"*.pid
 PD_T0=$SECONDS
@@ -1642,18 +1713,88 @@ while [ $((SECONDS - PD_T0)) -lt 8 ]; do sleep 1; done
   && check "L59 a supervisor killed by SIGKILL still has its worker group stopped at the deadline and its private directory removed, by the watchdog it left behind" PASS \
   || check "L59 orphaned worker (supervisor gone=$PD_GONE worker before=$PD_BEFORE after=$(pd_alive worker) grandchild=$(pd_alive grandchild) tmp=$(pd_tmp_left))" FAIL
 
-rm -f "$PD/mark/"*.pid
-TMPDIR="$PD/tmp" DRIVER_DEADLINE=37 MARK_DIR="$PD/mark" PD_LIB="$DEADLINE_LIB" PD_KIND=prompt \
+rm -f "$PD/mark/"*.pid "$PD/mark/"sleep.*
+TMPDIR="$PD/tmp" DRIVER_DEADLINE=37 MARK_DIR="$PD/mark" PD_LIB="$DEADLINE_LIB" PD_KIND=prompt PATH="$PD/shim:$PATH" \
   bash "$PD/driver.sh" "$DEADLINE_LIB" "$PD/worker-hang.sh" '{}' >"$PD/d.out" 2>&1 &
 PD_DRIVER=$!
 pd_wait_for "$PD/mark/grandchild.pid"
+PD_TRIES=0
+while [ "$(pd_watchdog_state 37)" = never ] && [ "$PD_TRIES" -lt 100 ]; do sleep 0.1; PD_TRIES=$((PD_TRIES + 1)); done
+PD_WATCH_BEFORE="$(pd_watchdog_state 37)"
 kill -TERM "$PD_DRIVER" 2>/dev/null
 wait "$PD_DRIVER"
 PD_RC=$?
 sleep 1
 { [ "$PD_RC" = 143 ] && [ ! -s "$PD/d.out" ] && [ "$(pd_alive worker)" = no ] && [ "$(pd_alive grandchild)" = no ] \
-  && [ "$(pd_sleepers 37)" = 0 ] && [ "$(pd_tmp_left)" = 0 ]; } \
-  && check "L60 SIGTERM to the supervisor stops the worker group and the watchdog at once, prints nothing and exits 143" PASS \
-  || check "L60 SIGTERM (rc=$PD_RC worker=$(pd_alive worker) grandchild=$(pd_alive grandchild) sleepers=$(pd_sleepers 37) tmp=$(pd_tmp_left))" FAIL
+  && [ "$PD_WATCH_BEFORE" = alive ] && [ "$(pd_watchdog_state 37)" = gone ] && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L60 SIGTERM to the supervisor stops the worker group and the watchdog that was sleeping at once, prints nothing and exits 143" PASS \
+  || check "L60 SIGTERM (rc=$PD_RC worker=$(pd_alive worker) grandchild=$(pd_alive grandchild) watchdog=$PD_WATCH_BEFORE/$(pd_watchdog_state 37) tmp=$(pd_tmp_left))" FAIL
+
+PD_LINEAGE_BUDGET=10
+pd_lineage() {
+  local dir="$PD/lineage-$1" cli="$2" host="$3" hang="$4"
+  TMPDIR="$PD/tmp" DRIVER_DEADLINE=3 MARK_DIR="$dir" PD_LIB="$DEADLINE_LIB" PD_CONFIG_LIB="$CONFIG_LIB" \
+    PD_LINKED_LIB="$LINKED_LIB" PD_ROOT="$WT" PD_KEY="$(key_of "$cli")" PD_CLI="$cli" PD_BUDGET="$PD_LINEAGE_BUDGET" \
+    CLAUDE_CODE_HOST_SESSION_ID="$host" CLAUDE_CODE_ACCOUNT_UUID="$HOOK_ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" \
+    ZT_HANG=resolver ZT_HANG_FOR="$hang" PATH="$PD/shim:$BSHIM:$PATH" \
+    bash "$PD/driver.sh" "$DEADLINE_LIB" "$PD/worker-lineage.sh" '{}' >"$dir/driver.out" 2>&1
+}
+pd_mark() { cat "$PD/lineage-$1/$2" 2>/dev/null; }
+pd_pgid() { [ -n "$1" ] && ps -o pgid= -p "$1" 2>/dev/null | tr -d ' '; }
+pd_up() {
+  [ -n "$1" ] && kill -0 "$1" 2>/dev/null || { echo down; return; }
+  case "$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')" in
+    (Z*) echo down ;;
+    (*) echo up ;;
+  esac
+}
+pd_down_within() {
+  local tries=0
+  while [ "$tries" -lt "$2" ] && [ "$(pd_up "$1")" = up ]; do sleep 0.1; tries=$((tries + 1)); done
+  pd_up "$1"
+}
+pd_reap() { [ -n "$1" ] && ps -p "$1" -o command= 2>/dev/null | grep -qF -- "$2" && kill -KILL "$1" 2>/dev/null; }
+mkdir -p "$PD/lineage-hung" "$PD/lineage-answer"
+session "$WT" "$P_HOST"; LH_CLI="$CLI"; LH_HOST="$HOST"
+session "$WT" "$P_HOST"; LA_CLI="$CLI"; LA_HOST="$HOST"
+PD_L0=$SECONDS
+pd_lineage hung "$LH_CLI" "$LH_HOST" 120 &
+LH_DRIVER=$!
+pd_lineage answer "$LA_CLI" "$LA_HOST" 5 &
+LA_DRIVER=$!
+PD_TRIES=0
+while [ "$PD_TRIES" -lt 100 ] && { [ ! -s "$PD/lineage-hung/parent.$PD_LINEAGE_BUDGET" ] || [ ! -s "$PD/lineage-hung/sleep.120" ] \
+  || [ ! -s "$PD/lineage-answer/parent.$PD_LINEAGE_BUDGET" ] || [ ! -s "$PD/lineage-answer/sleep.5" ]; }; do
+  sleep 0.1; PD_TRIES=$((PD_TRIES + 1))
+done
+PD_R=$SECONDS
+LH_WORKER="$(pd_mark hung worker.pid)"; LH_RESOLVER="$(pd_mark hung sleep.120)"
+LH_SLEEP="$(pd_mark hung "sleep.$PD_LINEAGE_BUDGET")"; LH_WATCH="$(pd_mark hung "parent.$PD_LINEAGE_BUDGET")"
+LA_WORKER="$(pd_mark answer worker.pid)"; LA_RESOLVER="$(pd_mark answer sleep.5)"
+LA_SLEEP="$(pd_mark answer "sleep.$PD_LINEAGE_BUDGET")"; LA_WATCH="$(pd_mark answer "parent.$PD_LINEAGE_BUDGET")"
+wait "$LH_DRIVER"; LH_RC=$?
+wait "$LA_DRIVER"; LA_RC=$?
+LH_GROUPS="$(pd_pgid "$LH_RESOLVER")/$(pd_pgid "$LH_WATCH")"
+LA_GROUPS="$(pd_pgid "$LA_RESOLVER")/$(pd_pgid "$LA_WATCH")"
+LH_A="$(pd_up "$LH_WORKER") $(pd_up "$LH_RESOLVER") $(pd_up "$LH_SLEEP") $(pd_up "$LH_WATCH")"
+LA_A="$(pd_up "$LA_WORKER") $(pd_up "$LA_RESOLVER") $(pd_up "$LA_SLEEP") $(pd_up "$LA_WATCH")"
+while [ $((SECONDS - PD_R)) -lt 7 ]; do sleep 0.5; done
+LA_B="$(pd_down_within "$LA_RESOLVER" 10) $(pd_up "$LA_SLEEP") $(pd_up "$LA_WATCH")"
+while [ $((SECONDS - PD_R)) -lt 12 ]; do sleep 0.5; done
+LH_C="$(pd_down_within "$LH_RESOLVER" 30) $(pd_down_within "$LH_SLEEP" 30) $(pd_down_within "$LH_WATCH" 30)"
+LA_C="$(pd_down_within "$LA_SLEEP" 30) $(pd_down_within "$LA_WATCH" 30)"
+PD_LTOOK=$((SECONDS - PD_L0))
+{ [ "$LH_RC" = 0 ] && [ -n "$LH_WORKER" ] && [ -n "$LH_RESOLVER" ] && [ -n "$LH_SLEEP" ] && [ -n "$LH_WATCH" ] \
+  && [ "$LH_GROUPS" = "$LH_RESOLVER/$LH_WATCH" ] && [ "$LH_A" = "down up up up" ] && [ "$LH_C" = "down down down" ] \
+  && [ ! -e "$PD/lineage-hung/answer" ] && [ ! -e "$(linked_marker "$WT" "$LH_CLI")" ]; } \
+  && check "L61 a deadline during a lineage read stops the worker's group but neither the resolver nor its watchdog, each the leader of a process group of its own, and the watchdog still stops a hung resolver at the lineage budget and then exits, with no lineage answer cached (both lineage cases ${PD_LTOOK}s)" PASS \
+  || check "L61 deadline during a hung lineage read (rc=$LH_RC groups=$LH_GROUPS want $LH_RESOLVER/$LH_WATCH after-deadline='$LH_A' after-budget='$LH_C' answered=$([ -e "$PD/lineage-hung/answer" ] && echo yes || echo no))" FAIL
+{ [ "$LA_RC" = 0 ] && [ -n "$LA_WORKER" ] && [ -n "$LA_RESOLVER" ] && [ -n "$LA_SLEEP" ] && [ -n "$LA_WATCH" ] \
+  && [ "$LA_GROUPS" = "$LA_RESOLVER/$LA_WATCH" ] && [ "$LA_A" = "down up up up" ] && [ "$LA_B" = "down up up" ] \
+  && [ "$LA_C" = "down down" ] && [ ! -e "$PD/lineage-answer/answer" ] && [ ! -e "$(linked_marker "$WT" "$LA_CLI")" ]; } \
+  && check "L61b a resolver that answers after the deadline exits on its own while its orphaned watchdog sleeps out the lineage budget and then exits, and the answer is cached nowhere" PASS \
+  || check "L61b deadline before a lineage answer (rc=$LA_RC groups=$LA_GROUPS want $LA_RESOLVER/$LA_WATCH after-deadline='$LA_A' after-answer='$LA_B' after-budget='$LA_C' answered=$([ -e "$PD/lineage-answer/answer" ] && echo yes || echo no))" FAIL
+[ "$LH_C" = "down down down" ] || { pd_reap "$LH_RESOLVER" sleep; pd_reap "$LH_SLEEP" sleep; pd_reap "$LH_WATCH" worker-lineage.sh; }
+[ "$LA_C" = "down down" ] || { pd_reap "$LA_RESOLVER" sleep; pd_reap "$LA_SLEEP" sleep; pd_reap "$LA_WATCH" worker-lineage.sh; }
 
 finish

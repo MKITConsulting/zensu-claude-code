@@ -316,8 +316,11 @@ the six spellings of the field, and prints:
   one, the sentence that this reminder never runs `/zensu:autopilot`, `TDD_STRICT_ASK`,
   `TDD_UNTRUSTED`, the preference rule and the yield sentence of `docs/precedence.md` (`R15b`
   counts four carriers). It names the workflow question without the record command, so nothing is
-  recorded from it, and it marks no prompt ledger, so the next prompt still gets the full text
-  (`L51`).
+  recorded from it, and it marks no prompt ledger, so the next prompt still gets the full text.
+  `L51` checks both against the full reminder of `L49`, which carries the command with `--build`
+  and marks the ledger. It refuses the helper's name, the `__ZENSU_ROUTE_COMMAND__` placeholder,
+  `--build`, and the skill sentence it reads from `zensu-directive.sh`, which that library renders
+  in the command's place when the data root is unusable.
 - either `prompt` shape after a recognized brief opens with `ZENSU_LINKED_BRIEF_LEAD`, which the
   fallback sources from `zensu-directive.sh` on that path alone (`L51d`).
 - `ci` with a recorded route: the CI note with that field, the text the worker would have printed
@@ -333,9 +336,18 @@ cannot be resolved: a hook that could not finish never lets a marker it did not 
 alone, pick a route. `L55` to `L60` drive the library itself through a small driver: the fallback
 with its facts and the facts it refuses, a kind it refuses, a worker that marked its output
 delivered before the deadline, the pass-through of stdin, stdout, stderr and exit code with nothing
-left behind, a supervisor killed by SIGKILL, and SIGTERM. The name screen spells its letters out
-instead of using bracket ranges, because `/bin/bash` 3.2 collates `[a-z]` under a UTF-8 locale and
-accepts `B` there; `L55b` checks it under `en_US.UTF-8`.
+left behind, a supervisor killed by SIGKILL, and SIGTERM; `L61` and `L61b` run the real lineage
+resolution inside such a worker, with a lineage budget that outlasts a 3 s deadline. A `sleep` shim
+on the driver's `PATH` records each sleeper's PID and parent under its argument. The supervisor's
+watchdog sleeps the deadline less the whole seconds already spent, so `L58` and `L60` look it up
+within `PD_SLACK` seconds below the deadline, and fail unless that sleeper was recorded during the
+run and is gone afterwards. The name screen spells its letters out instead of using bracket ranges,
+because `/bin/bash` 3.2 collates `[a-z]` under a UTF-8 locale and accepts `B` there. `L55b` requires
+both spelled-out classes and no bracket range in the function as bash parsed it, which fails on
+every runner, and runs the screen under `en_US.UTF-8` with `globasciiranges` off over names that
+include a slash, dots, the empty name and an accented letter after a valid first one; where ranges
+still do not collate, its PASS text says that only the parse check could tell a range from a
+spelled-out class.
 
 **A budget for the lineage.** The worker hands `zensu_linked_session_resolve` the seconds left until
 the deadline minus the 6 s reserve it passes to `zensu_prompt_lineage_budget` for the rest of its
@@ -344,9 +356,17 @@ substitution; one the watchdog kills answers `deferred`,
 writes no marker, and the field comes from the ordinary ladder in the full text (`L49`), so the
 session's own marker and a configured default still decide it (`L49b`); the next prompt resolves
 again (`L50`). A spent budget answers `deferred` without starting the resolver
-(`L50b`). The plan gate passes no budget and resolves as before. A resolver killed by the
-supervisor rather than by its own watchdog keeps running until that watchdog fires, which the reserve
-places before the deadline.
+(`L50b`). The plan gate passes no budget and resolves as before. The supervisor's group kill does
+not reach the resolver or its watchdog, because each leads a process group of its own: a deadline
+that stops the worker during a lineage read caches no answer, and leaves a hung resolver running
+until its watchdog stops it at the lineage budget and then exits (`L61`). A resolver that answers
+after the deadline exits on its own, while its watchdog, orphaned before the worker could stop it,
+sleeps out the budget and then exits (`L61b`). Its last act is the kill it was started for, aimed at
+a group that no longer exists: should the system reuse that process ID within those seconds, the
+process or group now holding it gets the signal, a residual no check covers. The reserve places that budget before the deadline, and the watchdog
+counts it from the resolver's start, so a resolver outlives the deadline only when the steps between
+reading the budget and starting the resolver took longer than the reserve less one second, because
+the worker reads the time spent from bash's whole-second `SECONDS`.
 
 **Known gaps.** The host can stop the supervisor after the worker marked the prompt ledger and
 before the supervisor forwarded the text, so a full text the model never received can count as
@@ -504,14 +524,17 @@ route: a route change moves only the field, and every shape of the reminder carr
   processes through a `node` shim on `PATH`. It skips on native Windows, where the store layout
   it builds is unverified, and carries no native-Windows marker, so
   `windows-native-structure.v1.json` does not list it. It has no `ci-shard-weights.v1.json`
-  figure yet; take one from its first green CI run. Its budget block (`L48` to `L60`) classifies
+  figure yet; take one from its first green CI run. Its budget block (`L48` to `L61b`) classifies
   every `node` child through a second shim by literals it shares with the code: the inline
   `core.readContext({ recordsDir, sessionId: key })` of `zensu_resolve_project_dir`, the
   resolver's file name, `ZENSU_DIRECTIVE_PLACEHOLDERS` of the substitution,
   `classifyPreToolPayload` of the principal check and `j.hooks.defaultDeliveryRoute` of
-  `zensu_default_delivery_route`. Rewording one of them turns its check red. The hung-child cases
-  wait for real deadlines; the hook-level fallback cases run side by side, so the block waits
-  about 45 s in all.
+  `zensu_default_delivery_route`. Rewording one of them turns its check red. Every driver case but
+  `L59` records its sleepers through a `sleep` shim keyed by the sleep argument, so a supervisor
+  watchdog that stops starting `sleep` from `PATH`, or sleeps longer than the deadline or more than
+  `PD_SLACK` seconds less, turns `L58` and `L60` red, and a lineage watchdog that stops sleeping the
+  exact budget turns `L61` and `L61b` red. The hung-child cases wait for real deadlines; the
+  hook-level fallback cases run side by side, and so do the two lineage cases, which wait about 12 s.
 - The time budget: `hooks/lib/zensu-prompt-deadline.sh` (the clamp, `zensu_prompt_supervise`,
   the worker entry, `zensu_prompt_classified`, `zensu_prompt_record`, `zensu_prompt_recorded`,
   `zensu_prompt_delivered`, `zensu_prompt_lineage_budget`); the reminder's `CI_NOTE`, the `TDD_*`
