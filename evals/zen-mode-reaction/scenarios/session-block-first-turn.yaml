@@ -49,7 +49,8 @@ assert:
       const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
-      const isGoal = (l) => !bullet(l) && /^(?:(?:this|the)\s+)?(?:session|goal|purpose|focus|started)\b|^why\s+(?:this|the)\s+session\b/i.test(undecorate(l));
+      const opener = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:started\b|(?:session\s+)?(?:goal|purpose|aim|focus)\b|you\s+started\s+(?:this|the)\s+session\b|(?:this|the)\s+session\s+(?:began|started|is\s+for)\b)/i.test(l);
+      const isGoal = (l) => (!bullet(l) || opener(l)) && !/^(?:(?:this|the)\s+)?session(?:\s+(?:so\s+far|summary|recap))?\s*:?$/i.test(undecorate(l)) && /^(?:(?:this|the)\s+)?(?:session|goal|purpose|focus|started)\b|^why\s+(?:this|the)\s+session\b|^you\s+started\s+(?:this|the)\s+session\b/i.test(undecorate(l));
       let goal = -1;
       lines.forEach((l, i) => { if (i > 0 && i < lines.length - 1 && isGoal(l)) goal = i; });
       const ok = goal > 0;
@@ -70,10 +71,12 @@ assert:
       const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
-      const isGoal = (l) => !bullet(l) && /^(?:(?:this|the)\s+)?(?:session|goal|purpose|focus|started)\b|^why\s+(?:this|the)\s+session\b/i.test(undecorate(l));
+      const opener = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:started\b|(?:session\s+)?(?:goal|purpose|aim|focus)\b|you\s+started\s+(?:this|the)\s+session\b|(?:this|the)\s+session\s+(?:began|started|is\s+for)\b)/i.test(l);
+      const isGoal = (l) => (!bullet(l) || opener(l)) && !/^(?:(?:this|the)\s+)?session(?:\s+(?:so\s+far|summary|recap))?\s*:?$/i.test(undecorate(l)) && /^(?:(?:this|the)\s+)?(?:session|goal|purpose|focus|started)\b|^why\s+(?:this|the)\s+session\b|^you\s+started\s+(?:this|the)\s+session\b/i.test(undecorate(l));
       let goal = -1;
       lines.forEach((l, i) => { if (i > 0 && i < lines.length - 1 && isGoal(l)) goal = i; });
-      const invented = goal < 0 ? [] : lines.slice(goal + 1).filter(bullet);
+      const recapper = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:(?:in\s+)?this\s+turn\b|last\s*:)/i.test(l);
+      const invented = goal < 0 ? [] : lines.slice(goal + 1).filter((l) => bullet(l) && !recapper(l));
       const ok = goal > 0 && invented.length === 0;
       return {
         pass: ok,
@@ -94,7 +97,8 @@ assert:
       const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
-      const isGoal = (l) => !bullet(l) && /^(?:(?:this|the)\s+)?(?:session|goal|purpose|focus|started)\b|^why\s+(?:this|the)\s+session\b/i.test(undecorate(l));
+      const opener = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:started\b|(?:session\s+)?(?:goal|purpose|aim|focus)\b|you\s+started\s+(?:this|the)\s+session\b|(?:this|the)\s+session\s+(?:began|started|is\s+for)\b)/i.test(l);
+      const isGoal = (l) => (!bullet(l) || opener(l)) && !/^(?:(?:this|the)\s+)?session(?:\s+(?:so\s+far|summary|recap))?\s*:?$/i.test(undecorate(l)) && /^(?:(?:this|the)\s+)?(?:session|goal|purpose|focus|started)\b|^why\s+(?:this|the)\s+session\b|^you\s+started\s+(?:this|the)\s+session\b/i.test(undecorate(l));
       let goal = -1;
       lines.forEach((l, i) => { if (i > 0 && i < lines.length - 1 && isGoal(l)) goal = i; });
       const after = goal < 0 ? -1 : lines.length - 1 - goal;
