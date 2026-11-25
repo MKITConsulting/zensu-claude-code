@@ -1,5 +1,6 @@
 #!/bin/bash
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 # Pins the plugin-wide evidence-discipline (anti-hallucination) rule:
 #   - docs/evidence-discipline.md is the single source of truth and carries the

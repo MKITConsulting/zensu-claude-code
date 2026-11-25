@@ -15,6 +15,8 @@ paths:
   - "hooks/plan-approved-delegate.sh"
   - "hooks/user-prompt-tdd-reminder.sh"
   - "skills/delivery-route/**"
+  - "skills/doctor/SKILL.md"
+  - "skills/doctor/references/linked-session.md"
   - "tests/structure/test-delivery-route.sh"
   - "tests/structure/test-linked-session-route.sh"
   - "tests/structure/test-plan-approved-delegate.sh"
@@ -194,7 +196,18 @@ session answers `none` (`no-session-store`) when no candidate passes, `unresolve
 (`own-record-missing`) when none holds an entry under the own record's name, and `none`
 (`own-record-ambiguous`) when two do, reading neither. Any entry under that name counts, a
 refused one included, while session-trail reads neither copy of a session id only when two
-stores hold records it accepts. Binding checks: the shape of
+stores hold records it accepts. Those two miss answers, `no-session-store` and
+`own-record-missing`, come only from that search, so each one means that
+`CLAUDE_CODE_HOST_SESSION_ID` is set and no candidate store holds the own record: an own
+record the search saw and that is gone when the read opens it answers `unresolved`
+(`own-record-unreadable`), as one that changes while it is read does. One search,
+`searchStores`, serves the hooks and the doctor: `resolveLinkedSession` with `detail: true`
+also returns every candidate store in candidate order (`stores`: the store, its source
+`override`, `named`, `default` or `hub-profile`, and its state `no-folder`, `refused` with the
+cause `ownedDirectoryRefusal` names, `same-folder` with the store it repeats, `no-record` or
+`holds-record`), the store that held the own record (`ownStore`) and the parent's desktop id
+(`parentSession`), while without it the verdict keeps its six fields and the line the shell
+reads is the same. Binding checks: the shape of
 each id; the store, account and organization directories real directories; each record a regular
 file opened without following a link and without blocking, at most 8 MiB, a read that keeps
 answering would-block retried 16 times 1 ms apart and then read as unreadable; off Windows, those
@@ -250,6 +263,51 @@ inherited rank sits below the own marker and above the config key, because it is
 made for the same work. A released own marker (`--auto`) skips it, and `--direct` writes an own
 marker that wins. `zensu-delivery-route.sh` keeps its four verbs: only the hooks write the two new
 files.
+
+**A miss is visible in `/zensu:doctor`.** For ten days after the user's accounts moved into Zensu
+Session Hub profiles, every linked session there answered a store miss and nothing showed it: the
+field read `ask`, as for a session no other session started (the FR-007 census of 2026-11-24). So
+the doctor renders a `linked session:` row for a bound session whose environment carries
+`CLAUDE_CODE_HOST_SESSION_ID`; the Bash tool that runs the doctor carries the same three desktop
+variables the hooks see. `linkedSessionRow` in `hooks/lib/zensu-doctor-report.js` runs
+`resolveLinkedSession` live with `detail: true`, the doctor's `CLAUDE_CODE_SESSION_ID`,
+`CLAUDE_PLUGIN_DATA` and the recorded project root, so the row answers what the hooks would
+answer now. A miss is a warning that names the reason token, every store searched with its state
+(a Session Hub profile store by its folder name, a refused store by the folder that failed: the
+store itself, its account folder or its organization folder, which the detail mode's `folder`
+field names) and the remedy: the `ZENSU_CCD_EXTRA_STORES` remedy with `ZENSU_CCD_STORE` named as
+the variable that replaces every other store, or, while `ZENSU_CCD_STORE` is in force (the detail
+mode's `override`), that variable alone. With no store at all the row names the one cause that
+holds, and every remedy says that a changed store variable helps only a lineage that is still
+open when the change reaches the hooks. An ambiguous, refused, unreadable or mismatching own
+record, a malformed parent, a parent record that is not readable beside the own one or names no
+CLI session, an unread Session Control store and a repository comparison that could not be made
+are warnings too; a resolved lineage, a session not started from another one and a parent whose
+context or root is gone are green. Paths go through `foldPath`, except the parent's project root,
+which the row wraps in a parenthetical of its own and therefore renders through
+`parenthesizedPath`, which withholds a root that carries a closing parenthesis. The wrapper probes
+`ZDOC_LINKED_SESSION` and `ZDOC_INHERITED_ROUTE` read the kept answer and the inherited-route
+snapshot through `zensu_linked_session_state` and `zensu_inherited_route_state`, each marker's one
+reader, so a same-repository row says whether the session inherited `build`, inherited nothing,
+or has not settled its lineage yet. The row also takes `ZDOC_DELIVERY_ROUTE`, the field the
+`delivery route:` row renders, because the snapshot decides the route only below the session's
+own marker. The route follows the snapshot, never the live answer, so
+every inheritance statement of the live answer speaks of a resolution made now
+(`LINKED_NOTHING_NOW`), and the row names what the hooks kept that the live answer does not
+explain: a kept `none` beside a lineage that resolves in the same repository is green and names
+the route that decides instead once the field comes from the session marker or
+`hooks.defaultDeliveryRoute`, and otherwise turns the row into a warning that names the `--build`
+remedy unless a kept snapshot still applies or could not be read; a kept `none` beside another
+live answer is named with the fact
+that the session keeps it; a kept `linked` beside any answer but the same-repository resolution
+is named with what the session inherited then (`build`, nothing, or a missing check); a snapshot
+that reads `build` beside a kept answer that is not `linked` is a warning of its own while the
+field reads `build (inherited from parent session)` or could not be read, and is named as set
+aside by the session's own marker once the field reads anything else; and a kept `none` says the
+session inherits nothing only while the snapshot reads `none` or is set aside. An unreadable own
+record promises another look only while the hooks have not kept an answer, and a kept answer or
+snapshot the probe could not read is a missing check. The row's operator account is
+`skills/doctor/references/linked-session.md`.
 
 **The brief note.** Both ask-hooks resolve the lineage: the reminder on a typed, slash-with-arguments
 or CI-monitor prompt while no chain is active, and the plan gate on its standalone branch. A brief
@@ -364,7 +422,25 @@ route: a route change moves only the field, and every shape of the reminder carr
   folders, a padded `ZENSU_CCD_STORE` beside a named store, a blank one beside blank, padded and
   repeated named entries, a home without a profiles folder), so a difference outside them passes
   it, and a relative entry or another platform's default, where the two sides differ by design,
-  is never compared;
+  is never compared; `taggedStoreCandidates`, which `storeCandidates` maps to its paths,
+  `storeOverride`, the one reading of `ZENSU_CCD_STORE`, and `searchStores`, the one search the
+  hook resolution and the detail mode share, which tags a failed store with the `STORE_FOLDERS`
+  member that failed and reports whether the override decided the candidates (`L3q` holds the
+  detail states and the candidate order, `L3r` the race answer and the unchanged hook line, and
+  `L49`, `L50` and `L54` the `folder` and `override` fields through the row);
+  the doctor row, `linkedSessionRow`, `linkedSessionText`, `linkedKeptClause`, `linkedStoreMiss`,
+  `linkedSameRepository`, `linkedStoreList`, `linkedStoreState`, `linkedFolderSubject` and the
+  `LINKED_*` texts in `hooks/lib/zensu-doctor-report.js`, which key on the resolver's exported
+  `KINDS`, `REASONS`, `REPOSITORY`, `HOST_SESSION_RE`, `STORE_STATES`, `STORE_SOURCES` and
+  `STORE_FOLDERS`, so a new reason, state or folder needs a row text (`L57` fails without one);
+  `LINKED_REFUSAL_PREDICATE`, a hand copy of the causes `ownedDirectoryRefusal` returns, because
+  `desktop-store-read-v1.js` exports no cause vocabulary and has a byte-identical copy in
+  `plugins/session-hub/`, so an unknown cause renders as a check the row has no text for and `L54`
+  renders every known one; the `ZDOC_LINKED_SESSION` and `ZDOC_INHERITED_ROUTE` probes in
+  `hooks/lib/zensu-doctor.sh`, which join the probe guard that sources `zensu-config.sh` once; and
+  `skills/doctor/references/linked-session.md` with its pointer in `skills/doctor/SKILL.md`,
+  whose phrases `L58` holds against the rendered rows (`L48`-`L56` drive the arms and the real
+  wrapper);
   `hooks/lib/desktop-store-read-v1.js`, the one owner of `writableOnlyByCaller`, `anyOwnerOrMode`,
   `realDirectory` with its required policy, `ownedRegularFile` and the bounded record reader, which
   the resolver and `trail.mjs` both load, so a change to the rule moves both readers, and
@@ -375,7 +451,11 @@ route: a route change moves only the field, and every shape of the reminder carr
   reader stops reusing the scratch buffer session-trail passes or the resolver starts passing one;
   `ZENSU_LINKED_BRIEF_LEAD` and the `ZENSU_DIRECTIVE_LEAD` name in `zensu-directive.sh`; the
   closed spelling list in the doctor probe of `zensu-doctor.sh` and the two source regexes in
-  `zensu-doctor-report.js`, which accept `inherited from parent session`.
+  `zensu-doctor-report.js`, which accept `inherited from parent session`; and
+  `LINKED_OWN_ROUTE_RE` and `LINKED_INHERITED_FIELD` in the same renderer, hand copies of the
+  `zensu_delivery_route_field` vocabulary as `deliveryRouteRow`'s regexes are, which decide
+  whether the linked row names the session's own route and whether a kept snapshot applies or is
+  set aside, so a new field spelling moves every one of these copies.
 - `zensu-directive.sh`: `zensu_delivery_route_record_command`,
   `ZENSU_DELIVERY_ROUTE_SKILL_FALLBACK`, `zensu_directive_substitute`,
   `zensu_delivery_route_substitute`, its header naming the two substitution conventions, and the
@@ -439,7 +519,13 @@ into `hooks/lib/desktop-store-read-v1.js` changes none of its answers. Reading t
 Hub profile stores is `patch` as well: no kind or field changes, the verdict line keeps its six
 fields, and the one new reason, `own-record-ambiguous`, comes under the existing kind `none`; the
 shell's tab-split `read` in `hooks/lib/zensu-linked-session.sh` discards the reason field, and no
-reason value is matched outside the resolver and its suite.
+reason value is matched outside the resolver and its suite. The visible miss is `patch` too: the
+one remapped case moves between two reasons of the kind `unresolved`, so the shell writes the same
+marker and retries as before; the detail fields, `folder` and `override` included, exist only on
+a call that asks for them, and the new `STORE_FOLDERS` export is read only by the doctor row; the
+doctor row is advisory and read-only; both wrapper probes read their marker through its one
+reader; and the new reason text is matched only by the doctor row and its suite, which ship
+together.
 
 ## Known bounds
 
@@ -539,7 +625,8 @@ reason value is matched outside the resolver and its suite.
   (`.claude/rules/session-trail-targeted-lookup.md`). A linked session started in a Claude Desktop
   that runs on any other data folder of its own answers `unresolved` (`own-record-missing`) when
   another store holds the same account and organization folders and `none` (`no-session-store`)
-  when none does, and inherits nothing. Naming that store in `ZENSU_CCD_EXTRA_STORES` helps only a
+  when none does, and inherits nothing; the doctor's `linked session:` row shows that miss with
+  every store it searched. Naming that store in `ZENSU_CCD_EXTRA_STORES` helps only a
   lineage still open when the variable reaches the hook, because `linked-session-<key>.json` keeps
   a `none` at once and retries an `unresolved` once, on a later prompt, before keeping it as
   `none`; a session that has answered resolves its route as one without a parent does, from its own
@@ -549,6 +636,14 @@ reason value is matched outside the resolver and its suite.
   record's name, a refused one included, where session-trail counts only the records it accepts,
   so a refused entry in a second store withholds the inherited route here while session-trail
   still reads the accepted record; the stricter count only withholds, the fail-safe direction.
+- The doctor row resolves in the doctor's own environment, the Bash tool's, which carried the three
+  desktop variables in a desktop session (measured on 2026-11-24 with the desktop-bundled CLI
+  2.1.330). A `ZENSU_CCD_STORE` or `ZENSU_CCD_EXTRA_STORES` changed after the hooks answered makes
+  the row search other stores than the hooks did; the cached-answer clause shows only that the two
+  answers differ, not why. The row is withheld for an unbound session and for a doctor run outside
+  the session, and it lists every store, so a machine with many Session Hub profiles gets a long
+  warning. The structure suites unset the three variables (`L3s`); the evals under `evals/` that
+  run an ask-hook do not, and the session-trail suites keep their own home-directory sandboxing.
 - A `.zensu/state` that passes the writable test and still refuses the write, on a full disk for
   example, leaves the answer uncached, so the module starts again on the next prompt. The test
   covers the read-only and the foreign-owned directory, the common cases.

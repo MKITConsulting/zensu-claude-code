@@ -16,6 +16,7 @@
 #      long legitimate implementation genuinely does span many turns.
 # Then: the threshold and its 0-disables semantics, and the doctor WARN row.
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"

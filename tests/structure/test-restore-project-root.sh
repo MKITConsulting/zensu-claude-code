@@ -36,6 +36,7 @@
 #       parity with the refusal set, the typed race predicate, the deny scope
 #       every gate emits in this state, and the operator account
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd -P)"
 CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"

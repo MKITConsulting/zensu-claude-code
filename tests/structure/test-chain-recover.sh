@@ -7,6 +7,7 @@
 # binding, or a claimed deferred-review generation, and fails closed on foreign,
 # corrupt, absent, and unsafe state.
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$ROOT/hooks/lib/zensu-log.sh"
