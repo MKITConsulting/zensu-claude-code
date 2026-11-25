@@ -8,6 +8,15 @@ and this plugin adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-11-25
+
+### Fixed
+
+- **session-trail**: Release the old session before its remaining work (#671)
+- **session-trail**: Find Claude Desktop records in data folders of their own (#645)
+- **hooks**: Let a linked session inherit build from desktop stores of their own (#648)
+- **autopilot**: Carry a durable run through a session-trail takeover (#651)
+
 ## [1.0.1] - 2026-11-15
 
 ### Fixed
