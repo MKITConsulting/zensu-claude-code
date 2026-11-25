@@ -1,6 +1,7 @@
 #!/bin/bash
 # Pin the prompt-level half of the durable outer/inner orchestration contract.
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 AUTO="$ROOT/skills/autopilot/SKILL.md"
 source "$ROOT/tests/structure/lib-skill-text.sh"

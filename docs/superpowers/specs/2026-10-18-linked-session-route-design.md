@@ -6,6 +6,11 @@ Builds on: `.claude/rules/session-delivery-route.md` (the route ladder) and `.cl
 (prompt classes).
 Naming: since #520 (0.32.0) the route this record calls `tdd` is `build`, and `/zensu:tdd` is `/zensu:build`.
 The shipped code, tests and rule use the new names; this record keeps the names of its time.
+Store discovery (2026-11-24): the FR-007 census found that no linked session started in a Zensu Session Hub profile
+resolved its parent, because this design reads the default desktop store only. Since #648 the candidates are every
+store `ZENSU_CCD_EXTRA_STORES` names, the platform default stores and every Session Hub profile store, a set
+`ZENSU_CCD_STORE` still alone, and a store miss shows in the `/zensu:doctor` `linked session:` row. The current rules are
+in `.claude/rules/session-delivery-route.md`; this record keeps the single-store design of its time.
 
 ## 1. Problem
 

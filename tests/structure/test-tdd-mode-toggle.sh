@@ -27,6 +27,7 @@
 #     driven by PATH shims for `mktemp` and `mv` that stage the swap at the point the
 #     race would strike (T9k, T9g, T9h, T9i); what a shim cannot show is the race itself.
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"

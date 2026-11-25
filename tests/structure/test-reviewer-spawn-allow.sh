@@ -1,5 +1,6 @@
 #!/bin/bash
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 # Pins the PreToolUse(Agent|Task) reviewer-spawn grant (pre-agent-reviewer-allow.sh):
 # it admits Zensu's own capability-confined reviewer subagents before the host

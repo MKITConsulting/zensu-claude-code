@@ -1,6 +1,7 @@
 #!/bin/bash
 # The inner review chain routes first; the outer run releases only at a terminal.
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
