@@ -44,9 +44,11 @@ several GB of memory and minutes of boot, so it runs only where its signal pays 
   and drop the lane. The driver reads no file but `repo-conventions-v1.js`, which only
   `--conventions` loads and the live suite never calls; `W17` fails when that changes, and the
   pathspecs must then name the new file too;
-- nightly, the pinned lane plus the drift job below. A red scheduled run, live or drift, comments
-  on the open issue labelled `gitlab-live`, or opens one; the label, not the title, finds it,
-  because anyone can open an issue with a copied title;
+- nightly, the pinned lane plus the drift job below. The `notify` job runs after every scheduled
+  run and reads the results of `result`, `drift` and `drift-issue` through `env:`. A red run, live
+  or drift, comments on the open issue labelled `gitlab-live`, or opens one; a green run closes
+  that issue with a comment that links the run. The label, not the title, finds it, because
+  anyone can open an issue with a copied title;
 - both release stages, `prepare-gitlab-live` against the bundled release commit and
   `publish-gitlab-live` against the published SHA. `skip_test_gate` skips them like the suite
   shards, and `prepare` and `publish` accept a skipped gate only together with a skipped suite.
@@ -73,8 +75,8 @@ is drift. The `drift-issue` job, the second job with `issues: write`, opens the 
 `gitlab-live-drift` with the report's pin lines, rewrites it when its marker line
 `<!-- zensu-gitlab-drift … -->` changes, and closes it when the report is empty. It runs only
 after a successful drift job: a failed one hands on no report, and an empty report closes the
-issue. The guard runs `drift.sh` against fixtures and the compare and issue steps with a fake
-`gh` (`W33`-`W54`). The cost, accepted on purpose: a release that breaks the driver surfaces in
+issue. The guard runs `drift.sh` against fixtures and the compare, drift issue and `notify` steps
+with a fake `gh` (`W33`-`W60`). The cost, accepted on purpose: a release that breaks the driver surfaces in
 the pull request that pins it, not on the night it ships.
 
 **Known bugs are strict XFAIL with a signature.** `xeq` takes the fixed result and the result the

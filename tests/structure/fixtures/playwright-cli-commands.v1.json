@@ -1,5 +1,5 @@
 {
-  "version": "0.1.24",
+  "version": "0.1.25",
   "source": "playwright-core/lib/tools/cli-client/help.json",
   "commands": {
     "attach": [
@@ -8,7 +8,9 @@
       "endpoint",
       "extension",
       "idle-timeout",
-      "session"
+      "no-tab-group",
+      "session",
+      "session-color"
     ],
     "check": [],
     "clear-color-scheme": [],
@@ -48,7 +50,9 @@
       "modifiers"
     ],
     "delete-data": [],
-    "detach": [],
+    "detach": [
+      "close-tabs"
+    ],
     "dialog-accept": [],
     "dialog-dismiss": [],
     "drag": [],

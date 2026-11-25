@@ -259,7 +259,7 @@ literal path into the package in the guard.
   injected instructions, not a determined actor. What the app renders reaches the model by
   design, which is why the docs demand a dedicated test account with synthetic data.
 - The runtime-signal plane of a signed-in row stays PARTIAL until a trusted sanitizer exists.
-- The integration test drives a real browser only where `playwright-cli` 0.1.24 and Chrome are
+- The integration test drives a real browser only where `playwright-cli` 0.1.25 and Chrome are
   installed; on the Linux CI runners it skips with its reason.
 - Windows is unverified end to end, and no port (`zensu-codex`, `zensu-kiro`,
   `zensu-antigravity`) was included.
