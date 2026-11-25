@@ -1,6 +1,6 @@
 {
   "name": "session-hub",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "displayName": "Zensu Session Hub",
   "description": "Companion plugin for the Zensu Session Hub: the /session-hub:session-trail takeover the Hub types, its handover receipt and the usage feed.",
   "author": {
