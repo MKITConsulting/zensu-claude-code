@@ -41,7 +41,7 @@ fi
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/glab-install.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
-curl -fsSL --max-time 600 -o "$work/$asset" "$release/$asset" || die 1 "download failed: $release/$asset"
+gitlab_it_fetch 600 "$work/$asset" "$release/$asset" || die 1 "download failed: $release/$asset"
 actual="$(F="$work/$asset" node -e '
   const hash = require("crypto").createHash("sha256");
   hash.update(require("fs").readFileSync(process.env.F));

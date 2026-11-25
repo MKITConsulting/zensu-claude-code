@@ -311,7 +311,7 @@ fi
 
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    check "W24-W60 the lane, gitlab-up, installer, drift and tracking issue checks (skipped: the live tier and its drift job run on Linux and macOS only)" PASS
+    check "W24-W62 the lane, gitlab-up, installer, drift, tracking issue and fetch checks (skipped: the live tier and its drift job run on Linux and macOS only)" PASS
     finish
     ;;
 esac
@@ -631,5 +631,25 @@ expect "W59 a green scheduled run closes the open tracking issue with a comment 
   "$(notify_run success success success 5)" 'rc=0 writes=issue close 5 --comment=RUN;'
 expect "W60 a green scheduled run without an open tracking issue writes nothing" \
   "$(notify_run success success success '')" 'rc=0 writes='
+
+REAL_CURL="$(command -v curl)"
+mkdir -p "$WORK/fakecurl"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$CURL_LOG"\nexec "$REAL_CURL" "$@"\n' > "$WORK/fakecurl/curl"
+chmod 755 "$WORK/fakecurl/curl"
+fetch_run() {
+  local script="$1"
+  shift
+  : > "$WORK/curl.log"
+  CURL_LOG="$WORK/curl.log" REAL_CURL="$REAL_CURL" PATH="$WORK/fakecurl:$PATH" "$@" >/dev/null 2>&1
+  printf 'rc=%s direct=%s calls=%s' "$?" "$(grep -v 'command -v curl >/dev/null' "$script" | grep -cw curl)" \
+    "$(sed -E 's| -o [^ ]+ [^ ]+$| -o FILE URL|' "$WORK/curl.log" | tr '\n' ';')"
+}
+FETCH='-fL --no-progress-meter --retry 3 --retry-all-errors --retry-delay 5 --retry-max-time 120 --proto-redir =https'
+expect "W61 glab-install downloads only through gitlab_it_fetch and hands curl -f, three retries of any error within two minutes, HTTPS-only redirects and 600 s per attempt" \
+  "$(fetch_run "$LIVE/glab-install.sh" install_glab 9.9.9 "$WORK/retried")" "rc=0 direct=0 calls=$FETCH --max-time 600 -o FILE URL;"
+drift_upstream v1.128.0 "$TAGS_CURRENT"
+expect "W62 drift.sh reads every metadata file only through gitlab_it_fetch and hands curl the same flags with 60 s per attempt" \
+  "$(fetch_run "$LIVE/drift.sh" drift_env bash "$LIVE/drift.sh")" \
+  "rc=0 direct=0 calls=$FETCH --max-time 60 -o FILE URL;$FETCH --max-time 60 -o FILE URL;$FETCH --max-time 60 -o FILE URL;"
 
 finish
