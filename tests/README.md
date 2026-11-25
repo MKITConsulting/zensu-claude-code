@@ -190,9 +190,11 @@ runs no suite. Its `drift` job keeps the read-only token and runs
 stable version there is newer than `PLAYWRIGHT_CLI_SOURCE_VERSION`, the version the browser
 consent gate's parser port was measured against, the `drift-issue` job, which holds
 `issues: write` and nothing else, opens or rewrites the issue labelled `playwright-cli-drift`
-with the steps to re-record `tests/structure/fixtures/playwright-cli-argv.v1.json` locally,
+with the steps to re-record `tests/structure/fixtures/playwright-cli-argv.v1.json` and to run
+the fence probe `tests/integration/verify-fence/probe.mjs` locally,
 and it closes that issue once the measured version is the newest again. A red scheduled run
-comments on or opens the issue labelled `playwright-cli-drift-check`.
+comments on or opens the issue labelled `playwright-cli-drift-check`, and a green one closes
+that issue with a comment that links the run.
 `test-playwright-cli-drift.sh` guards the workflow graph, runs the script against fixture
 metadata and the two issue steps against a fake `gh`, and runs three mutants that its own
 cases must catch.
@@ -260,8 +262,9 @@ summary line reads `N PASS / M FAIL / K XFAIL`.
   `dev.zensu.gitlab-it=1` label.
 - **Where it runs.** Pull requests that touch `hooks/lib/zensu-vcs.sh`, this directory or the
   workflow run the pinned lane; the required check is the `GitLab live result` job. A nightly
-  run repeats the pinned lane and, when it fails, comments on the open issue labelled
-  `gitlab-live` or opens one. Both release stages run the pinned matrix as a gate.
+  run repeats the pinned lane. When it fails, it comments on the open issue labelled
+  `gitlab-live` or opens one; when it passes, it closes that issue with a comment that links
+  the run. Both release stages run the pinned matrix as a gate.
 - **Only pinned builds run in CI.** The nightly drift job reads the newest glab release with its
   vendor `checksums.txt` and the Docker Hub tag listing of `gitlab/gitlab-ce`, downloads no
   archive and pulls no image. When upstream released past the pins, it opens or rewrites the

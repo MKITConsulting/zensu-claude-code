@@ -6,6 +6,8 @@ paths:
   - "tests/structure/fixtures/record-zensu-cli-floor-help.js"
   - "hooks/lib/ai-work-preflight-v1.js"
   - "hooks/lib/ai-work-capture-v1.js"
+  - "hooks/lib/ai-work-feature-search-v1.js"
+  - "tests/structure/ai-work-capture.test.js"
   - "hooks/lib/context-auto-load-v1.js"
   - "agents/zensu-plm.md"
   - "skills/implement/references/knowledge-context.md"
@@ -168,7 +170,7 @@ the prose copies above. Tests: the unit file, driven by
 `tests/structure/test-session-start-banner.sh`; `P9a`-`P9d` and `P10a`-`P10f` in
 `tests/structure/test-setup-skill.sh`; `FT8` in `tests/structure/test-skill-workflow-markers.sh`.
 
-**Sites outside this repository.** Seven zensu-cli facts, the last one with the backend behaviour
+**Sites outside this repository.** Eight zensu-cli facts, the last one with the backend behaviour
 behind it, are copied here and nothing checks them against their source:
 
 - the `Not logged in` text of `zensu auth status`. This one fails open: if the CLI rewords it, a
@@ -207,6 +209,20 @@ behind it, are copied here and nothing checks them against their source:
   prompt and in the truncated-pack advice of `hooks/lib/context-auto-load-v1.js` asks for a few
   terms the artifacts use, while `knowledge context-search` takes a task description by its own
   help, so the discovery advice keeps `<specific task question>`;
+- the feature list the AI-work capture preflight searches. `zensu features list --product <id> --json`
+  prints, by its 0.23.0 help, all pages as one envelope `{data, total, page, perPage}`; on
+  2026-11-24 zensu 0.23.0 returned 342 features of the bound product with `total` 342 and
+  `perPage` 342, each carrying `id`, `title`, `slug`, `status`, `tags`, `description`,
+  `product_id`, `deprecated_at`, `replaced_by_feature_id` and `lifecycle`, the fields
+  `hooks/lib/ai-work-feature-search-v1.js` reads. Two drifts fail closed: an envelope whose
+  integer `total` exceeds its rows, and a non-empty list without one record that carries a lower-case
+  UUID `id` and a non-blank `title`, both make the search `unavailable`, so a paged CLI or a
+  renamed `id` or `title` never reads as an empty product. The rest fails open on a rename: a
+  renamed `deprecated_at`, `replaced_by_feature_id` or `lifecycle` lets deprecated, replaced or
+  inactive features back into the candidates, and a renamed `product_id` drops the local
+  product check, so only the CLI's own `--product` filter keeps other products' features out.
+  The unit cases in `tests/structure/ai-work-capture.test.js` build their own lists, so re-read a
+  real list when a zensu-cli release changes `features list`;
 - the Pulse contract of zensu-cli 0.22.0 (`internal/cmd/pulse.go`, `printJSON` in
   `internal/cmd/factory.go`) and of the Zensu backend at `7e5a52185`
   (`backend/internal/handlers/pulse.go`, `backend/internal/services/pulse.go`, migration `000173`).

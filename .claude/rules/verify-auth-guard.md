@@ -250,7 +250,8 @@ literal path into the package in the guard.
   local recipe's loopback `baseUrl` when it is one of the run's origins is the open alternative.
 - Cookies are scoped by host, not by port, and a parent-domain cookie (`.example.com`) is kept
   when a run origin's host lies below it, so the restored session reaches every approved port of
-  a host and a sibling host a redirect lands on.
+  a host and an approved sibling host a redirect lands on; the network fence refuses a redirect
+  to a sibling host outside the run config.
 - The state exists on disk from the login to `open`; a refused prompt or a failed `open` leaves
   it until Phase 4 discards it, and a crash or `SIGKILL` before cleanup leaves it behind. A file swapped between the gate's check and the browser's launch is
   followed, the class of the run-config swap.
@@ -258,7 +259,7 @@ literal path into the package in the guard.
   injected instructions, not a determined actor. What the app renders reaches the model by
   design, which is why the docs demand a dedicated test account with synthetic data.
 - The runtime-signal plane of a signed-in row stays PARTIAL until a trusted sanitizer exists.
-- The integration test drives a real browser only where `playwright-cli` 0.1.24 and Chrome are
+- The integration test drives a real browser only where `playwright-cli` 0.1.25 and Chrome are
   installed; on the Linux CI runners it skips with its reason.
 - Windows is unverified end to end, and no port (`zensu-codex`, `zensu-kiro`,
   `zensu-antigravity`) was included.

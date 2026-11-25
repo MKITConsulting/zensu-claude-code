@@ -160,7 +160,9 @@ fi
 FENCE_RULE="$(grep -n 'takes no \*\*Provide access now\*\*' "$VERIFY_CONSENT" | head -n 1 | cut -d: -f1)"
 FENCE_SWITCH="$(grep -n 'Never offer, set or mention a way to switch the acceptance gate off\.' "$VERIFY_CONSENT" | head -n 1 | cut -d: -f1)"
 if grep -qF "or the driver's fence rules the state out for everyone (a **driver fence**)" <<<"$CONSENT_FLAT" \
-  && grep -qF "A driver fence is a state the driver can never show, whoever drives it. Today there is one: the \`browser\` driver's run config blocks service workers, so a criterion that depends on one (an update prompt, an offline cache, push, background sync) is never observed in that browser." <<<"$CONSENT_FLAT" \
+  && grep -qF 'A driver fence is a state the driver can never show, whoever drives it. No driver has a fence of this kind today.' <<<"$CONSENT_FLAT" \
+  && ! grep -qiF 'service worker' <<<"$CONSENT_FLAT" \
+  && ! grep -qiF 'offline' <<<"$CONSENT_FLAT" \
   && ! grep -qiF 'query' <<<"$CONSENT_FLAT" \
   && ! grep -qiF 'page code' <<<"$CONSENT_FLAT" \
   && grep -qF 'A criterion that a driver fence rules out takes no **Provide access now**, whatever else it needs: no login, account, service or driver lifts the fence.' <<<"$CONSENT_FLAT" \
@@ -169,28 +171,32 @@ if grep -qF "or the driver's fence rules the state out for everyone (a **driver 
   && grep -qF 'put both groups into the same `AskUserQuestion` call as two questions, so the user is still asked once.' <<<"$CONSENT_FLAT" \
   && [ -n "$FENCE_RULE" ] && [ -n "$FENCE_SWITCH" ] && [ -n "$OPT_OPEN" ] \
   && [ "$OPT_OPEN" -lt "$FENCE_RULE" ] && [ "$FENCE_RULE" -lt "$FENCE_SWITCH" ]; then
-  check "A0k the consent rule names the driver fence as today's only one, names neither a query nor page code, and asks about it without the access option whatever else the criterion needs" PASS
+  check "A0k the consent rule keeps the driver fence as a category no driver fills today, names no service worker, offline case, query or page code, and asks about a fence without the access option whatever else the criterion needs" PASS
 else
-  check "A0k the consent rule names the driver fence as today's only one, names neither a query nor page code, and asks about it without the access option whatever else the criterion needs" FAIL
+  check "A0k the consent rule keeps the driver fence as a category no driver fills today, names no service worker, offline case, query or page code, and asks about a fence without the access option whatever else the criterion needs" FAIL
 fi
-if grep -qF 'Nor can one that a driver fence rules out (`{plugin_root}/skills/verify-feature/rules/acceptance-consent.md` §"What `partial` means"): the `browser` driver'"'"'s run config blocks service workers, so a criterion that depends on one (an update prompt, an offline cache, push, background sync) is never observed in that browser.' "$TDD_SKILL" \
+if grep -qF 'Nor can one that a driver fence rules out, a state the driver can never show, whoever drives it (`{plugin_root}/skills/verify-feature/rules/acceptance-consent.md` §"What `partial` means" names them; no driver has one today).' "$TDD_SKILL" \
+  && ! grep -qF 'blocks service workers' "$TDD_SKILL" \
   && grep -qF 'it is `missing` when it needs anything the observability item lists' "$TDD_SKILL" \
   && grep -qF 'A gap that is a driver fence takes only (b) and (c): no access lifts the fence, so never offer (a) for it, and name the fence in the question.' "$TDD_SKILL"; then
-  check "A0l planning names a service-worker criterion as an observability gap and offers no access option for a driver fence" PASS
+  check "A0l planning names a driver fence as an observability gap no driver has today and offers no access option for one" PASS
 else
-  check "A0l planning names a service-worker criterion as an observability gap and offers no access option for a driver fence" FAIL
+  check "A0l planning names a driver fence as an observability gap no driver has today and offers no access option for one" FAIL
 fi
 SPEC_TEMPLATE="$PLUGIN_DIR/templates/autopilot-spec.md"
 VALIDATE_FLAT="$(tr '\n' ' ' < "$VALIDATE_RULE" 2>/dev/null | tr -s ' ')"
 SPEC_FLAT="$(tr '\n' ' ' < "$SPEC_TEMPLATE" 2>/dev/null | tr -s ' ')"
 GATES_FLAT="$(tr '\n' ' ' < "$GATES_DOC" 2>/dev/null | tr -s ' ')"
-if grep -qF 'or because its driver cannot run here, or because a driver fence rules the state out (the `browser` driver blocks service workers). Name that cause in the evidence.' <<<"$VALIDATE_FLAT" \
+if grep -qF 'or because its driver cannot run here, or because a driver fence rules the state out (no driver has one today). Name that cause in the evidence.' <<<"$VALIDATE_FLAT" \
   && grep -qF '{credentials / account / non-loopback host / signed build / driver cannot run here / driver fence}' "$PLAN_TEMPLATE" \
   && grep -qF '{credentials / account / non-loopback host / signed build / driver cannot run here / driver fence}' "$SPEC_TEMPLATE" \
-  && grep -qF 'or its driver cannot run here, or a driver fence rules the state out (the `browser` driver blocks service workers). VALIDATE accepts a `partial`' <<<"$SPEC_FLAT" \
-  && grep -qF 'or its driver cannot run here, or a driver fence rules the state out (the `browser` driver blocks service workers). A criterion it could observe but did not prove is verified again, or recorded `fail`.' "$CONFIG_DOC" \
-  && grep -qF 'A driver fence is one more such cause: a state the driver can never show, whoever drives it, which today means a service worker under the `browser` driver.' <<<"$GATES_FLAT" \
-  && grep -qF 'a driver fence takes only the last two, because no access lifts it' <<<"$GATES_FLAT"; then
+  && grep -qF 'or its driver cannot run here, or a driver fence rules the state out (no driver has one today). VALIDATE accepts a `partial`' <<<"$SPEC_FLAT" \
+  && grep -qF 'or its driver cannot run here, or a driver fence rules the state out (no driver has one today). A criterion it could observe but did not prove is verified again, or recorded `fail`.' "$CONFIG_DOC" \
+  && grep -qF "A driver fence is one more such cause: a state the driver can never show, whoever drives it. No driver has one today: the \`browser\` driver's run config allows service workers." <<<"$GATES_FLAT" \
+  && grep -qF 'a driver fence takes only the last two, because no access lifts it' <<<"$GATES_FLAT" \
+  && ! grep -qF 'blocks service workers' <<<"$VALIDATE_FLAT" \
+  && ! grep -qF 'blocks service workers' <<<"$SPEC_FLAT" \
+  && ! grep -qF 'blocks service workers' "$CONFIG_DOC"; then
   check "A0m every other cause list names the driver fence: the VALIDATE rule, both plan templates and the configuration and gates docs" PASS
 else
   check "A0m every other cause list names the driver fence: the VALIDATE rule, both plan templates and the configuration and gates docs" FAIL

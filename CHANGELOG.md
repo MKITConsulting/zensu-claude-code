@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **`/zensu:verify-feature` fences its browser at the network level**: the browser now connects
+  only to the hosts and ports of the run's origins. A WebSocket endpoint on another host or port,
+  a shared worker's request to one, and the target of a redirect used to pass and now fail with
+  `net::ERR_PROXY_CONNECTION_FAILED` unless the run declares them: list each one like an API
+  origin, in the recipe's `validate.networkOnly.origins` and, under a policy, in its
+  `networkOnlyOrigins`, a WebSocket endpoint by the `http` or `https` origin of its host and
+  port. A plain `ws://` endpoint outside loopback has no such origin and is no longer reached.
+  WebRTC over UDP is still not fenced. The fence was measured with Google Chrome on macOS and with
+  Chrome for Testing on macOS and on Linux aarch64; on Windows, on Linux x86-64 and with the Edge
+  and prerelease Chrome channels it is unmeasured, and only the request interception of earlier
+  releases is known to hold there.
+- **Service workers run in the verify browser**: an application that registers one now behaves
+  there as it does for a user, with a cache its worker fills on the first load and a page a new
+  worker can take over. An update prompt, a filled cache and a page under a worker's control can
+  be verified; offline behaviour, background sync and push cannot.
+- **A session that was open across the update keeps its old fence**: it keeps the installation it
+  loaded, helper and gate together, until it ends or `/reload-plugins` runs in it. After that the
+  gate refuses a run config an earlier helper wrote, with a reason that says to write it again
+  with the run-config helper of this installation, and an earlier gate refuses a run config this
+  release writes. One remedy covers every such case: start `/zensu:verify-feature` again in a
+  session started or reloaded after the update, so that helper and gate come from one
+  installation.
+- **verify-feature**: the browser consent gate is now measured against `playwright-cli`
+  0.1.25, and the run-config helper refuses to start a browser verification run on any other
+  version, 0.1.24 included. Upgrade with `npm install -g @playwright/cli@0.1.25`.
+  `brew install playwright-cli` is unpinned: the helper refuses it unless Homebrew ships
+  exactly that version. A session that was running when the plugin updated keeps its earlier
+  plugin root, whose helper still accepts only 0.1.24 and tells you to install 0.1.24 again; do
+  not follow it, but start a fresh session for `/zensu:verify-feature` after upgrading
+  `playwright-cli`.
+
 ## [0.42.0] - 2026-11-20
 
 ### Added

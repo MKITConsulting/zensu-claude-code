@@ -9,19 +9,22 @@ const cp = require('node:child_process');
 const goalScope = require('./ai-work-goal-scope-v1.js');
 const recovery = require('./ai-work-recovery-v1.js');
 const compatibility = require('./ai-work-preflight-v1.js');
+const featureSearch = require('./ai-work-feature-search-v1.js');
 const { isDeepStrictEqual } = require('node:util');
 const core = require('./session-control-core-v1.js');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const FEATURE_LIST_BUFFER = 16 * 1024 * 1024;
+class UsageError extends Error {}
 
 function text(value, max) {
   return typeof value === 'string' && value.trim().length > 0 && value.length <= max && !/[\x00-\x1f\x7f]/.test(value);
 }
-function execute(command, args, cwd) {
+function execute(command, args, cwd, maxBuffer = 1024 * 1024) {
   const env = { ...process.env };
   // Git hooks may export discovery variables belonging to another checkout.
   for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
-  const r = cp.spawnSync(command, args, { cwd, env, encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024, windowsHide: true });
+  const r = cp.spawnSync(command, args, { cwd, env, encoding: 'utf8', timeout: 15000, maxBuffer, windowsHide: true });
   if (r.error || r.status !== 0) throw new Error(`${command === 'git' ? 'Git' : 'CLI'} capture operation failed; capture is incomplete. Check personal OAuth login, permissions, server compatibility and connection, then retry the same task.`);
   return r.stdout.trim();
 }
@@ -96,8 +99,18 @@ function detail(s, root) {
   return d;
 }
 function checkCLI(root) { return compatibility.check(root); }
+function searchFeatures(productId, query, root) {
+  let found;
+  try {
+    found = featureSearch.search(JSON.parse(execute('zensu', ['features', 'list', '--product', productId, '--json'], root, FEATURE_LIST_BUFFER)), productId, query);
+  } catch {
+    return { featureSearch: 'unavailable' };
+  }
+  return { featureSearch: featureSearch.status(query, found), ...found };
+}
 
 function preflight(options) {
+  if (Object.hasOwn(options, 'query') && !featureSearch.usable(options.query)) throw new UsageError(featureSearch.QUERY_REFUSAL);
   const { root, file } = location(options.workspace, options.session);
   if (compatibility.paused(file)) return { status: 'capture_disabled' };
   const support = checkCLI(root);
@@ -105,9 +118,9 @@ function preflight(options) {
   const goal = goalScope.fromOptions(options);
   try {
     const context = cli(goalScope.contextArgs(goal), root);
-    if (context.ready === false && context.workScope === 'unassigned') return { ...support, status: 'product_confirmation_required', reason: 'Ask once for the exact product and this goal\'s feature or maintenance scope before implementation. Bind only after explicit human confirmation; otherwise continue without capture.' };
+    if (context.ready === false && context.workScope === 'unassigned') return { ...support, status: 'product_confirmation_required', reason: 'Ask once for the exact product to bind before implementation. Bind only after explicit human confirmation; otherwise continue without capture. After binding, run preflight again with --query; it searches the bound product\'s features for the feature question.' };
     const scope = confirmedScope(context, options['cross-product-reason'] ?? '');
-    if (!goal) return { ...support, status: 'feature_confirmation_required', productId: scope.productId, reason: 'Reuse the confirmed product. Ask once for this goal\'s exact feature or an explicit maintenance reason; otherwise continue without capture.' };
+    if (!goal) return { ...support, status: 'feature_confirmation_required', productId: scope.productId, ...searchFeatures(scope.productId, options.query, root), reason: `Reuse the confirmed product and ${featureSearch.QUESTION} Without an answer, continue without capture.` };
     goalScope.confirm(context, goal);
     return { ...support, status: 'ready', ...scope, ...goal };
   } catch {
@@ -274,10 +287,12 @@ function main(argv) {
   }
   const options = {};
   for (let i = 0; i < args.length; i += 2) {
-    if (!['--workspace', '--session', '--task', '--title', '--criteria', '--run-kind', '--cross-product-reason', '--feature', '--feature-revision', '--maintenance-reason', '--review-file'].includes(args[i]) || args[i + 1] === undefined || Object.hasOwn(options, args[i].slice(2))) throw new Error('Invalid capture arguments');
+    if (!args[i].startsWith('--')) throw new UsageError('Zensu AI work capture refused: pass each value as one quoted argument, such as --query "invoice export".');
+    if (!['--workspace', '--session', '--task', '--title', '--criteria', '--run-kind', '--cross-product-reason', '--feature', '--feature-revision', '--maintenance-reason', '--review-file', '--query'].includes(args[i]) || args[i + 1] === undefined || Object.hasOwn(options, args[i].slice(2))) throw new Error('Invalid capture arguments');
     options[args[i].slice(2)] = args[i + 1];
   }
   if (action === 'begin' && options['review-file']) throw new Error('Review details belong to checkpoint');
+  if (action !== 'preflight' && Object.hasOwn(options, 'query')) throw new UsageError('Zensu AI work capture refused: only preflight takes --query. Run this action again without it.');
   const operations = { begin, checkpoint, preflight, pause };
   if (!Object.hasOwn(operations, action)) throw new Error('Use preflight, pause, begin or checkpoint; decisions are only available in the web application');
   process.stdout.write(JSON.stringify(operations[action](options)) + '\n');
@@ -286,7 +301,7 @@ if (require.main === module) {
   try { main(process.argv.slice(2)); } catch (e) {
     // Never replay server bodies, CLI stderr or hook input into the agent context.
     const output = process.argv[2] === 'hook' ? process.stdout : process.stderr;
-    output.write('Zensu AI work capture incomplete. No acceptance was recorded. Check confirmed product binding, personal OAuth login, capture state, permissions and connectivity; retry the same task.\n');
+    output.write(e instanceof UsageError ? `${e.message}\n` : 'Zensu AI work capture incomplete. No acceptance was recorded. Check confirmed product binding, personal OAuth login, capture state, permissions and connectivity; retry the same task.\n');
     process.exitCode = process.argv[2] === 'hook' ? 0 : 1;
   }
 }

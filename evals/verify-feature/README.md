@@ -34,9 +34,10 @@ file name alone is not evidence.
 The runner exports `ZENSU_VERIFY_NAVIGATION_POLICY_V1` for the reserved fixture origin, and the
 remote providers export it for `https://example.com`, the second one with `https://example.org` as a network-only origin, so the gate runs in policy mode: a
 non-interactive Promptfoo run cannot answer the consent prompt that consent mode opens for a new
-loopback origin. The runner also clears every `PLAYWRIGHT_MCP_*` and `PWTEST_*` variable from its
-environment: the gate refuses to open a browser while a `PLAYWRIGHT_MCP_*` variable is set, and
-`PWTEST_CLI_GLOBAL_CONFIG` moves the global `playwright-cli` config that the gate judges.
+loopback origin. The runner also clears every `PLAYWRIGHT_MCP_*` and `PWTEST_*` variable and
+`PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK` from its environment: the gate refuses to open a
+browser while a `PLAYWRIGHT_MCP_*` variable or `PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK` is set,
+and `PWTEST_CLI_GLOBAL_CONFIG` moves the global `playwright-cli` config that the gate judges.
 
 ## Run
 
@@ -53,7 +54,7 @@ ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
 ```
 
 The runner requires authenticated `claude`, `promptfoo`, and `playwright-cli` on `PATH` (the
-run-config helper accepts only the measured version, `playwright-cli` 0.1.24, and the grader in
+run-config helper accepts only the measured version, `playwright-cli` 0.1.25, and the grader in
 `assertions/transcript-check.js` parses its response lines), plus a Chrome or Chromium build that
 `playwright-cli` can drive. The runner never installs a browser. It sets
 `ZENSU_PLUGIN_DIR_OVERRIDE` to this checkout, uses a temporary writable `PROMPTFOO_CONFIG_DIR`,
