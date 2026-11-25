@@ -782,14 +782,16 @@ an entry that names another version, or do not list the measured version: an unp
 measured version breaks the pinned install command. The `drift-issue` job holds
 `issues: write` and nothing else, checks out nothing and runs only after a successful drift
 job; it opens the issue labelled `playwright-cli-drift`, rewrites it when the marker changes,
-and closes it when the report is empty. A red scheduled run comments on or opens the issue
-labelled `playwright-cli-drift-check`; the label, not the title, finds each issue. One
+and closes it when the report is empty. The `notify` job runs after every scheduled run and
+reads the results of both jobs through `env:`: a red run comments on or opens the issue
+labelled `playwright-cli-drift-check`, and a green run closes that issue with a comment that
+links the run; the label, not the title, finds each issue. One
 concurrency group serializes every run, so a dispatch and the nightly run never race on an
 issue. A dispatch runs both jobs on the ref it names, so a dispatch from a branch writes the
 issue from that branch's constant until the next nightly run on `main` corrects it. Not read:
 `dist-tags`, publish times and deprecations. `tests/structure/test-playwright-cli-drift.sh`
 pins the workflow graph, runs the script against fixture metadata with spies that admit one
-`curl` and no package manager, archiver or CLI, runs the compare, issue and red-run steps
+`curl` and no package manager, archiver or CLI, runs the compare, issue and `notify` steps
 against a fake `gh`, and requires three mutants (release order by text, an unanchored stable
 filter, a whole-body marker match) to give the wrong answer their cases refuse. Like
 `tests/structure/test-gitlab-live-workflow.sh`, the guard of the GitLab `drift` and
