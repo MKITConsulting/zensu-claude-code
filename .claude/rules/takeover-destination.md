@@ -78,8 +78,8 @@ four things hold together:
   `retireAnchors` only under `--apply`, and `WR1`, `WR3` and `FK3` in the verdict suite pin
   that. An unblocked dry run still answers with text written for the end of a takeover: `READY`
   prints the `ARCHIVE` lines with or without `--apply` (`WR5`, `WR11`), `RELEASABLE` ends in a
-  hint to run `--apply`, and a busy source names `--force` as the answer to a takeover the user
-  confirmed. So every carrier says that before the yes its `ARCHIVE` line is not relayed and
+  hint to run `--apply`, held for each session it names (the hold bullet below), and a busy
+  source names `--force` as the answer to a takeover the user confirmed. So every carrier says that before the yes its `ARCHIVE` line is not relayed and
   its hints are not followed. The dry run measures the old tree in place, so what it names
   about that tree binds the create route: after a move nothing is left at the recorded path
   and `release` is ready at once (`WR12`), and the confirmation names a nested repository or
@@ -113,7 +113,15 @@ four things hold together:
   the verdict is chosen. To the continuation of a linked session they name the parent and the
   linked sessions beside it. So steps 0 and 1 keep them for the plan confirmation, which names
   each session, and step 4 releases only once each named session's work is carried over, by
-  its continuation's report or the user's word, or the user leaves it behind. A `BLOCKED`
+  its continuation's report or the user's word, or the user leaves it behind. The `RELEASABLE`
+  answer's own closing hint holds the same way: `cmdRelease` hands the `would also end` lines
+  it prints to `releasableHint`, a top-level function of its own because `H16` compares it in
+  both copies while it skips `cmdRelease`. It picks the hint through `alsoEnd.length > 0` and
+  then reads `Hold the release until the work of each session whose keep anchor it would also
+  end is carried over or the user leaves it behind, and only then run release again with
+  --apply`, with ` --force` when the dry run took it, while a dry run that names no other
+  session keeps the plain `Run release again with --apply` hint. Its `--json` payload carries
+  no hint, because `message` is `null` for a `releasable` verdict. A `BLOCKED`
   text answer prints none of those lines, and an old session that is `BUSY` or unmeasured
   blocks every dry run without `--force` (`WR8`), the plan pass included. So `--apply`
   follows only a dry run that answered `RELEASABLE` or `READY`: after a `BLOCKED` one the dry
@@ -138,25 +146,40 @@ at-once report, the wait, the hold and that no line opens with `LAST,`; `T41` in
 and command references and each script's release step, and holds the quoted dry-run line to
 `otherNotes('would also end', null)` and its line template in the script, the `--json` form
 to the owner expression, the `anchors.push` statement and the payload key of `cmdRelease`,
-and both busy-source blocker texts to their `first without --apply` wording; each
+both busy-source blocker texts to their `first without --apply` wording, and the releasable
+dry run's hint to the call that hands `releasableHint` the lines it printed and to every line
+of that function: its `--apply` operand, its `alsoEnd.length > 0` condition, its hold hint as
+the true branch and its plain hint as the false branch; `H16` in
+`tests/structure/test-session-hub-plugin.sh` holds `releasableHint` equal in both copies; each
 `T41-control` mutant removes or rewords one pinned site in the takeover, handoff or command
 reference or in the script, three of them plant the retired wording beside the current one,
 in the takeover reference, the handoff reference and the script, and those three, the step-0
-and flow-5 `--json` mutants, the three mutants of the `--json` sites in the script and the
-blocker-text mutant must fail as their own arm and as nothing else; `WR9c` in
+and flow-5 `--json` mutants, the three mutants of the `--json` sites in the script, the
+blocker-text mutant and the five hint mutants, which reword the hold hint, drop its condition,
+reword the plain hint, hand the function no printed lines and drop `--force` from its operand,
+must fail as their own arm and as nothing else; `WR9c` in
 `tests/structure/test-session-trail-verdict.sh` runs the companion's `release` against a busy
 old session beside another session's anchor: the dry run answers `BLOCKED`, its blocker asks
 for the forced run without `--apply` first and its text names no other session, its `--json`
 form lists that session as an `ended-session` anchor with the action `end`, and the dry run
-repeated with `--force` answers `RELEASABLE`, names that session and changes nothing; and the
-step-order needles of `CH6` and `LS14` in the same suite name the heading. Known gaps: the order, the wait and the hold are prose, so nothing checks that a
-session released before it continued the work, waited, or applied only after a dry run that
-named the other sessions; `cmdRelease` itself still ends the anchor of every session that is
-not running, and a refusal there would change what `WR9` pins; a session whose keep anchor is
-no longer live, aged by its SessionEnd or past its idle window, is named by neither form of
-the dry run although its work may still lie in the tree, so the release waits for it only
-where the brief names it as a linked session that shared the checkout; `WR9c` grades the
-companion's copy alone, and PLM's `cmdRelease` is held to it only by the `T41` text pins; a
+repeated with `--force` answers `RELEASABLE`, names that session, holds its `--apply --force`
+hint until that session's work is carried over or left behind, prints no unconditional
+`Run release again with --apply` line and changes nothing; `WR9d` then runs PLM's copy on that
+same forced dry run, measured on its own, and requires the same answer, line and hint and that
+it changed nothing; `WR9` requires the hold hint without `--force` on its unforced dry run;
+`WR3b` requires the plain hint, with and without `--force`, on a dry run that names no other
+session; and the step-order needles of `CH6` and `LS14` in the same suite name the heading.
+Known gaps: the order, the wait and the hold are prose, so nothing checks that a session
+released before it continued the work, waited, or applied only after a dry run that named the
+other sessions; `cmdRelease` itself still ends the anchor of every session that is not
+running, and a refusal there would change what `WR9` pins; a session whose keep anchor is no
+longer live, aged by its SessionEnd or past its idle window, is named by neither form of the
+dry run although its work may still lie in the tree, so the release waits for it only where
+the brief names it as a linked session that shared the checkout; PLM's `cmdRelease` runs in
+`WR9d` on one forced dry run and, for its Autopilot blockers and its refusal of `--apply` on a
+blocked tree, in `AP4`, `AP6`, `AP7`, `AP9` and `AP11` under `[plm]` and in `AP10`'s byte
+comparison; of its other paths only the sites `T41` pins by text are held to the companion's,
+and the rest, its other blocker texts and its `RELEASED` branch among them, by nothing; a
 session whose process ends between the dry run and the `--apply` is named only afterwards, by
 the `also ended` line and the `ARCHIVE` line; a session learns of another's carry-over only
 from that session's own report or from the user, and the continuation of a linked session

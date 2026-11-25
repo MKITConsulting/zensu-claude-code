@@ -2861,8 +2861,13 @@ release_timing_sites() {
     'says that it would also end the keep anchor of another session, until the work of that session is carried over or the user leaves it behind'; do
     printf '%s\n' "$code" | grep -qF -- "$n" || bad="$bad [trail:$n]"
   done
-  printf '%s\n' "$code" | grep -qF -- "...otherNotes('would also end', null)," || bad="$bad trail-dry-run-note-call"
+  printf '%s\n' "$code" | grep -qxF -- "    const alsoEnd = otherNotes('would also end', null);" || bad="$bad trail-dry-run-note-call"
   printf '%s\n' "$code" | grep -qF -- '${verb} the keep anchor of session ${sessionTag(a.sessionId)}, which is not running`' || bad="$bad trail-dry-run-note-text"
+  { printf '%s\n' "$code" | grep -qxF -- '      ...alsoEnd,' && printf '%s\n' "$code" | grep -qxF -- '      releasableHint(pad, alsoEnd, opts.force),'; } || bad="$bad trail-dry-run-hint-call"
+  printf '%s\n' "$code" | grep -qxF -- "  const apply = force ? '--apply --force' : '--apply';" || bad="$bad trail-dry-run-hint-apply"
+  printf '%s\n' "$code" | grep -qxF -- '  return alsoEnd.length > 0' || bad="$bad trail-dry-run-hold-condition"
+  printf '%s\n' "$code" | grep -qxF -- '    ? `${pad}Hold the release until the work of each session whose keep anchor it would also end is carried over or the user leaves it behind, and only then run release again with ${apply}. It then tells you that the old session can be archived or removed.`' || bad="$bad trail-dry-run-hold-hint"
+  printf '%s\n' "$code" | grep -qxF -- '    : `${pad}Run release again with ${apply}. It then tells you that the old session can be archived or removed.`;' || bad="$bad trail-dry-run-plain-hint"
   printf '%s\n' "$code" | grep -qF -- "known ? (known.live ? 'live-session' : 'ended-session') : 'unattributed';" || bad="$bad trail-json-anchor-owner"
   printf '%s\n' "$code" | grep -qF -- "anchors.push({ key: entry.key, owner, sessionId: ownerId, state: 'live', lastSeenAt: new Date(entry.record.lastSeenAt).toISOString(), action: ends ? 'end' : 'keep' });" || bad="$bad trail-json-anchor-entry"
   printf '%s\n' "$code" | grep -qxF -- '    anchors,' || bad="$bad trail-json-anchor-key"
@@ -2872,11 +2877,11 @@ release_timing_sites() {
 }
 T41_BAD="$(release_timing_sites "$REF_TAKEOVER" "$REF_HANDOFF" "$REF_ARCHIVE" "$REF_COMMANDS" "$TRAIL_MJS")"
 [ -z "$T41_BAD" ] \
-  && check "T41 [hub] the takeover reference releases the old session after the linked sessions, the chips and the Autopilot hand-over and before its remaining work, its plan pass runs the release dry run and the plan confirmation carries the blockers, the archive is reported at once with the wait for linked sessions, the release is held back for every session the brief or the dry run names as sharing the old worktree and applied only after a dry run that answered RELEASABLE or READY, and flow 5, the archive reference, the release row and the script's release step follow and quote the dry-run line and the --json anchor entry as the script writes them" PASS \
+  && check "T41 [hub] the takeover reference releases the old session after the linked sessions, the chips and the Autopilot hand-over and before its remaining work, its plan pass runs the release dry run and the plan confirmation carries the blockers, the archive is reported at once with the wait for linked sessions, the release is held back for every session the brief or the dry run names as sharing the old worktree and applied only after a dry run that answered RELEASABLE or READY, and flow 5, the archive reference, the release row and the script's release step follow and quote the dry-run line and the --json anchor entry as the script writes them, and the script's releasable dry run holds its --apply hint for each session it names that way and keeps its plain hint otherwise" PASS \
   || check "T41 [hub] release timing:$T41_BAD" FAIL
 T41_BAD="$(release_timing_sites "$PLM_REF_TAKEOVER" "$PLM_SKILL_DIR/references/handoff.md" "$PLM_SKILL_DIR/references/archive.md" "$PLM_REF_COMMANDS" "$PLM_TRAIL_MJS")"
 [ -z "$T41_BAD" ] \
-  && check "T41 [plm] PLM's frozen copy carries the same release timing and the same hold in its takeover, handoff, archive and command references and in its script's release step" PASS \
+  && check "T41 [plm] PLM's frozen copy carries the same release timing and the same hold in its takeover, handoff, archive and command references, in its script's release step and in its releasable dry-run hint" PASS \
   || check "T41 [plm] release timing:$T41_BAD" FAIL
 T41_SANDBOX="$(mktemp -d -t session-trail-t41-XXXXXX)"
 for spec in \
@@ -2905,7 +2910,12 @@ for spec in \
   "row-json|[commands:a \`BLOCKED\` one prints none|a release row that names the other sessions by their text line alone" \
   "json-owner|=trail-json-anchor-owner|a script whose release payload names the owner of an ended session's anchor in other words" \
   "json-entry|=trail-json-anchor-entry|a script whose release payload names the action of an anchor it would end in other words" \
-  "json-key|=trail-json-anchor-key|a script whose release payload carries the anchors under another key"; do
+  "json-key|=trail-json-anchor-key|a script whose release payload carries the anchors under another key" \
+  "hold-hint|=trail-dry-run-hold-hint|a script whose releasable dry run rewords its hold hint" \
+  "hold-condition|=trail-dry-run-hold-condition|a script whose releasable dry run never picks its hold hint" \
+  "plain-hint|=trail-dry-run-plain-hint|a script whose releasable dry run rewords its plain hint" \
+  "hint-call|=trail-dry-run-hint-call|a script whose releasable dry run picks its hint without the would-also-end lines it printed" \
+  "hint-apply|=trail-dry-run-hint-apply|a script whose releasable hint drops the --force its dry run took"; do
   mode="${spec%%|*}"; rest="${spec#*|}"; want="${rest%%|*}"; what="${rest#*|}"
   T41_ERR="$(node -e '
     const fs = require("fs");
@@ -2949,6 +2959,11 @@ for spec in \
     if (mode === "json-owner") s = swap(s, "(known.live ? \x27live-session\x27 : \x27ended-session\x27)", "(known.live ? \x27live-session\x27 : \x27ended\x27)");
     if (mode === "json-entry") s = swap(s, "action: ends ? \x27end\x27 : \x27keep\x27 });", "action: ends ? \x27retire\x27 : \x27keep\x27 });");
     if (mode === "json-key") s = swap(s, "\n    anchors,\n", "\n    keepAnchors: anchors,\n");
+    if (mode === "hold-hint") s = swap(s, "? `${pad}Hold the release until the work of each session whose keep anchor it would also end", "? `${pad}Wait for the sessions named above");
+    if (mode === "hold-condition") s = swap(s, "\n  return alsoEnd.length > 0\n", "\n  return false\n");
+    if (mode === "plain-hint") s = swap(s, ": `${pad}Run release again with ${apply}", ": `${pad}Apply the release with ${apply}");
+    if (mode === "hint-call") s = swap(s, "releasableHint(pad, alsoEnd, opts.force)", "releasableHint(pad, [], opts.force)");
+    if (mode === "hint-apply") s = swap(s, "const apply = force ? \x27--apply --force\x27 : \x27--apply\x27;", "const apply = \x27--apply\x27;");
     fs.writeFileSync(dir + "/takeover.md", t);
     fs.writeFileSync(dir + "/trail.mjs", s);
     fs.writeFileSync(dir + "/handoff.md", h);

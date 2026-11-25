@@ -6593,6 +6593,13 @@ function releaseArchiveLines(r, subject, v, state, others) {
   return lines;
 }
 
+function releasableHint(pad, alsoEnd, force) {
+  const apply = force ? '--apply --force' : '--apply';
+  return alsoEnd.length > 0
+    ? `${pad}Hold the release until the work of each session whose keep anchor it would also end is carried over or the user leaves it behind, and only then run release again with ${apply}. It then tells you that the old session can be archived or removed.`
+    : `${pad}Run release again with ${apply}. It then tells you that the old session can be archived or removed.`;
+}
+
 function cmdRelease(opts) {
   const r = hydrate(resolve(opts, opts._[1], 'a session never releases itself'));
   const selfId = selfSessionId();
@@ -6754,11 +6761,12 @@ function cmdRelease(opts) {
     lines = [head('READY'), `${pad}${why}`, ...archiveText];
   } else if (!opts.apply) {
     verdict = 'releasable';
+    const alsoEnd = otherNotes('would also end', null);
     lines = [
       `${head('RELEASABLE')}   ${where}`,
       `${pad}would end ${endedNoun(toEnd.length)} and remove the ${keep.KEEP_FILENAME} marker; nothing was changed`,
-      ...otherNotes('would also end', null),
-      `${pad}Run release again with --apply${opts.force ? ' --force' : ''}. It then tells you that the old session can be archived or removed.`,
+      ...alsoEnd,
+      releasableHint(pad, alsoEnd, opts.force),
     ];
   } else {
     const result = keep.retireAnchors(subject.root, toEnd, now, idleMs);
