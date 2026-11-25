@@ -6580,6 +6580,94 @@ test('adoptContext refuses with a typed error a caller can branch on', () => {
   assert.equal(core.readContext(f.readerOptions).plugin_root, fs.realpathSync.native(f.pluginRoot));
 });
 
+test('isInterruptedAdoptionCopy answers true only for a byte copy or a cut-short prefix of the live record', () => {
+  const f = prunedReaderFixture();
+  const key = core.sessionKey(RAW_SESSION);
+  const record = fs.readFileSync(f.recordFile);
+  const copy = core.supersededRecordFile(f.recordsDir, key, '9.8.7');
+  const answer = () => core.isInterruptedAdoptionCopy(f.recordsDir, key, '9.8.7');
+  assert.equal(answer(), false);
+  for (const bytes of [record, record.subarray(0, 7), Buffer.alloc(0)]) {
+    fs.writeFileSync(copy, bytes);
+    assert.equal(answer(), true, `${bytes.length} of ${record.length} bytes`);
+  }
+  const altered = Buffer.from(record);
+  altered[altered.length - 3] ^= 1;
+  for (const bytes of [altered, Buffer.concat([record, Buffer.from(' ')]), Buffer.from('{}')]) {
+    fs.writeFileSync(copy, bytes);
+    assert.equal(answer(), false, `${bytes.length} of ${record.length} bytes`);
+  }
+  fs.writeFileSync(copy, record);
+  const twin = path.join(f.root, 'twin.json');
+  fs.linkSync(copy, twin);
+  assert.equal(answer(), false);
+  fs.rmSync(twin);
+  fs.rmSync(copy);
+  fs.mkdirSync(copy);
+  assert.equal(answer(), false);
+  fs.rmdirSync(copy);
+  let linked = true;
+  try {
+    fs.symlinkSync(f.recordFile, copy);
+  } catch (error) {
+    if (error.code !== 'EPERM' && error.code !== 'EACCES') throw error;
+    linked = false;
+  }
+  if (linked) {
+    assert.equal(answer(), false);
+    fs.rmSync(copy);
+    fs.symlinkSync(path.join(f.root, 'no-such-record.json'), copy);
+    assert.equal(answer(), false);
+    fs.rmSync(copy);
+  }
+  assert.equal(core.isInterruptedAdoptionCopy(f.recordsDir, key, '../9.8.7'), false);
+});
+
+test('adoptContext completes an interrupted adoption over a byte copy or a cut-short copy of the live record', () => {
+  for (const cut of [null, 11, 0]) {
+    const f = prunedReaderFixture();
+    const successor = successorInstallation(f, '10.0.0');
+    const key = core.sessionKey(RAW_SESSION);
+    const record = fs.readFileSync(f.recordFile);
+    const copy = core.supersededRecordFile(f.recordsDir, key, '9.8.7');
+    fs.writeFileSync(copy, cut === null ? record : record.subarray(0, cut));
+    const adopted = core.adoptContext(adoptionOptions(f, successor));
+    assert.equal(path.basename(adopted.supersededFile), path.basename(copy));
+    assert.deepEqual(fs.readFileSync(adopted.supersededFile), record, `cut ${cut}`);
+    assert.equal(core.readContext(f.readerOptions).plugin_root, successor);
+  }
+});
+
+test('adoptContext still refuses a superseded file it cannot prove a copy of the live record, and leaves both files untouched', () => {
+  const plants = [
+    (copy, record) => {
+      const altered = Buffer.from(record);
+      altered[1] ^= 1;
+      fs.writeFileSync(copy, altered);
+    },
+    (copy, record) => fs.writeFileSync(copy, Buffer.concat([record, Buffer.from('\n')])),
+    (copy, record, f) => {
+      fs.writeFileSync(copy, record);
+      fs.linkSync(copy, path.join(f.root, 'twin.json'));
+    },
+  ];
+  for (const plant of plants) {
+    const f = prunedReaderFixture();
+    const successor = successorInstallation(f, '10.0.0');
+    const key = core.sessionKey(RAW_SESSION);
+    const record = fs.readFileSync(f.recordFile);
+    const copy = core.supersededRecordFile(f.recordsDir, key, '9.8.7');
+    plant(copy, record, f);
+    const planted = fs.readFileSync(copy);
+    assert.throws(
+      () => core.adoptContext(adoptionOptions(f, successor)),
+      (error) => core.isSupersededRecordConflict(error) && path.basename(error.supersededFile) === path.basename(copy),
+    );
+    assert.deepEqual(fs.readFileSync(copy), planted);
+    assert.deepEqual(fs.readFileSync(f.recordFile), record);
+  }
+});
+
 // Exported surface is a one-way door: adding an export later is free, removing one
 // later is the break, and the port obligations invite a second host to implement
 // whatever this module exports. `prunedPluginRootSession` was added for symmetry

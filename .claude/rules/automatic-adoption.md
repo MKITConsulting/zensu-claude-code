@@ -58,8 +58,10 @@ first three rungs ARE `previewAdoption`, and `adoptForHook` starts from it, so t
 read-only report, the binder's `adoption-refusal` mode and the adoption cannot disagree
 about one record. The probe runs first, so `opted-out` only stands for a record that
 would otherwise have been adopted. The crash-resume check is an `lstat` of
-`supersededRecordFile(...)`: an interrupted adoption leaves that file behind and
-`adoptContext`'s `COPYFILE_EXCL` refuses every later attempt, a dangling link included.
+`supersededRecordFile(...)` and then `isInterruptedAdoptionCopy`: a copy an interrupted
+adoption left of this record is no conflict (§"Interrupted adoptions"), and every other
+file there refuses, because `adoptContext`'s `COPYFILE_EXCL` would refuse it, a dangling
+link included.
 
 The preview is WRITE-FREE, and two consumers rest on that: the report's read-only path,
 whose write-free premise the PreToolUse recognizer's admission of the command rests on,
@@ -139,6 +141,59 @@ process and require two proofs of waiting: every racer finished at or after the 
 released, and the re-minted record was written no earlier than one second before the
 release. The second does not rest on the racers' run time; it reads the RECORD and not the
 superseded copy, because `copyFileSync` carries the source's timestamps over on macOS.
+
+## Interrupted adoptions
+
+`adoptContext` copies the record to its superseded name and then swaps the record, both
+under the records lock. Two supervised hooks bind with the adoption opted in and can be
+killed at their deadline: the Stop hook and the UserPromptSubmit route reminder
+(`.claude/rules/stop-latency.md`). A kill between the two steps leaves the record
+untouched and a byte copy of it at the superseded name; a kill inside the copy leaves a
+prefix of that copy, the empty file included. That file used to refuse every later
+adoption as `superseded-record-exists` until someone moved it by hand. Now the next bind
+completes the adoption.
+
+- **One predicate.** `isInterruptedAdoptionCopy(recordsDir, key, recordedVersion)` in the
+  core reads the superseded file and the live record through `readRegularFileSnapshot` (no
+  link followed, a regular file with one link, at most `MAX_JSON_BYTES`) and answers true
+  only when the superseded bytes are a prefix of the record's bytes. It never throws; every
+  fault answers false. Such a file holds no byte the record lacks, so removing it loses
+  nothing.
+- **The preview** asks it after the `lstat`. A proven copy is no conflict, so the record
+  reads ADOPTABLE, or `opted-out` under the opt-out, and the preview stays write-free.
+- **`adoptContext`** asks it again under the records lock, after its own `adoptableRecord`
+  verdict, unlinks a proven copy, then copies and swaps as before. It re-mints the record
+  the verdict verified; the residue is never read as a record, and the copy step writes a
+  fresh copy of the verified record at that name. A kill during the completion leaves one
+  of the same shapes, so the bind after it completes the adoption again.
+- **Concurrent binds** serialize on the records lock: the winner completes the adoption,
+  and every loser re-checks inside the lock and answers `already-served`. A preview that
+  finds a file it cannot prove a copy probes once more before it refuses (`servedProbe`,
+  the probe the lock-timeout arm uses), because a sibling may have completed the adoption
+  between that preview's probe and its check, and the sibling's kept record is no prefix of
+  the re-minted one. A record that serves by then answers `already-served`, never
+  `superseded-record-exists`.
+- **What still refuses:** other bytes, a link (a dangling one included), a hard-linked
+  file, a directory, an unreadable file and one over `MAX_JSON_BYTES`. The remedy pair
+  (`ADOPTION_REFUSAL_REMEDIES` and `_zensu_adoption_refusal_remedy`, identical as the seam pin
+  requires) and `renderSupersededConflict` call such a file not a provable copy of the record.
+- **Residuals.** A kill after the swap leaves a record this installation serves, without
+  its `RUNTIME_ADOPTED` entry and without the lease sweep. No hook sweeps a record whose
+  strict bind succeeds, so leases from before the update keep failing until
+  `/zensu:adopt-session --confirm` runs its in-place repair, the `already-served` arm the
+  adoption skill documents. A kill inside the swap's own write can leave its temporary
+  file, `.<key>.json.<pid>.<hex>.tmp`, in the records directory, which nothing reads. A
+  copy engine that sizes the destination before it copies can leave a cut-short copy that
+  is no byte prefix; that shape still refuses. Windows is unmeasured for it.
+- **Pins.** In `tests/structure/session-auto-adopt-v1.test.js`: `a bind killed between the
+  superseded copy and the record swap is completed by the next bind` (a child running
+  `adoptForHook` kills itself with `SIGKILL` right after the copy), `a copy that a kill cut
+  short is rolled back and the next bind completes the adoption`, `concurrent binds over an
+  interrupted adoption adopt it exactly once` and the three preview cases after them. In
+  `tests/session-control/session-control-core-v1.test.js`: the predicate's truth table,
+  the completion over a copy and a prefix, and the refusals that remain. In the upgrade
+  suite, `AUTO-14` plants a non-copy that still refuses end to end, and `AUTO-14b` completes
+  a byte copy on the first gate contact.
 
 ## Denies name the token
 
@@ -339,9 +394,20 @@ the `--confirm` arms, the preview arms and the provenance branches.
 `patch`: no schema field, no strict key set, no hook added or re-matched, a new key read
 permissively by a new reader, no attestation change, and the gates deny strictly less.
 
+The completion of an interrupted adoption is `patch` as well, walked against
+`.claude/rules/runtime-lineage.md`: no context-record or workflow-state field, no strict
+key set (the verdict keeps its fields), no hook added, removed or re-matched, no
+`permissionDecision` hook, no config key and no attestation change. The core gains one
+read-only export, the superseded name and its contents are unchanged, and the gates deny
+strictly less: an interrupted copy and a preview that a sibling's adoption overtook no
+longer refuse. An older installation of the same lineage still refuses such a copy, and
+the newer one completes it.
+
 ## Port-relevant
 
-Core half: the module's ladder with its crash-resume rung, the sticky-`false` combining
+Core half: the module's ladder with its crash-resume rung and its second probe before a
+conflict refuses, `isInterruptedAdoptionCopy` with the unlink `adoptContext` performs under
+the records lock, the sticky-`false` combining
 rule over the layers a host hands it, the four screens, the renderers built over the
 injected core, `SAFE_TOKEN`, `STATE_NEUTRAL_REASONS` and `establishesNamedState`, plus the
 core's typed errors, `ADOPTION_PROVENANCE`, the reason grammar, `supersededRecordName` /

@@ -2450,6 +2450,16 @@ function supersededRecordFile(recordsDir, key, recordedVersion) {
   return path.join(recordsDir, supersededRecordName(key, recordedVersion));
 }
 
+function isInterruptedAdoptionCopy(recordsDir, key, recordedVersion) {
+  try {
+    const copy = readRegularFileSnapshot(supersededRecordFile(recordsDir, key, recordedVersion)).data;
+    const record = readRegularFileSnapshot(contextRecordFile(recordsDir, key)).data;
+    return copy.length <= record.length && copy.equals(record.subarray(0, copy.length));
+  } catch {
+    return false;
+  }
+}
+
 function contextRecordLocation(options) {
   const pluginData = canonicalDirectory(options.pluginData, 'plugin data');
   const recordsDir = ensureDescendantDirectory(options.pluginData, options.recordsDir);
@@ -2480,9 +2490,8 @@ function supersedeContextRecord(file, supersededFile, next) {
     fs.copyFileSync(file, supersededFile, fs.constants.COPYFILE_EXCL);
   } catch (error) {
     if (error && error.code === 'EEXIST') {
-      // Names the file, because this is also the crash-resume shape — a death
-      // between the copy and the swap leaves it behind — and the session has
-      // no other write channel to find it with.
+      // Names the file, because the session has no other write channel to find
+      // it with.
       const conflict = new Error(`session-control-v1: a superseded record already exists and adoption would overwrite it: ${supersededFile}`);
       conflict.code = SUPERSEDED_EXISTS_CODE;
       conflict.supersededFile = supersededFile;
@@ -2561,6 +2570,7 @@ function adoptContext(options) {
     // no record is ever rewritten, a second one is minted beside it, and the
     // first stays readable under a name that says what happened to it.
     const supersededFile = supersededRecordFile(recordsDir, key, verdict.recorded);
+    if (isInterruptedAdoptionCopy(recordsDir, key, verdict.recorded)) fs.unlinkSync(supersededFile);
     supersedeContextRecord(file, supersededFile, next);
     return {
       context: next,
@@ -6210,6 +6220,7 @@ module.exports = {
   isSupersededRecordConflict,
   supersededRecordName,
   supersededRecordFile,
+  isInterruptedAdoptionCopy,
   LOCK_TIMEOUT_CODE,
   isLockTimeout,
   // The read-only path helper. Exported because SessionStart needs to ASK where

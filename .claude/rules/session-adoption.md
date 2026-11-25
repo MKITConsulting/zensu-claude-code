@@ -78,9 +78,13 @@ value nobody reads.
    under "Gates bypassed" is true. Adoption escapes no gate; it re-mints a
    record. Same rule, same reason, as `--chain-recover`.
 
-The previous record is never overwritten — it is renamed to
+The previous record is never overwritten — it is copied to
 `<key>.superseded-<recorded-version>.json` and stays readable, so "the record is
-immutable" remains literally true. `created_at` is carried over.
+immutable" remains literally true. `created_at` is carried over. The one file an adoption
+ever removes is a byte copy, or a prefix of one, of the live record at that name, which a
+kill between the copy and the swap leaves behind: it holds no byte the record lacks, and
+the adoption writes the copy again (`.claude/rules/automatic-adoption.md` §"Interrupted
+adoptions").
 
 **The gate channel is a SECOND recognized command, admitted on a DIFFERENT
 argument.** `hooks/lib/zensu-doctor-invocation.js` admitted exactly one shape

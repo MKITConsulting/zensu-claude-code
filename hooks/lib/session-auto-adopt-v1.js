@@ -503,12 +503,12 @@ function createAutoAdopter(deps) {
   // The probe once more, for a caller that waited on the records lock until it
   // timed out: the holder was very likely a sibling that has finished by now. Only
   // the served answer is used; any other answer, or a throw, leaves the timeout.
-  function servesNow(request) {
+  function servedProbe(request) {
     try {
       const probe = core.adoptableRecord(coreOptions(request));
-      return Boolean(probe) && probe.ok !== true && probe.reason === alreadyServed;
+      return Boolean(probe) && probe.ok !== true && probe.reason === alreadyServed ? probe : null;
     } catch {
-      return false;
+      return null;
     }
   }
 
@@ -523,8 +523,11 @@ function createAutoAdopter(deps) {
         || typeof core.supersededRecordFile !== 'function'
         || typeof core.sessionKey !== 'function') return null;
     try {
-      const file = core.supersededRecordFile(request.recordsDir, core.sessionKey(request.sessionId), recorded);
+      const key = core.sessionKey(request.sessionId);
+      const file = core.supersededRecordFile(request.recordsDir, key, recorded);
       fsModule.lstatSync(file);
+      if (typeof core.isInterruptedAdoptionCopy === 'function'
+          && core.isInterruptedAdoptionCopy(request.recordsDir, key, recorded)) return null;
       return file;
     } catch {
       return null;
@@ -568,15 +571,19 @@ function createAutoAdopter(deps) {
       return verdict(AUTO_ADOPT_OUTCOMES.REFUSED, reason, state);
     }
     // The crash-resume shape, asked HERE so every consumer of this preview agrees
-    // about it. The record is adoptable, yet a superseded file from an interrupted
-    // adoption already sits at the name adoptContext would copy to, and its
-    // COPYFILE_EXCL refuses every later attempt until the file is moved — so
-    // "retry" would be a loop. It used to be asked by the hook binder alone, which
-    // left the read-only report answering ADOPTABLE for a state the deny named as
-    // a refusal. Above the opt-out for the reason the opt-out comment gives: a
+    // about it. It used to be asked by the hook binder alone, which left the
+    // read-only report answering ADOPTABLE for a state the deny named as a
+    // refusal. Above the opt-out for the reason the opt-out comment gives: a
     // refusal keeps its own reason under the opt-out too.
     const blocking = supersededConflict(request, state.recorded);
     if (blocking !== null) {
+      const served = servedProbe(request);
+      if (served !== null) {
+        return verdict(AUTO_ADOPT_OUTCOMES.ALREADY_SERVED, alreadyServed, {
+          ...probeState(served),
+          recorded: request.observedRecorded,
+        });
+      }
       return verdict(AUTO_ADOPT_OUTCOMES.REFUSED, AUTO_ADOPT_REASONS.SUPERSEDED_EXISTS, {
         ...state,
         supersededFile: blocking,
@@ -627,7 +634,7 @@ function createAutoAdopter(deps) {
         });
       }
       if (isLockTimeout(error)) {
-        if (servesNow(request)) {
+        if (servedProbe(request) !== null) {
           return verdict(AUTO_ADOPT_OUTCOMES.ALREADY_SERVED, AUTO_ADOPT_REASONS.ADOPTED_CONCURRENTLY, {
             ...failed,
             leases: sweepServed(request),

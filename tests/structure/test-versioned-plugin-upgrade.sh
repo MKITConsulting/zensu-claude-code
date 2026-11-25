@@ -2236,7 +2236,7 @@ fi
 # The FIRST entry-point-only refusal, which CONV-1's ENTRY_ONLY list REQUIRES to be
 # documented while nothing checked the code still emits it. (The list's second
 # member, superseded-record-exists, has its emission check in AUTO-14, which needs
-# an interrupted adoption this block does not build.) It is raised before
+# a planted superseded file this block does not build.) It is raised before
 # adoptableRecord runs, when privateRecordsDirectory refuses the store — here a
 # records leaf that is group- and world-accessible. Platform-gated: the binder's
 # mode and ownership checks are POSIX-only.
@@ -6294,18 +6294,19 @@ else
   check "AUTO-13 fixture: the manual opt-out session registers under the candidate root" FAIL
 fi
 
-# AUTO-14 — a superseded copy left by an interrupted adoption. The PREVIEW owns the
-# check, so every consumer agrees: the read-only report says NOT adoptable and names
-# the file (every deny that carries this token tells the reader that it does),
-# --confirm says NOT adopted and names it too, both deny paths name the token with
-# its move-aside remedy, and the record is untouched.
+# AUTO-14 — a file at the superseded name that is not a copy of the record. The
+# PREVIEW owns the check, so every consumer agrees: the read-only report says NOT
+# adoptable and names the file (every deny that carries this token tells the reader
+# that it does), --confirm says NOT adopted and names it too, both deny paths name
+# the token with its move-aside remedy, and the record and the file are untouched.
 AUTO_CONFLICT_SESSION='versioned-upgrade-auto-conflict'
 AUTO_CONFLICT_KEY="$(auto_key "$AUTO_CONFLICT_SESSION")"
 AUTO_CONFLICT_RECORD="$ADOPT_RECORDS_DIR/$AUTO_CONFLICT_KEY.json"
 AUTO_CONFLICT_FILE="$ADOPT_RECORDS_DIR/$AUTO_CONFLICT_KEY.superseded-0.17.0.json"
 if auto_session_start "$AUTO_CONFLICT_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
     && [ -f "$AUTO_CONFLICT_RECORD" ]; then
-  cp "$AUTO_CONFLICT_RECORD" "$AUTO_CONFLICT_FILE"
+  AUTO_CONFLICT_PLANTED='{"planted":"not a copy of this record"}'
+  printf '%s\n' "$AUTO_CONFLICT_PLANTED" >"$AUTO_CONFLICT_FILE"
   AUTO_CONFLICT_REPORT="$TMP/auto-conflict-report.out"; AUTO_CONFLICT_REPORT_RC=0
   CLAUDE_CODE_SESSION_ID="$AUTO_CONFLICT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     CLAUDE_PROJECT_DIR="$PROJECT" \
@@ -6345,8 +6346,9 @@ if auto_session_start "$AUTO_CONFLICT_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_
       && printf '%s' "$AUTO_CONFLICT_SHELL_REASON" | grep -qF 'moving it aside lets the adoption complete' \
       && ! printf '%s' "$AUTO_CONFLICT_SHELL_REASON" | grep -qF 'so retry this call' \
       && [ "$(auto_record_version "$AUTO_CONFLICT_RECORD")" = 0.17.0 ] \
+      && [ "$(cat "$AUTO_CONFLICT_FILE")" = "$AUTO_CONFLICT_PLANTED" ] \
       && [ "$(auto_adopted_entries "$PROJECT" "$AUTO_CONFLICT_SESSION")" = 0 ]; then
-    check "AUTO-14 a leftover superseded file refuses the adoption as superseded-record-exists: the read-only report AND --confirm both exit 1 naming the file, the all-tool gate AND a shell gate name the token with its move-aside remedy and never a bare retry, the record untouched" PASS
+    check "AUTO-14 a superseded file that is not a copy of the record refuses the adoption as superseded-record-exists: the read-only report AND --confirm both exit 1 naming the file, the all-tool gate AND a shell gate name the token with its move-aside remedy and never a bare retry, the record and the file untouched" PASS
   else
     check "AUTO-14 a leftover superseded file refuses the adoption (rc=$AUTO_CONFLICT_RC report-rc=$AUTO_CONFLICT_REPORT_RC token='$AUTO_CONFLICT_TOKEN' version=$(auto_record_version "$AUTO_CONFLICT_RECORD"))" FAIL
     head -c 300 "$AUTO_CONFLICT_REPORT" 2>/dev/null; printf '\n'
@@ -6355,6 +6357,52 @@ if auto_session_start "$AUTO_CONFLICT_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_
   fi
 else
   check "AUTO-14 fixture: the conflict session registers under the candidate root" FAIL
+fi
+
+AUTO_INTERRUPTED_SESSION='versioned-upgrade-auto-interrupted'
+AUTO_INTERRUPTED_KEY="$(auto_key "$AUTO_INTERRUPTED_SESSION")"
+AUTO_INTERRUPTED_RECORD="$ADOPT_RECORDS_DIR/$AUTO_INTERRUPTED_KEY.json"
+AUTO_INTERRUPTED_FILE="$ADOPT_RECORDS_DIR/$AUTO_INTERRUPTED_KEY.superseded-0.17.0.json"
+AUTO_INTERRUPTED_OUT="$TMP/auto-interrupted.out"
+AUTO_INTERRUPTED_ERR="$TMP/auto-interrupted.err"
+if auto_session_start "$AUTO_INTERRUPTED_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
+    && [ -f "$AUTO_INTERRUPTED_RECORD" ]; then
+  AUTO_INTERRUPTED_BEFORE="$(cat "$AUTO_INTERRUPTED_RECORD")"
+  cp "$AUTO_INTERRUPTED_RECORD" "$AUTO_INTERRUPTED_FILE"
+  AUTO_INTERRUPTED_REPORT="$TMP/auto-interrupted-report.out"
+  CLAUDE_CODE_SESSION_ID="$AUTO_INTERRUPTED_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" >"$AUTO_INTERRUPTED_REPORT" 2>&1 || true
+  AUTO_INTERRUPTED_REPORT_RECORD="$(cat "$AUTO_INTERRUPTED_RECORD")"
+  AUTO_INTERRUPTED_REPORT_FILE="$(cat "$AUTO_INTERRUPTED_FILE")"
+  AUTO_INTERRUPTED_TOKEN="$(printf '%s' "$(auto_read_payload "$AUTO_INTERRUPTED_SESSION")" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" adoption-refusal 2>/dev/null)" \
+    || AUTO_INTERRUPTED_TOKEN="rc=$?"
+  AUTO_INTERRUPTED_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+    "$(auto_read_payload "$AUTO_INTERRUPTED_SESSION")" "$AUTO_INTERRUPTED_OUT" "$AUTO_INTERRUPTED_ERR")"
+  AUTO_INTERRUPTED_SYSTEM="$(auto_stdout_field "$AUTO_INTERRUPTED_OUT" systemMessage)"
+  AUTO_INTERRUPTED_SHELL="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-write-secret-scan.sh \
+    "$(bash_payload "$AUTO_INTERRUPTED_SESSION" 'echo probe')" "$TMP/auto-interrupted-shell.out" "$TMP/auto-interrupted-shell.err")"
+  if grep -qF 'Zensu session adoption — ADOPTABLE' "$AUTO_INTERRUPTED_REPORT" \
+      && ! grep -qF 'superseded-record-exists' "$AUTO_INTERRUPTED_REPORT" \
+      && [ "$AUTO_INTERRUPTED_REPORT_RECORD" = "$AUTO_INTERRUPTED_BEFORE" ] \
+      && [ "$AUTO_INTERRUPTED_REPORT_FILE" = "$AUTO_INTERRUPTED_BEFORE" ] \
+      && [ "$AUTO_INTERRUPTED_TOKEN" = not-completed ] \
+      && [ "$AUTO_INTERRUPTED_DECISION" = allow ] \
+      && [ "$AUTO_INTERRUPTED_SHELL" = allow ] \
+      && [ "$(auto_record_version "$AUTO_INTERRUPTED_RECORD")" = 0.18.0 ] \
+      && [ "$(cat "$AUTO_INTERRUPTED_FILE")" = "$AUTO_INTERRUPTED_BEFORE" ] \
+      && [ "$(auto_adopted_entries "$PROJECT" "$AUTO_INTERRUPTED_SESSION")" = 1 ] \
+      && printf '%s' "$AUTO_INTERRUPTED_SYSTEM" | grep -qF "kept beside it as $AUTO_INTERRUPTED_KEY.superseded-0.17.0.json"; then
+    check "AUTO-14b a byte copy that an interrupted adoption left of the record is no conflict: the read-only report answers ADOPTABLE and writes nothing, the refusal mode answers not-completed, and the first gate contact completes the adoption over the copy" PASS
+  else
+    check "AUTO-14b an interrupted adoption completes on the next bind (token='$AUTO_INTERRUPTED_TOKEN' decision=$AUTO_INTERRUPTED_DECISION shell=$AUTO_INTERRUPTED_SHELL version=$(auto_record_version "$AUTO_INTERRUPTED_RECORD") entries=$(auto_adopted_entries "$PROJECT" "$AUTO_INTERRUPTED_SESSION"))" FAIL
+    head -c 400 "$AUTO_INTERRUPTED_REPORT" 2>/dev/null; printf '\n'
+    head -c 400 "$AUTO_INTERRUPTED_OUT" 2>/dev/null; printf '\n  stderr: '; head -c 300 "$AUTO_INTERRUPTED_ERR" 2>/dev/null; printf '\n'
+  fi
+else
+  check "AUTO-14b fixture: the interrupted session registers under the candidate root" FAIL
 fi
 
 # AUTO-15 — the review-evidence SubagentStart hook opts in: it binds through the

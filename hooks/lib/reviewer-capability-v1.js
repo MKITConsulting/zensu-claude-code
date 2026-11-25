@@ -70,7 +70,7 @@ const ADOPTION_REFUSAL_REMEDIES = Object.freeze({
   'adopted-concurrently': 'A sibling hook adopted the record in the meantime and it serves now, so simply retry this call',
   'not-completed': 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call',
   'lock-timeout': 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call',
-  'superseded-record-exists': 'A superseded record from an interrupted adoption is already in place; /zensu:adopt-session names the file, and moving it aside lets the adoption complete',
+  'superseded-record-exists': 'The file at the superseded record name is not a provable copy of this record; /zensu:adopt-session names the file, and moving it aside lets the adoption complete',
 });
 const GENERIC_ADOPTION_REMEDY = 'Run /zensu:adopt-session for the full report, and /zensu:adopt-session --confirm to retry the adoption by hand';
 const adoptionRefusalRemedy = (reason) => (
