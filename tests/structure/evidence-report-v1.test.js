@@ -186,9 +186,17 @@ function lockOf(directory, id) {
   return { lockDirectory: directory, resourcePath: path.join(directory, `${id}.binding.json`) };
 }
 
-function idle(fx, id) {
-  const when = new Date(Date.now() - er.LIMITS.openReportMs - 24 * 60 * 60 * 1000);
+function stampBinding(fx, id, at) {
+  const when = new Date(at);
   fs.utimesSync(path.join(repositoryDirectory(fx), `${id}.binding.json`), when, when);
+}
+
+function idle(fx, id) {
+  stampBinding(fx, id, Date.now() - er.LIMITS.openReportMs - 24 * 60 * 60 * 1000);
+}
+
+function fresh(fx, id) {
+  stampBinding(fx, id, Date.now());
 }
 
 function footprint(started, fx) {
@@ -1033,16 +1041,21 @@ test('retention trims only the calling repository and spares a report another ca
   const others = [0, 1].map((index) => begin(first, {}, FEATURE, { now: () => 1790000000000 + index }));
   for (const started of others) idle(first, started.id);
   const open = begin(second, {}, FEATURE, { now: () => 1790000000002 });
+  fresh(second, open.id);
   const third = begin(second, {}, FEATURE, { config: { user: { keep: 1 } }, now: () => 1790000000003 });
+  fresh(second, third.id);
   for (const started of others) assert.ok(fs.existsSync(started.bundle), 'the keep of one repository never trims another');
   assert.ok(fs.existsSync(open.bundle), 'an unrendered report touched within the window is still being built');
   addImage(second, open.id);
   ok(call(second, 'render', { report: open.id, verdict: 'PARTIAL' }));
+  fresh(second, open.id);
   const fourth = begin(second, {}, FEATURE, { config: { user: { keep: 1 } }, now: () => 1790000000004 });
+  fresh(second, fourth.id);
   assert.ok(!fs.existsSync(open.bundle), 'a rendered report beyond keep is deleted');
   const stale = begin(second, {}, FEATURE, { now: () => 1790000000005 });
   idle(second, stale.id);
   const building = begin(second, {}, FEATURE, { now: () => 1790000000006 });
+  fresh(second, building.id);
   const mustKeep = [third, fourth, building, building].reduce((sum, started) => sum + footprint(started, second), 0);
   begin(second, {}, FEATURE, { config: { user: { keep: 1, maxBytes: mustKeep + 512 } }, now: () => 1790000000007 });
   assert.ok(!fs.existsSync(stale.bundle), 'an unrendered report idle beyond the window is deleted');

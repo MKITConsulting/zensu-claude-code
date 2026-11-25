@@ -76,7 +76,12 @@ byte; the companion's is contract 2 with the prefix `/session-hub:session-trail 
 in `test-session-hub-receipt.sh`). PLM's receipt module runs behind a shell hook that exits 0 on
 every path; the companion's exec-form entry is total on its own: a lineage module that fails to
 load, a throwing home lookup or clock and any other throw end with exit 0, no output and no
-receipt, which three child-process cases in `session-hub-receipt-v1.test.js` prove. The suites
+receipt, which three child-process cases in `session-hub-receipt-v1.test.js` prove. The
+home-lookup and the lineage-module case pin `Date.now` in every child they spawn to a time read
+from a file the kernel just stamped, through the same `-r` preload: the entry lands a receipt and
+prunes with its own `Date.now()` in one call, so on the shifted clock of the scheduled pass the
+fresh receipt would read older than the seven-day retention and be removed. No test of the unit
+file is on `tests/profiles/clock-shift-allowlist.v1.json`. The suites
 grade the companion: `test-session-trail-{skill,lineage,verdict}.sh`, the unit files they drive
 and `test-session-hub-{plugin,receipt,usage-feed}.sh`. PLM's copy is graded for what the
 companion removed: the write-anchor checks (`W*`, `WC*`), the PLM census in
