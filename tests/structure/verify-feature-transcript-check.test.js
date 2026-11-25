@@ -249,14 +249,14 @@ const REMOTE_SNAPSHOT = [
   ...REMOTE_PAGE,
   '### Snapshot',
   '```yaml',
-  '- generic [ref=e2]:',
-  '  - heading "Example Domain" [level=1] [ref=e3]',
-  '  - paragraph [ref=e4]: This domain is for use in documentation examples without needing permission.',
-  '  - paragraph [ref=e5]:',
-  '    - link "Learn more" [ref=e6] [cursor=pointer]:',
-  '      - /url: https://iana.org/domains/example',
+  '- generic [active] [ref=e1]:',
+  '  - paragraph [ref=e7]: This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.',
+  '  - link "Learn more" [ref=e13] [cursor=pointer]:',
+  '    - /url: https://iana.org/help/example-domains',
   '```',
 ].join('\n');
+const REMOTE_STATIC_REQUESTS = '### Result\n1. [GET] https://example.com/ => [200] \n2. [GET] https://example.com/s.js => [200] \n';
+const REMOTE_HIDDEN_REQUESTS = '### Result\n\nNote: 2 static requests not shown, run with --static option to see them.\n';
 
 const REMOTE_ORDER = Object.freeze([
   'skill', 'helper', 'open', 'snapshot', 'screenshot', 'read', 'observation', 'console', 'requests', 'close', 'report'
@@ -276,7 +276,7 @@ function remoteParts() {
     read: readFile('remote-read', `${ROOT}/${REMOTE_SHOT}`),
     observation: '[assistant_text]\nThe page is styled and readable with no overlap or clipping.\n',
     console: cli('remote-console', 'console', CONSOLE_BODY, remote),
-    requests: cli('remote-requests', 'requests --static', '### Result\n1. [GET] https://example.com/ => [200] OK\n', remote),
+    requests: cli('remote-requests', 'requests --static', REMOTE_STATIC_REQUESTS, remote),
     close: cli('remote-close', 'close', `Browser '${REMOTE_SESSION}' closed\n`, remote),
     report: '[assistant_text]\nDeployment identity is unavailable, so worktree equivalence is unproven.\nVERIFY-FEATURE-VERDICT: PARTIAL\n',
   };
@@ -514,10 +514,78 @@ test('playwright-cli outside one plain call on a literal zensu-verify session fa
     `playwright-cli -s=${SESSION} snapshot && playwright-cli -s=${SESSION} eval document.cookie`,
     `/opt/homebrew/bin/playwright-cli -s=${SESSION} snapshot`,
     `playwright-cli -s=${SESSION} goto "$TARGET"`,
-    'playwright-cli --version',
-    'which playwright-cli',
   ]) {
     assert.equal(reportOnlyCommand(command), false, command);
+  }
+});
+
+test('a read-only CLI probe that names no session passes, while a probe that could reach a browser fails', () => {
+  for (const command of [
+    'command -v playwright-cli',
+    'command -v playwright-cli && playwright-cli --version',
+    'command -v playwright-cli; echo "exit=$?"',
+    'command -v playwright-cli; echo $?',
+    'command -v playwright-cli >/dev/null 2>&1 && echo present || echo missing',
+    'command -v playwright-cli 2>/dev/null; playwright-cli --version 2>&1',
+    'command -v "playwright-cli" || echo \'playwright-cli is not installed\'',
+    'playwright-cli --version',
+    'playwright-cli --help',
+    'which playwright-cli',
+    'which playwright-cli && playwright-cli --version;',
+    'command -v playwright-cli || echo \'playwright-cli not found, open a new shell\'',
+    'command -v playwright-cli || echo \'playwright-cli --version failed\'',
+  ]) {
+    assert.equal(reportOnlyCommand(command), true, command);
+  }
+  for (const command of [
+    `command -v playwright-cli && playwright-cli -s=${SESSION} --version`,
+    'command -v playwright-cli && playwright-cli -s=mine --version',
+    'command -v playwright-cli && playwright-cli open https://example.com/',
+    'playwright-cli --version --config=/tmp/playwright-cli.json',
+    'playwright-cli --version | head -1',
+    'playwright-cli --version | sh',
+    'command -v playwright-cli && echo $(playwright-cli open)',
+    'command -v playwright-cli && echo "$(playwright-cli open)"',
+    'command -v playwright-cli && echo `playwright-cli open`',
+    'playwright-cli --version > /tmp/version.txt',
+    'playwright-cli --version & playwright-cli open',
+    'command -v playwright-cli\nplaywright-cli open',
+    `PLAYWRIGHT_CLI_SESSION=${SESSION} playwright-cli --version`,
+    'echo ready; playwright-cli -s=mine snapshot',
+    `command -v playwright-cli; cat ${CONFIG}`,
+    '(playwright-cli --version)',
+    'command -v playwright-cli &&',
+    'echo playwright-cli',
+    `command -v playwright-cli; echo 'BASH_VERSINFO[$(playwright-cli open https://example.org/ >/dev/null)]'; echo "$[_]"`,
+    'command -v playwright-cli; echo "$[1]"',
+    'command -v playwright-cli; echo "$HOME"',
+    `command -v playwright-cli; echo -s=${SESSION}`,
+    'command -v playwright-cli; echo --config=/x/.zensu/verify-feature-runs/r/playwright-cli.json open',
+    'command -v playwright-cli && echo ZENSU-VERIFY-capture1',
+    'command -v playwright-cli; echo -s=mine',
+    'command -v playwright-cli; echo --session mine',
+    'command -v playwright-cli; echo PLAYWRIGHT_CLI_SESSION=mine',
+    'command -v playwright-cli; echo PLAYWRIGHT_MCP_CONFIG=/tmp/c.json',
+    `command -v playwright-cli; echo ${RUN_DIR}`,
+    'command -v playwright-cli; echo playwright-cli.json',
+    'command -v playwright-cli || echo \'run playwright-cli open first\'',
+    'command -v playwright-cli; echo /opt/homebrew/bin/playwright-cli eval',
+    'command -v playwright-cli; echo npx @playwright/cli@latest eval',
+    'command -v playwright-cli; echo playwright-cli --raw eval',
+    'command -v playwright-cli; echo playwright-cli --browser chrome open',
+    'command -v playwright-cli; echo \'C:\\tools\\playwright-cli.exe eval\'',
+    'command -v playwright-cli; echo --config=/tmp/c.json',
+    'command -v playwright-cli; echo playwright-cli run-code',
+    'command -v playwright-cli; echo playwright-cli cookie-list',
+    'command -v playwright-cli; echo playwright-cli localstorage-get',
+    'command -v playwright-cli; echo playwright-cli sessionstorage-get',
+    'command -v playwright-cli; echo playwright-cli state-save',
+  ]) {
+    assert.equal(reportOnlyCommand(command), false, command);
+  }
+  const probed = localRun({ skill: localParts().skill + bash('probe', 'command -v playwright-cli && playwright-cli --version', '/opt/homebrew/bin/playwright-cli\n0.1.24') });
+  for (const name of ['localBrowserTools', 'localEvidence', 'localTeardown', 'reportOnly']) {
+    assert.equal(check(probed, name).pass, true, name);
   }
 });
 
@@ -545,6 +613,10 @@ test('direct Bash browser access fails while the instructed helper spellings pas
     `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy local ${ORIGIN} / declared-safe`,
     `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy remote https://example.org api-only`,
     `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --run-dir ${RUN_DIR} --mode remote --network-only-origin https://example.org`,
+    `'/Applications/Google Chr''ome.app/Contents/MacOS/Google Chr''ome' --headless=new ${ORIGIN}/`,
+    `/Applications/Google\\ Chr\\ome.app/Contents/MacOS/Google\\ Chr\\ome --headless=new ${ORIGIN}/`,
+    `open -a "Google Chr"$''"ome" ${ORIGIN}/`,
+    `/Applications/Google\\ Chr\\\nome.app/Contents/MacOS/Google\\ Chr\\\nome --headless=new ${ORIGIN}/`,
   ]) {
     assert.equal(reportOnlyCommand(command), false, command);
   }
@@ -611,12 +683,34 @@ test('accepted remote mode proves gated evidence before the deployment-identity 
   const localRuntime = bash('up', './scripts/fixture-runtime.sh up', 'fixture-runtime: started');
   assert.equal(check(remoteRun({ helper: localRuntime + parts.helper }), 'remoteAcceptedTools').pass, false);
   assert.equal(check(remoteRun({ observation: '[assistant_text]\nThe page looks fine.\n' }), 'remoteAcceptedEvidence').pass, false);
-  const staleLink = REMOTE_SNAPSHOT.replace('link "Learn more"', 'link "More information..."');
-  assert.equal(check(remoteRun({ snapshot: cli('remote-snapshot', 'snapshot', staleLink, { session: REMOTE_SESSION }) }), 'remoteAcceptedEvidence').pass, false);
-  const hiddenDocument = cli('remote-requests', 'requests',
-    '### Result\n\nNote: 1 static request not shown, run with --static option to see it.', { session: REMOTE_SESSION });
-  assert.equal(check(remoteRun({ requests: hiddenDocument }), 'remoteAcceptedEvidence').pass, false);
   assert.equal(check(run.replace('VERIFY-FEATURE-VERDICT: PARTIAL', 'VERIFY-FEATURE-VERDICT: PASS'), 'remoteAcceptedVerdict').pass, false);
+});
+
+test('remote evidence names no page wording and proves the document load from the request log', () => {
+  const remote = { session: REMOTE_SESSION };
+  const evidence = (overrides) => check(remoteRun(overrides), 'remoteAcceptedEvidence').pass;
+  const snapshot = (body) => cli('remote-snapshot', 'snapshot', body, remote);
+  const requests = (args, body) => cli('remote-requests', args, body, remote);
+  assert.equal(evidence({}), true);
+  const reworded = REMOTE_SNAPSHOT
+    .replace('link "Learn more"', 'link "More information..."')
+    .replace('  - paragraph [ref=e7]:', '  - heading "Reserved Domain" [level=1] [ref=e3]\n  - paragraph [ref=e7]:');
+  assert.equal(evidence({ snapshot: snapshot(reworded) }), true);
+  const headingOnly = REMOTE_SNAPSHOT.replace(/ {2}- paragraph \[ref=e7\]: [^\n]*/, '  - heading "Reserved Domain" [level=1] [ref=e3]');
+  assert.equal(evidence({ snapshot: snapshot(headingOnly) }), true);
+  const noLink = REMOTE_SNAPSHOT.replace(/ {2}- link "Learn more"[^\n]*\n {4}- \/url: [^\n]*\n/, '');
+  assert.equal(evidence({ snapshot: snapshot(noLink) }), false);
+  assert.equal(evidence({ snapshot: snapshot(REMOTE_SNAPSHOT.replace('link "Learn more" [ref=e13]', 'link [ref=e13]')) }), false);
+  const noText = REMOTE_SNAPSHOT.replace(/ {2}- paragraph \[ref=e7\]: [^\n]*\n/, '');
+  assert.equal(evidence({ snapshot: snapshot(noText) }), false);
+  assert.equal(evidence({ snapshot: snapshot(REMOTE_SNAPSHOT.replace('- Page URL: https://example.com/', '- Page URL: https://example.com/other')) }), false);
+  assert.equal(evidence({ requests: requests('requests', REMOTE_HIDDEN_REQUESTS) }), true);
+  assert.equal(evidence({ requests: requests('requests', '### Result\n\nNote: 1 static request not shown, run with --static option to see it.\n') }), true);
+  assert.equal(evidence({ requests: requests('requests', '### Result\n') }), false);
+  assert.equal(evidence({ requests: requests('requests', '### Result\n\nNote: 0 static requests not shown, run with --static option to see them.\n') }), false);
+  assert.equal(evidence({ requests: requests('requests', `### Result\n3. [GET] https://example.com/s.js => [404] \n${REMOTE_HIDDEN_REQUESTS.replace('### Result\n', '')}`) }), false);
+  assert.equal(evidence({ requests: requests('requests --static', REMOTE_STATIC_REQUESTS.replace('s.js => [200]', 's.js => [503]')) }), false);
+  assert.equal(evidence({ requests: requests('requests --static', '### Result\n1. [GET] https://example.com/ net::ERR_CONNECTION_RESET\n') }), false);
 });
 
 const NETWORK_ONLY_HELPER = `node ${PLUGIN}/scripts/verify-browser-config.js --run-dir ${REMOTE_RUN_DIR} --mode remote --origin https://example.com --network-only-origin https://example.org`;

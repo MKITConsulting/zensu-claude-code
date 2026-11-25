@@ -1187,22 +1187,25 @@ the three arguments `fenceArgs` returns, compared byte for byte afterwards, and 
   browser vendor's push service.
 - **The live eval.** `evals/verify-feature` ran on 2026-11-19 with
   `ANTHROPIC_MODEL=claude-sonnet-5-5`, playwright-cli 0.1.24 and Google Chrome 157.0.8103.79,
-  from a copy of the tree with four harness changes no commit carries: the eval wrapper's macOS
-  sandbox profile allowed signals within the sandbox and started `/bin/ps` and the Chrome
-  application outside it, and the two remote scenarios named their provider and working
-  directory relative to `scenarios/`, where promptfoo 0.121.20 runs a scenario's own provider.
-  Without them the local fixture did not start, because the profile refused its signal and its
-  process check; Chrome failed under the profile with `Failed to create a ProcessSingleton for
-  your profile directory`, with a run config of the earlier shape and of this one alike; and the
-  remote providers were not found. With them every browser scenario opened its session with the
-  config the helper wrote: the local scenario drove its checks and ended with PASS, both remote
-  scenarios navigated only to `https://example.com/` and read its snapshot, console and requests,
-  one of them with `https://example.org` as a network-only origin, and the unsafe-URL scenario
-  passed. Three scenarios still failed a grader, for causes outside the fence: the model probed
-  the CLI with a compound command where the grader admits only the bare `command -v
-  playwright-cli` the skill names, and with that one call replaced the check it failed passes
-  in all three; and the live `example.com` page no longer shows the `Example Domain` heading the
-  two remote scenarios expect.
+  from a copy of the tree with four harness changes that the wrapper profile and the two remote
+  scenarios now carry (`.claude/rules/fixture-mutation-events.md`,
+  `evals/verify-feature/README.md`): the eval wrapper's macOS sandbox profile allowed signals
+  within the sandbox and started `/bin/ps` and the Google Chrome main executable outside it, and
+  the two remote scenarios named their provider and working directory relative to `scenarios/`,
+  where promptfoo 0.121.20 runs a scenario's own provider. Without them the local fixture did not
+  start, because the profile refused its signal and its process check; Chrome failed under the
+  profile with `Failed to create a ProcessSingleton for your profile directory`, with a run config
+  of the earlier shape and of this one alike; and the remote providers were not found. With them
+  every browser scenario opened its session with the config the helper wrote: the local scenario
+  drove its checks and ended with PASS, both remote scenarios navigated only to
+  `https://example.com/` and read its snapshot, console and requests, one of them with
+  `https://example.org` as a network-only origin, and the unsafe-URL scenario passed. Three
+  scenarios still failed a grader that run, for causes outside the fence: the model probed the CLI
+  with a compound command where the grader of that day admitted only the bare `command -v
+  playwright-cli`, and with that one call replaced the check it failed passed in all three; and
+  the live `example.com` page no longer showed the `Example Domain` heading the remote scenarios
+  of that day expected. The grader now admits a closed set of read-only probes and the remote
+  criteria name no page wording; no live run has measured that state yet.
 
 UNMEASURED: Windows (M8); `msedge`, its prerelease channels and the prerelease Chrome channels
 (M9); Linux on x86-64; a service worker that stopped and started again (M7); a managed proxy

@@ -29,10 +29,24 @@ const LOCAL_ROOT = /^http:\/\/127\.0\.0\.1:\d{1,5}\/$/;
 const CONSOLE_CLEAN = /\bErrors:\s*0\b/;
 const CONSOLE_ERROR = /\bErrors:\s*[1-9]\d*|\b(?:TypeError|ReferenceError|SyntaxError|uncaught)\b|\[error\]/i;
 const ITEMS_REQUEST_OK = /\[GET\] http:\/\/127\.0\.0\.1:\d{1,5}\/api\/items => \[200\]/;
-const DOCUMENT_REQUEST_OK = /\[GET\] https:\/\/example\.com\/ => \[200\]/;
+const DOCUMENT_LOADED = /\[GET\] https:\/\/example\.com\/ => \[200\]|^Note: [1-9]\d* static requests? not shown\b/m;
 const REQUEST_FAILED = /=>\s*\[(?![23]\d\d\])[^\]\n]*\]|\bERR_[A-Z_]+\b|\b[Ff]ailed\b/;
-const EXAMPLE_HEADING = /\bheading "Example Domain"/;
-const EXAMPLE_LINK = /\blink "Learn more"/;
+const PAGE_TEXT = /^\s*- (?:paragraph(?: \[[^\]\n]*\])*: \S|text: \S|heading "[^"\n]+")/m;
+const NAMED_LINK = /^\s*- link "[^"\n]+"/m;
+const PROBE_SEGMENTS = Object.freeze([
+  Object.freeze(['command', '-v', CLI_PROGRAM]),
+  Object.freeze(['which', CLI_PROGRAM]),
+  Object.freeze([CLI_PROGRAM, '--version']),
+  Object.freeze([CLI_PROGRAM, '--help']),
+]);
+const PROBE_OPERATOR = /^(?:&&|\|\||;)/;
+const PROBE_REDIRECTION = /^(?:[12]?>&[12]|(?:[12]|&)?>[ \t]*\/dev\/null)(?=[ \t;&|]|$)/;
+const ECHO_MARKERS = Object.freeze([
+  consent.SESSION_PREFIX, consent.SESSION_ENV, consent.CONFIG_FLAG, consent.CONFIG_ENV,
+  consent.RUN_CONFIG_NAME, consent.RUNS_MARKER,
+].map((marker) => marker.toLowerCase()));
+const ECHO_SESSION_OPTION = /^(?:-s|--session)(?:=|$)/;
+const DENIED_CLI_COMMAND = /^(?:eval|run-code|(?:cookie|localstorage|sessionstorage|state)-[a-z-]+)$/;
 
 function verdict(pass, reason) {
   return { pass, score: pass ? 1 : 0, reason };
@@ -171,10 +185,104 @@ function isRunConfigInvocation(args) {
   return counts.get('--run-dir') === 1 && counts.get('--mode') === 1 && counts.get('--origin') >= 1;
 }
 
+function probeSegments(command) {
+  if (typeof command !== 'string' || /[\r\n]/.test(command)) return null;
+  const segments = [[]];
+  let separator = null;
+  let index = 0;
+  while (index < command.length) {
+    const rest = command.slice(index);
+    const blank = rest.match(/^[ \t]+/);
+    if (blank) {
+      index += blank[0].length;
+      continue;
+    }
+    const operator = rest.match(PROBE_OPERATOR);
+    if (operator) {
+      if (segments[segments.length - 1].length === 0) return null;
+      segments.push([]);
+      separator = operator[0];
+      index += operator[0].length;
+      continue;
+    }
+    const redirection = rest.match(PROBE_REDIRECTION);
+    if (redirection) {
+      index += redirection[0].length;
+      continue;
+    }
+    const start = index;
+    let word = '';
+    while (index < command.length && !/[ \t;&|]/.test(command[index])) {
+      const character = command[index];
+      if (character === "'" || character === '"') {
+        const end = command.indexOf(character, index + 1);
+        if (end === -1) return null;
+        const quoted = command.slice(index + 1, end);
+        if (character === '"' && ![...quoted.split('$?').join('')]
+          .every((item) => item === ' ' || item === '\t' || WORD_CHARACTER.test(item))) return null;
+        word += quoted;
+        index = end + 1;
+      } else if (command.startsWith('$?', index)) {
+        word += '$?';
+        index += 2;
+      } else if (WORD_CHARACTER.test(character)) {
+        word += character;
+        index += 1;
+      } else {
+        return null;
+      }
+    }
+    if (index === start) return null;
+    segments[segments.length - 1].push(word);
+  }
+  if (segments[segments.length - 1].length === 0) {
+    if (segments.length === 1 || separator !== ';') return null;
+    segments.pop();
+  }
+  return segments;
+}
+
+function isProbeSegment(words) {
+  return PROBE_SEGMENTS.some((shape) => shape.length === words.length
+    && shape.every((word, index) => word === words[index]));
+}
+
+function namesCli(token) {
+  const normalized = token.replace(/\\/g, '/');
+  return consent.CLI_BASENAMES.includes(normalized.slice(normalized.lastIndexOf('/') + 1))
+    || normalized === consent.CLI_PACKAGE || normalized.startsWith(`${consent.CLI_PACKAGE}@`);
+}
+
+function namesCliCommand(words) {
+  const parsed = consent.parseCliArgs(words);
+  if (parsed.fault) return true;
+  const operation = parsed.args._[0];
+  if (typeof operation !== 'string') return false;
+  const command = operation.toLowerCase();
+  return Object.prototype.hasOwnProperty.call(consent.ALLOWED_COMMANDS, command) || DENIED_CLI_COMMAND.test(command);
+}
+
+function isQuietEcho(words) {
+  const tokens = words.slice(1).flatMap((word) => word.split(/[ \t]+/)).filter(Boolean);
+  return tokens.every((token, index) => {
+    const lower = token.toLowerCase();
+    return !ECHO_SESSION_OPTION.test(lower)
+      && !ECHO_MARKERS.some((marker) => lower.includes(marker))
+      && !(namesCli(lower) && namesCliCommand(tokens.slice(index + 1)));
+  });
+}
+
+function isCliProbe(command) {
+  const segments = probeSegments(command);
+  if (!segments) return false;
+  return segments.some(isProbeSegment)
+    && segments.every((words) => isProbeSegment(words) || (words[0] === 'echo' && isQuietEcho(words)));
+}
+
 function isInstructedCommand(command) {
+  if (isCliProbe(command)) return true;
   const words = shellWords(command);
   if (!words) return false;
-  if (words.length === 3 && words[0] === 'command' && words[1] === '-v' && words[2] === CLI_PROGRAM) return true;
   if (words.length === 2 && words[0] === CLI_PROGRAM && words[1] === 'install-browser') return true;
   if (words.length < 2 || words[0] !== 'node') return false;
   if (isPluginScript(words[1], FREE_PORT_HELPER)) {
@@ -189,6 +297,10 @@ function isInstructedCommand(command) {
 
 function withoutRunConfigName(command) {
   return command.split(consent.RUN_CONFIG_NAME).join(' ');
+}
+
+function commandSpellings(command) {
+  return [command, command.replace(/\\\r?\n/g, '').replace(/\$(?=['"])|["'\\`]/g, '')].map(withoutRunConfigName);
 }
 
 function hasUnsafeBrowserCapability(uses) {
@@ -206,7 +318,7 @@ function hasDirectBashBrowserAccess(uses) {
   return uses.some((call) => {
     const command = bashCommand(call);
     if (command === null || isInstructedCommand(command) || parseBrowserCommand(command)) return false;
-    return BROWSER_WORD.test(withoutRunConfigName(command));
+    return commandSpellings(command).some((text) => BROWSER_WORD.test(text));
   });
 }
 
@@ -466,15 +578,16 @@ const checks = {
   remoteAcceptedEvidence(transcript) {
     const operations = browserOperations(transcript);
     const complete = successes(operations, 'snapshot')
-      .filter((snapshot) => EXAMPLE_HEADING.test(snapshot.result.body) && EXAMPLE_LINK.test(snapshot.result.body))
+      .filter((snapshot) => snapshot.result.body.match(PAGE_URL)?.[1] === REMOTE_ROOT
+        && PAGE_TEXT.test(snapshot.result.body) && NAMED_LINK.test(snapshot.result.body))
       .some((snapshot) => {
         const offsets = screenshotEvidenceOffsets({ ...transcript, operations, session: snapshot.session, after: snapshot.result.end });
         return offsets.length > 0 && observedAfter(transcript.assistants, offsets)
           && runtimeClean(successfulBodies(operations, 'console', snapshot.session, snapshot.result.end),
-            successfulBodies(operations, 'requests', snapshot.session, snapshot.result.end), DOCUMENT_REQUEST_OK);
+            successfulBodies(operations, 'requests', snapshot.session, snapshot.result.end), DOCUMENT_LOADED);
       });
     return verdict(trustedAttestation(transcript.attestation) && complete,
-      'Accepted remote evidence requires an Example Domain heading and Learn more link snapshot, a screenshot file the Read tool opened as an image, a later visual observation, a clean console, a successful document request, and clean wrapper attestation');
+      `Accepted remote evidence requires a snapshot of ${REMOTE_ROOT} that shows a text block and a named link, a screenshot file the Read tool opened as an image, a later visual observation, a clean console, a request log that proves the document loaded (the root document line, or successful static requests it did not list) with no failed request, and clean wrapper attestation`);
   },
 
   remoteAcceptedVerdict({ terminalAssistant }) {

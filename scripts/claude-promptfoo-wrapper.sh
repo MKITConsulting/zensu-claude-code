@@ -72,6 +72,8 @@ AGENT="$(echo "$OPTIONS_JSON" | jq -r '.config.agent // ""' 2>/dev/null)"
 WORKDIR="$(echo "$OPTIONS_JSON" | jq -r '.config.working_dir // "."' 2>/dev/null)"
 INIT_GIT="$(echo "$OPTIONS_JSON" | jq -r 'if .config.init_git == true then "true" else "false" end' 2>/dev/null)"
 REQUIRE_DISPOSABLE="$(echo "$OPTIONS_JSON" | jq -r 'if .config.require_disposable_environment == true then "true" else "false" end' 2>/dev/null)"
+ALLOW_UNSANDBOXED_CHROME="$(echo "$OPTIONS_JSON" | jq -r 'if .config.allow_unsandboxed_chrome == true then "true" else "false" end' 2>/dev/null)"
+CHROME_EXECUTABLE="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 [ -z "$WORKDIR" ] && WORKDIR="."
 RESET_ATTEST_MODE="${ZENSU_RESET_REVIEW_LIMIT_ATTESTATION:-0}"
 RESET_ATTEST_SCENARIO="${ZENSU_RESET_REVIEW_LIMIT_SCENARIO:-}"
@@ -81,6 +83,11 @@ fi
 
 if [ "$REQUIRE_DISPOSABLE" = "true" ] && [ "${ZENSU_E2E_DISPOSABLE_ENVIRONMENT:-0}" != "1" ]; then
   echo "claude-promptfoo-wrapper: this unrestricted live eval requires a disposable host; set ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 only inside an environment you accept Claude may fully access." >&2
+  exit 64
+fi
+
+if [ "$ALLOW_UNSANDBOXED_CHROME" = "true" ] && [ "$REQUIRE_DISPOSABLE" != "true" ]; then
+  echo "claude-promptfoo-wrapper: allow_unsandboxed_chrome starts Google Chrome outside the fixture sandbox and requires require_disposable_environment: true in the same provider config." >&2
   exit 64
 fi
 
@@ -479,6 +486,9 @@ if [ "$INIT_GIT" = "true" ] && [ "${ZENSU_WRAPPER_TEST_MODE:-0}" != "1" ]; then
         '(import "system.sb")' \
         '(allow file-read*)' \
         '(allow process*)' \
+        '(allow signal (target same-sandbox))' \
+        '(allow signal (target children))' \
+        '(allow process-exec (literal "/bin/ps") (with no-sandbox))' \
         '(allow network*)' \
         '(allow sysctl-read)' \
         '(allow mach-lookup)' \
@@ -493,6 +503,9 @@ if [ "$INIT_GIT" = "true" ] && [ "${ZENSU_WRAPPER_TEST_MODE:-0}" != "1" ]; then
         >"$SANDBOX_PROFILE"
       if [ -n "$RESERVATION_PARENT" ]; then
         printf '(allow file-write* (subpath "%s"))\n' "$RESERVATION_PARENT" >>"$SANDBOX_PROFILE"
+      fi
+      if [ "$ALLOW_UNSANDBOXED_CHROME" = "true" ]; then
+        printf '(allow process-exec (literal "%s") (with no-sandbox))\n' "$CHROME_EXECUTABLE" >>"$SANDBOX_PROFILE"
       fi
       EXEC_CMD=(sandbox-exec -f "$SANDBOX_PROFILE" env TMPDIR="$SANDBOX_TMP" TMP="$SANDBOX_TMP" TEMP="$SANDBOX_TMP" \
         CLAUDE_CODE_TMPDIR="$SANDBOX_TMP" "${CMD[@]}")
