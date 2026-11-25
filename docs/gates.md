@@ -820,7 +820,7 @@ desktop app has no shell prefix at all, so there it can come only from the `env`
 behind a capability broker. Claude Code started that server once per session, and each start
 materialized a private npm runtime of several hundred megabytes whether or not a browser was ever
 opened. The skill now drives `playwright-cli`, which the user installs once
-(`npm install -g @playwright/cli@0.1.24`, the measured version; `brew install playwright-cli` is
+(`npm install -g @playwright/cli@0.1.25`, the measured version; `brew install playwright-cli` is
 unpinned), and the controls the broker
 held moved into this gate and into the run config the browser is opened with.
 
@@ -868,7 +868,7 @@ session is prose, not a boundary.
   `-s=<session>`, `--session <session>` and a literal
   `PLAYWRIGHT_CLI_SESSION=<session>` prefix are all read; a session given twice, appended with
   `+=`, or spelled in another letter case or behind a path is refused. The arguments are parsed
-  with a port of the CLI's own parser, pinned by a golden recording of `playwright-cli` 0.1.24's
+  with a port of the CLI's own parser, pinned by a golden recording of `playwright-cli` 0.1.25's
   parser; an argument shape it does not recognize is denied rather than admitted — an option
   outside the allowlist on a `zensu-verify` call, and a plain call whose text names a
   `zensu-verify` session that the parser does not resolve as the call's session. **Accepted
@@ -1040,7 +1040,7 @@ helper's `--discard-state` before teardown, also when it keeps the run directory
 `zensu-verify-auth-…` session `console` and `requests` are denied with a final reason, and every
 cookie, storage and state command stays denied on every `zensu-verify` session:
 `tests/structure/verify-consent-v1.test.js` drives every
-command of `playwright-cli` 0.1.24, recorded in
+command of `playwright-cli` 0.1.25, recorded in
 `tests/structure/fixtures/playwright-cli-commands.v1.json` and compared with the installed
 `help.json` where that version is installed, on a plain and on a signed-in session.
 
