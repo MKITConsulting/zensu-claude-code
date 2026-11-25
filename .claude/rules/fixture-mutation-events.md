@@ -1,5 +1,6 @@
 ---
 paths:
+  - "scripts/claude-promptfoo-wrapper.sh"
   - "scripts/fixture-mutation-watch.js"
   - "scripts/fixture-manifest.js"
   - "tests/structure/fixture-mutation-watch.test.js"
@@ -49,6 +50,43 @@ through `tests/structure/test-eval-harness-units.sh`, a `ciStructureTests` suite
 weekly Windows Safety run too. The wrapper's shell probes, P13-S6 and P13-S8 among them, do
 not: `test-claude-promptfoo-wrapper.sh` is local-only (`tests/profiles/promptfoo-local-only.v1.json`,
 and in the `excluded` list of `windows-native-structure.v1.json`).
+
+**The macOS profile is the enforcing half, and three rules widen it on purpose.** The
+attestation above detects a fixture write; the `sandbox-exec` profile the wrapper writes for an
+`init_git` fixture prevents one. Measured on macOS 26.7.2 on 2026-11-24, `(deny default)` with
+`(allow process*)` still refused every signal and the exec of the setuid `/bin/ps` (exit 126), so
+the verify-feature fixture runtime could not prove its own server. The profile therefore adds
+`(allow signal (target same-sandbox))` (own and orphaned sandboxed processes, never one
+outside), `(allow signal (target children))` and `(allow process-exec (literal "/bin/ps") (with
+no-sandbox))` for every `init_git` eval. Google Chrome cannot run inside the profile at all: the
+socket directory of its single-instance lock lies in the per-user temp directory, with that
+writable its startup dies on `mach-register`, and with that allowed its renderer crashes,
+because its own sandbox cannot be applied inside another one. So `allow_unsandboxed_chrome: true`
+in a provider config appends `(allow process-exec (literal "<Chrome main executable>") (with
+no-sandbox))`, the main executable of `/Applications/Google Chrome.app` alone, which is narrower
+than the app subpath and enough, since the helpers it starts inherit no sandbox. Only the three
+verify-feature providers set the key, and the wrapper refuses it with exit 64 unless the same
+provider config sets `require_disposable_environment: true`. The rules must follow
+`(allow process*)`, and `(target children)` is what lets the sandboxed Playwright daemon kill
+the browser it started: with `same-sandbox` alone its group kill failed with EPERM and the
+browser kept running. So a child the sandbox starts outside itself, the browser and `ps`
+included, stays signalable, while a process it did not start stays out of reach. **The cost:**
+the browser process tree runs outside the boundary, and any process inside the sandbox can start
+that executable outside it with arguments of its choosing, so for the browser the boundary falls
+back to this file's detection. The eval grader fails a run whose Bash command text names a
+browser, a word check it also applies with line continuations joined and quotes, backslashes and
+backticks removed, and a name the shell assembles from a variable passes it. Linux `bwrap` is unmeasured for Chrome and ignores
+the key. Moving together: the profile and the key's refusal in
+`scripts/claude-promptfoo-wrapper.sh`; the profile-rule check of
+`tests/structure/test-eval-harness-units.sh`, a `ciStructureTests` suite, which counts the
+`with no-sandbox` lines, lists the files that set the key and requires the disposable setting
+beside it; P13-S12 and P13-S12b in `test-claude-promptfoo-wrapper.sh`, which drive the real
+profile with a stub `claude` and signal an orphaned sandboxed process and the unsandboxed
+browser, one case per signal rule (macOS only), and P13-S12c there, which refuses the key without
+the disposable setting in a dry run, so a regression stops at the preview and never starts a CLI
+(all three local-only); and the macOS paragraph of
+`evals/verify-feature/README.md`. A new `with no-sandbox` rule needs its own measurement and
+moves that count.
 
 **Known gap, measured and not closed.** Under the concurrent harness that measured P13-S8,
 128 runs at a heavier setting produced ONE failure whose cause was not established; 224

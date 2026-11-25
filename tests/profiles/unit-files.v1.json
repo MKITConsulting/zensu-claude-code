@@ -316,7 +316,7 @@
       "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer with its linear shell-flag scan, every refused indirection and the signed-in session rules."
     },
     {
-      "path": "tests/structure/verify-feature-transcript-check.test.js", "registered": 26,
+      "path": "tests/structure/verify-feature-transcript-check.test.js", "registered": 28,
       "runs": [{ "driver": "tests/structure/test-eval-harness-units.sh" }],
       "summary": "The verify-feature transcript assertion contract for plain playwright-cli calls on the zensu-verify session."
     },
