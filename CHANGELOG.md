@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **session-trail**: Release the old session before its remaining work (#671)
 - **verify-feature**: Measure the consent gate against playwright-cli 0.1.25 (#679)
 - **evals**: Close the remaining route short-line needle and README gaps (#672)
 - **session-trail**: Find Claude Desktop records in data folders of their own (#645)
