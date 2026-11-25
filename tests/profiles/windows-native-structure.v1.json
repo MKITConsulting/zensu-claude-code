@@ -156,6 +156,10 @@
       "reason": "The only native-Windows marker is the host branch of ST1, which skips the interrupt check of the driver's stream helper on Git Bash: that check sends a POSIX TERM signal to the helper's subshell and counts the temporary files it leaves, and it asserts no Windows behavior. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes it and passes through that skip."
     },
     {
+      "path": "tests/structure/test-evidence-report.sh",
+      "reason": "The only native-Windows marker is R24's host branch: the WebP tool lookup answers no pair on win32, so the add with a stub pair first on PATH expects the plain add line there instead of a PNG kept reason, and the branch asserts no path transport. The suite is a ciStructureTests member, and the weekly Windows Safety run still executes it."
+    },
+    {
       "path": "tests/structure/test-live-evals.sh",
       "reason": "The only native-Windows marker is the platform guard that skips every executed check on Git Bash: live-evals.yml runs on ubuntu-latest only, and those checks need O_NOFOLLOW, real symbolic links, a named pipe and extensionless stubs started without a shell. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes its file checks and passes through that skip."
     }

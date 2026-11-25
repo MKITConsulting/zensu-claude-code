@@ -2,6 +2,6 @@
   "description": "A run that stopped during setup: no criterion, no step, no evidence; verdict PARTIAL.",
   "inScope": [],
   "expect": {
-    "rendering": "sha256:3f263a474447e9a1a81865569a65f826df4800357a8c651af2f0ca903c182afe"
+    "rendering": "sha256:dfd12af4279ea4aeda1bb46117135c48e7e4d60a1e34264b74d76e242608aa6c"
   }
 }

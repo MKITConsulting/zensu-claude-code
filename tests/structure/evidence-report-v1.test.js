@@ -104,6 +104,164 @@ function riff(chunks) {
   return Buffer.concat([head, body]);
 }
 
+const NO_STAND_IN_TOOLS = NOT_ON_WINDOWS && 'a stand-in tool is a script with an interpreter line, which Windows does not start';
+const ENCODER_FLAGS = ['-quiet', '-lossless', '-exact', '-z', '6', '-metadata', 'icc'];
+const LIBPNG_FILTERS_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAwAAAAKCAIAAAAPTiitAAAAtUlEQVQYlWO06bnffe3fHUZtuaOHTk19Hpe7Kk7F7rP0XWW9oB4vE6PZbuKblBiZmZnZOTjxIyYGIgALr5AQKzMHGxsbCzs7CysXMxs7EwvLf0b2f4zMf/8x//rD+O/3f2ZiTGJI8HaeF3H7VbrmnlP+xkXl5/8u4GOfwlr28vUbpaIZgZcupvh/2EJFh6vpm7KwcbGzs7GxsbKwsDOzc7GzszCzsLOxcbGxs7Cws7OxcBHlcAA4RzDIlwVv0gAAAABJRU5ErkJggg==', 'base64');
+const LIBPNG_FILTERS_RGBA = '68476c89762a2d65c7e2a64e3f29c7ef0543c0830954d9ea96d20d70cae6a6f4';
+const STAND_IN_TOOL = [
+  `#!${process.execPath}`,
+  "'use strict';",
+  "const fs = require('node:fs');",
+  "const plan = JSON.parse(fs.readFileSync(`${__filename}.json`, 'utf8'));",
+  'const args = process.argv.slice(2);',
+  "fs.appendFileSync(plan.log, `${JSON.stringify({ tool: plan.tool, program: process.argv[1], args, env: process.env, cwd: process.cwd() })}\\n`);",
+  'if (plan.sleepMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, plan.sleepMs);',
+  'if (plan.exit) process.exit(plan.exit);',
+  "const target = args[args.indexOf('-o') + 1];",
+  'if (plan.output) fs.copyFileSync(plan.output, target);',
+  'if (plan.link) fs.symlinkSync(plan.link, target);',
+  'if (plan.folder) fs.mkdirSync(target);',
+  "if (plan.fifo) require('node:child_process').execFileSync(plan.fifo, [target]);",
+  '',
+].join('\n');
+
+function hex(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function sampleBytes(length, seed) {
+  const bytes = Buffer.alloc(length);
+  let state = seed >>> 0;
+  for (let index = 0; index < length; index += 1) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    bytes[index] = state >>> 24;
+  }
+  return bytes;
+}
+
+function filteredRow(type, row, previous, step) {
+  const filtered = Buffer.alloc(row.length);
+  for (let index = 0; index < row.length; index += 1) {
+    const left = index >= step ? row[index - step] : 0;
+    const up = previous ? previous[index] : 0;
+    const corner = previous && index >= step ? previous[index - step] : 0;
+    let predicted = 0;
+    if (type === 1) predicted = left;
+    if (type === 2) predicted = up;
+    if (type === 3) predicted = Math.floor((left + up) / 2);
+    if (type === 4) {
+      const estimate = left + up - corner;
+      const distances = [[Math.abs(estimate - left), left], [Math.abs(estimate - up), up], [Math.abs(estimate - corner), corner]];
+      predicted = distances.reduce((best, candidate) => (candidate[0] < best[0] ? candidate : best))[1];
+    }
+    filtered[index] = (row[index] - predicted + 256) % 256;
+  }
+  return filtered;
+}
+
+function pngOf(spec) {
+  const channels = spec.channels || 3;
+  const filters = spec.filters || [0];
+  const stride = spec.width * channels;
+  const lines = [];
+  let previous = null;
+  for (let line = 0; line < spec.height; line += 1) {
+    const row = spec.pixels.subarray(line * stride, (line + 1) * stride);
+    const type = filters[line % filters.length];
+    lines.push(Buffer.from([type]), filteredRow(type, row, previous, channels));
+    previous = row;
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(spec.width, 0);
+  header.writeUInt32BE(spec.height, 4);
+  header[8] = spec.depth || 8;
+  header[9] = spec.colour === undefined ? (channels === 3 ? 2 : 6) : spec.colour;
+  header[10] = spec.compression || 0;
+  header[11] = spec.filter || 0;
+  header[12] = spec.interlace || 0;
+  const data = spec.idat === undefined ? [zlib.deflateSync(Buffer.concat(lines))] : [].concat(spec.idat);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', header),
+    ...(spec.extra || []).map(([type, bytes]) => pngChunk(type, bytes)),
+    ...data.map((bytes) => pngChunk('IDAT', bytes)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+function rgbaOf(pixels, channels) {
+  if (channels === 4) return Buffer.from(pixels);
+  const rgba = Buffer.alloc((pixels.length / 3) * 4, 0xff);
+  for (let source = 0, target = 0; source < pixels.length; source += 3, target += 4) pixels.copy(rgba, target, source, source + 3);
+  return rgba;
+}
+
+function pamOf(width, height, rgba) {
+  return Buffer.concat([Buffer.from(`P7\nWIDTH ${width}\nHEIGHT ${height}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n`, 'latin1'), rgba]);
+}
+
+function profileChunk(profile, name = 'Display P3') {
+  return Buffer.concat([Buffer.from(`${name}\u0000\u0000`, 'latin1'), zlib.deflateSync(profile)]);
+}
+
+function losslessWebp(width, height, options = {}) {
+  const image = Buffer.alloc(5 + (options.pad || 3), 0x55);
+  image[0] = 0x2f;
+  image.writeUInt32LE(((width - 1) | ((height - 1) << 14)) >>> 0, 1);
+  const flags = (options.profiles ? 0x20 : 0) | (options.exif ? 0x08 : 0) | (options.xmp ? 0x04 : 0);
+  if (flags === 0) return riff([['VP8L', image]]);
+  const extended = Buffer.alloc(10);
+  extended[0] = flags;
+  extended.writeUIntLE(width - 1, 4, 3);
+  extended.writeUIntLE(height - 1, 7, 3);
+  return riff([
+    ['VP8X', extended],
+    ...(options.profiles || []).map((profile) => ['ICCP', profile]),
+    ['VP8L', image],
+    ...(options.exif ? [['EXIF', Buffer.from('capture tool')]] : []),
+    ...(options.xmp ? [['XMP ', Buffer.from('<x:xmpmeta/>')]] : []),
+  ]);
+}
+
+function standInTools(plans = {}, directory = tempDir('tools')) {
+  fs.mkdirSync(directory, { recursive: true });
+  fs.chmodSync(directory, 0o755);
+  const log = path.join(directory, 'calls.jsonl');
+  const plan = (tool, value = {}) => fs.writeFileSync(path.join(directory, `${tool}.json`), JSON.stringify({ tool, log, ...value }));
+  for (const tool of ['cwebp', 'dwebp']) {
+    if (plans[tool] === null) continue;
+    fs.writeFileSync(path.join(directory, tool), STAND_IN_TOOL, { mode: 0o755 });
+    plan(tool, plans[tool]);
+  }
+  const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : []);
+  const reply = (tool, bytes) => {
+    const output = path.join(directory, `${tool}.answer`);
+    fs.writeFileSync(output, bytes);
+    plan(tool, { output });
+  };
+  return { directory, plan, calls, reply };
+}
+
+function verifiedTools(picture, options = {}) {
+  const tools = standInTools({}, options.directory);
+  const webp = losslessWebp(picture.width, picture.height, options.webp);
+  tools.reply('cwebp', webp);
+  tools.reply('dwebp', pamOf(picture.width, picture.height, rgbaOf(picture.pixels, picture.channels || 3)));
+  return { ...tools, webp };
+}
+
+function scratchOf(fx) {
+  return path.join(fx.data, 'evidence-report', 'v1', 'scratch');
+}
+
+function privateScratch(fx) {
+  return fs.existsSync(scratchOf(fx)) ? fs.readdirSync(scratchOf(fx)).filter((name) => name.startsWith('webp-')) : [];
+}
+
+function bindingOf(fx, id) {
+  return JSON.parse(fs.readFileSync(path.join(repositoryDirectory(fx), `${id}.binding.json`), 'utf8'));
+}
+
 function corpusFile(caseName, extension) {
   const directory = path.join(CORPUS, caseName, 'files');
   const name = fs.readdirSync(directory).find((entry) => entry.endsWith(`.${extension}`));
@@ -1318,7 +1476,7 @@ test('a report lock another live call holds makes a verb wait and refuse, and th
 });
 
 test('the config keys are read permissively and every value not used is disclosed', () => {
-  assert.deepEqual(er.normalizeConfig(undefined), { enabled: true, dir: null, keep: 30, maxBytes: 2147483648, disclosures: [] });
+  assert.deepEqual(er.normalizeConfig(undefined), { enabled: true, dir: null, keep: 30, maxBytes: 2147483648, webp: 'auto', disclosures: [] });
   assert.equal(er.normalizeConfig({ user: { enabled: false } }).enabled, false);
   assert.equal(er.normalizeConfig({ user: { enabled: 'false' } }).enabled, true);
   const relative = er.normalizeConfig({ user: { dir: 'reports' } });
@@ -1328,7 +1486,7 @@ test('the config keys are read permissively and every value not used is disclose
   assert.equal(bad.keep, 30);
   assert.equal(bad.maxBytes, 2147483648);
   assert.equal(bad.disclosures.length, 2);
-  assert.deepEqual(er.normalizeConfig({ user: { keep: 5, maxBytes: 1000 } }), { enabled: true, dir: null, keep: 5, maxBytes: 1000, disclosures: [] });
+  assert.deepEqual(er.normalizeConfig({ user: { keep: 5, maxBytes: 1000 } }), { enabled: true, dir: null, keep: 5, maxBytes: 1000, webp: 'auto', disclosures: [] });
   const layered = er.normalizeConfig({ user: { maxBytes: 5000, dir: '/srv/user-reports' }, project: { keep: 2, maxBytes: 1, dir: '/srv/project-reports', enabled: false } });
   assert.deepEqual([layered.enabled, layered.dir, layered.keep, layered.maxBytes, layered.disclosures.length], [false, path.resolve('/srv/user-reports'), 2, 5000, 2]);
   const projectOnly = er.normalizeConfig({ project: { maxBytes: 7 } });
@@ -1375,18 +1533,26 @@ test('the core module reads no host environment variable and every host fact ent
   assert.equal((source.match(/process\.env/g) || []).length, 1);
   assert.match(source, /async function main\(argv, env = process\.env\)/);
   const required = [...source.matchAll(/require\('([^']+)'\)/g)].map((match) => match[1]).sort();
-  assert.deepEqual(required, ['./acceptance-verify-v1.js', './evidence-run-v1.js', './secret-patterns.js', './session-control-core-v1.js', './zensu-artifact-redact-v1.js', 'node:crypto', 'node:fs', 'node:path']);
+  assert.deepEqual(required, ['./acceptance-verify-v1.js', './evidence-run-v1.js', './secret-patterns.js', './session-control-core-v1.js', './zensu-artifact-redact-v1.js', 'node:child_process', 'node:crypto', 'node:fs', 'node:path', 'node:zlib']);
   const seen = new Set();
   const env = new Proxy({ ZENSU_ERP_HOST: 'kiro' }, { get(target, key) { seen.add(String(key)); return target[key]; } });
   const options = er.transportOptions(env);
   assert.equal(options.host, 'kiro');
   for (const key of seen) assert.match(key, /^ZENSU_ERP_[A-Z_]+$/);
+  assert.ok(seen.has('ZENSU_ERP_TOOL_PATH'));
+  assert.equal(er.transportOptions({ ZENSU_ERP_TOOL_PATH: '/opt/tools:/usr/bin' }).toolPath, '/opt/tools:/usr/bin');
+  assert.equal(er.transportOptions({}).toolPath, '');
 });
 
-test('the core module makes no network request, starts no program itself and runs git through the evidence runner', () => {
+test('the core module makes no network request, starts only the two WebP tools through one runner without a shell, and runs git through the evidence runner', () => {
   const source = fs.readFileSync(LIB, 'utf8');
-  assert.doesNotMatch(source, /require\('node:(?:http|https|http2|net|tls|dns|dgram|child_process)'\)/);
-  assert.doesNotMatch(source, /\bfetch\(|spawnSync|execFileSync|childProcess/);
+  assert.doesNotMatch(source, /require\('node:(?:http|https|http2|net|tls|dns|dgram)'\)/);
+  assert.doesNotMatch(source, /\bfetch\(|execFileSync|execSync|\bspawn\(|\bfork\(|shell: true/);
+  assert.match(source, /^const childProcess = require\('node:child_process'\);$/m);
+  assert.equal((source.match(/childProcess\./g) || []).length, 1);
+  assert.match(source, /childProcess\.spawnSync\(tool, args, \{\n    cwd: directory,\n    env: toolEnvironment\(\),\n    shell: false,\n    stdio: 'ignore',\n    timeout: limits\.toolMs,\n    killSignal: 'SIGKILL',\n    windowsHide: true,\n  \}\)/);
+  assert.deepEqual([...source.matchAll(/runTool\(tools\.(encoder|decoder), /g)].map((match) => match[1]), ['encoder', 'decoder']);
+  assert.equal((source.match(/\brunTool\(/g) || []).length, 3);
   assert.match(source, /evidenceRun\.git\(/);
   assert.doesNotMatch(source, /not a git repository/);
   assert.equal(evr.outsideWorkTree({ code: 'ENOENT' }), true);
@@ -2245,4 +2411,549 @@ test('the manifest and the binding are read schema first and a schema this reade
   fs.writeFileSync(draftPath, `${JSON.stringify(draft, null, 2)}\n`);
   ok(call(fx, 'render', { report: drafted.id, verdict: 'PARTIAL' }));
   assert.deepEqual(manifestOf(drafted.bundle).coverage.criteria.map((criterion) => criterion.zensu), [zensu, null]);
+});
+
+test('the PNG decoder returns the exact pixels of every filter type for RGB and RGBA and refuses a pixel stream of the wrong length', () => {
+  for (const channels of [3, 4]) {
+    const width = 7;
+    const height = 10;
+    const stride = width * channels;
+    const pixels = sampleBytes(stride * height, 40 + channels);
+    for (const filters of [[0], [1], [2], [3], [4], [4, 3, 2, 1, 0], [1, 4, 0, 3, 2]]) {
+      const facts = er.pngFacts(pngOf({ width, height, channels, pixels, filters }));
+      assert.deepEqual([facts.reason, facts.width, facts.height, facts.channels, facts.icc], [undefined, width, height, channels, null]);
+      assert.ok(Buffer.concat(er.decodePng(facts)).equals(pixels), `${channels} channels with the filters ${filters}`);
+    }
+    const stream = Buffer.concat(Array.from({ length: height }, (unused, line) => Buffer.concat([Buffer.from([0]), pixels.subarray(line * stride, (line + 1) * stride)])));
+    const packed = zlib.deflateSync(stream);
+    const split = er.pngFacts(pngOf({ width, height, channels, pixels, idat: [packed.subarray(0, 9), packed.subarray(9)] }));
+    assert.equal(split.idat.length, 2);
+    assert.ok(Buffer.concat(er.decodePng(split)).equals(pixels));
+    const unknownFilter = Buffer.from(stream);
+    unknownFilter[stride + 1] = 5;
+    const broken = [stream.subarray(0, stream.length - 1), Buffer.concat([stream, Buffer.from([0])]), Buffer.alloc(0), unknownFilter].map((bytes) => zlib.deflateSync(bytes));
+    for (const idat of [...broken, Buffer.from('not a zlib stream')]) {
+      assert.equal(er.decodePng(er.pngFacts(pngOf({ width, height, channels, pixels, idat }))), null);
+    }
+  }
+});
+
+test('a PNG that libpng wrote with all five filter types decodes to the pixels libwebp decoded for the same image', () => {
+  const facts = er.pngFacts(LIBPNG_FILTERS_PNG);
+  assert.deepEqual([facts.reason, facts.width, facts.height, facts.channels], [undefined, 12, 10, 3]);
+  const stream = zlib.inflateSync(Buffer.concat(facts.idat));
+  assert.deepEqual([...new Set(Array.from({ length: 10 }, (unused, line) => stream[line * 37]))].sort(), [0, 1, 2, 3, 4]);
+  assert.equal(hex(rgbaOf(Buffer.concat(er.decodePng(facts)), 3)), LIBPNG_FILTERS_RGBA);
+});
+
+test('the PNG facts name the first reason a PNG is outside what a lossless WebP can hold', () => {
+  const width = 5;
+  const height = 4;
+  const base = { width, height, channels: 3, pixels: sampleBytes(width * height * 3, 7) };
+  const facts = (spec, limits) => er.pngFacts(pngOf({ ...base, ...spec }), limits);
+  const density = (across, down) => {
+    const bytes = Buffer.alloc(9);
+    bytes.writeUInt32BE(across, 0);
+    bytes.writeUInt32BE(down, 4);
+    bytes[8] = 1;
+    return bytes;
+  };
+  const profile = sampleBytes(300, 3);
+  assert.equal(facts({}).reason, undefined);
+  assert.equal(facts({ depth: 16 }).reason, 'it is not an 8-bit truecolor image');
+  for (const colour of [0, 3, 4]) assert.equal(facts({ colour }).reason, 'it is not an 8-bit truecolor image');
+  assert.equal(facts({ interlace: 1 }).reason, 'it is interlaced');
+  assert.equal(facts({ compression: 1 }).reason, 'its header names an unknown compression or filter method');
+  assert.equal(facts({ filter: 1 }).reason, 'its header names an unknown compression or filter method');
+  assert.equal(er.pngFacts(pngOf({ width: 16384, height: 1, pixels: Buffer.alloc(16384 * 3) })).reason, 'a side is longer than 16383 pixels, the limit of a WebP');
+  assert.equal(er.pngFacts(pngOf({ width: 1, height: 16384, pixels: Buffer.alloc(16384 * 3) })).reason, 'a side is longer than 16383 pixels, the limit of a WebP');
+  assert.equal(er.pngFacts(pngOf({ width: 16383, height: 1, pixels: Buffer.alloc(16383 * 3) })).reason, undefined);
+  assert.equal(facts({}, { ...er.LIMITS, maxTranscodePixels: 19 }).reason, 'it holds more than 19 pixels');
+  assert.equal(facts({}, { ...er.LIMITS, maxTranscodePixels: 20 }).reason, undefined);
+  for (const type of ['tRNS', 'PLTE', 'bKGD', 'hIST', 'sPLT', 'cICP', 'mDCV', 'cLLI']) {
+    assert.equal(facts({ extra: [[type, Buffer.alloc(3)]] }).reason, `it carries a ${type} chunk, which a WebP cannot hold`);
+  }
+  for (const type of ['gAMA', 'cHRM']) {
+    assert.equal(facts({ extra: [[type, Buffer.alloc(4)]] }).reason, `it carries ${type} without sRGB or iCCP`);
+    assert.equal(facts({ extra: [['sRGB', Buffer.from([0])], [type, Buffer.alloc(4)]] }).reason, undefined);
+    assert.ok(facts({ extra: [[type, Buffer.alloc(4)], ['iCCP', profileChunk(profile)]] }).icc.equals(profile));
+  }
+  assert.equal(facts({ extra: [['sBIT', Buffer.from([8, 8, 8])], ['pHYs', density(5669, 5669)]] }).reason, undefined);
+  assert.equal(facts({ extra: [['pHYs', density(5669, 2835)]] }).reason, 'its pHYs chunk does not declare square pixels');
+  assert.equal(facts({ extra: [['pHYs', Buffer.alloc(8)]] }).reason, 'its pHYs chunk does not declare square pixels');
+  assert.equal(facts({ extra: [['sRGB', Buffer.from([0])], ['sRGB', Buffer.from([0])]] }).reason, 'it repeats its sRGB chunk');
+  assert.ok(facts({ extra: [['iCCP', profileChunk(profile)]] }).icc.equals(profile));
+  const unreadable = [
+    Buffer.from([0, 0, 1, 2]),
+    Buffer.concat([Buffer.from('P3\u0000\u0001', 'latin1'), zlib.deflateSync(profile)]),
+    Buffer.from('P3\u0000\u0000not a zlib stream', 'latin1'),
+    Buffer.from(`${'n'.repeat(80)}\u0000\u0000`, 'latin1'),
+  ];
+  for (const data of unreadable) assert.equal(facts({ extra: [['iCCP', data]] }).reason, 'its ICC profile cannot be read');
+  assert.equal(facts({ extra: [['iCCP', profileChunk(profile)]] }, { ...er.LIMITS, maxProfileBytes: 299 }).reason, 'its ICC profile cannot be read');
+});
+
+test('the tool lookup takes the first absolute path entry that holds cwebp, needs dwebp beside it and refuses a pair inside the project', { skip: NO_STAND_IN_TOOLS }, () => {
+  const project = tempDir('project');
+  let asked = 0;
+  const roots = () => {
+    asked += 1;
+    return [project];
+  };
+  const join = (...entries) => entries.join(path.delimiter);
+  const good = standInTools();
+  const found = { encoder: path.join(good.directory, 'cwebp'), decoder: path.join(good.directory, 'dwebp') };
+  const empty = tempDir('empty');
+  assert.deepEqual(er.findWebpTools(good.directory, roots), found);
+  assert.deepEqual(er.findWebpTools(join('', 'relative/bin', '.', empty, path.join(empty, 'missing'), good.directory), roots), found);
+  asked = 0;
+  for (const value of [undefined, '', 'bin', join('', '.', 'tools/bin'), empty, path.join(empty, 'missing')]) assert.equal(er.findWebpTools(value, roots), null);
+  const reachable = path.relative(process.cwd(), good.directory);
+  assert.equal(path.isAbsolute(reachable), false);
+  assert.ok(fs.statSync(path.join(reachable, 'cwebp')).isFile(), 'the relative entry reaches the pair');
+  assert.equal(er.findWebpTools(reachable, roots), null);
+  assert.equal(er.findWebpTools(join(reachable, empty), roots), null);
+  assert.equal(asked, 0);
+  const encoderOnly = standInTools({ dwebp: null });
+  assert.equal(er.findWebpTools(join(encoderOnly.directory, good.directory), roots), null);
+  const decoderOnly = standInTools({ cwebp: null });
+  assert.deepEqual(er.findWebpTools(join(decoderOnly.directory, good.directory), roots), found);
+  const plainFile = standInTools();
+  fs.chmodSync(path.join(plainFile.directory, 'cwebp'), 0o644);
+  assert.equal(er.findWebpTools(plainFile.directory, roots), null);
+  assert.deepEqual(er.findWebpTools(join(plainFile.directory, good.directory), roots), found);
+  const folder = standInTools({ cwebp: null });
+  fs.mkdirSync(path.join(folder.directory, 'cwebp'));
+  assert.deepEqual(er.findWebpTools(join(folder.directory, good.directory), roots), found);
+  const plainDecoder = standInTools();
+  fs.chmodSync(path.join(plainDecoder.directory, 'dwebp'), 0o644);
+  assert.equal(er.findWebpTools(join(plainDecoder.directory, good.directory), roots), null);
+  const inside = standInTools({}, path.join(project, 'node_modules', '.bin'));
+  assert.equal(er.findWebpTools(join(inside.directory, good.directory), roots), null);
+  assert.equal(er.findWebpTools(good.directory, () => [good.directory]), null);
+  assert.equal(er.findWebpTools(good.directory, () => null), null);
+  const linked = path.join(tempDir('links'), 'bin');
+  fs.symlinkSync(good.directory, linked);
+  assert.deepEqual(er.findWebpTools(linked, roots), found);
+  const projectLink = path.join(project, 'tools');
+  fs.symlinkSync(good.directory, projectLink);
+  assert.equal(er.findWebpTools(projectLink, roots), null);
+  const linkedTool = tempDir('linked-tool');
+  fs.symlinkSync(path.join(inside.directory, 'cwebp'), path.join(linkedTool, 'cwebp'));
+  fs.symlinkSync(path.join(good.directory, 'dwebp'), path.join(linkedTool, 'dwebp'));
+  assert.equal(er.findWebpTools(linkedTool, roots), null);
+  const open = standInTools();
+  const openPair = { encoder: path.join(open.directory, 'cwebp'), decoder: path.join(open.directory, 'dwebp') };
+  for (const mode of [0o777, 0o1777, 0o757]) {
+    fs.chmodSync(open.directory, mode);
+    asked = 0;
+    assert.equal(er.findWebpTools(open.directory, roots), null, `a tool directory of mode ${mode.toString(8)}`);
+    assert.equal(er.findWebpTools(join(open.directory, good.directory), roots), null);
+    assert.equal(asked, 0);
+  }
+  fs.chmodSync(open.directory, 0o775);
+  assert.deepEqual(er.findWebpTools(open.directory, roots), openPair);
+  for (const tool of ['cwebp', 'dwebp']) {
+    const loose = standInTools();
+    fs.chmodSync(path.join(loose.directory, tool), 0o757);
+    assert.equal(er.findWebpTools(loose.directory, roots), null, `a ${tool} that everyone may write`);
+    fs.chmodSync(path.join(loose.directory, tool), 0o775);
+    assert.deepEqual(er.findWebpTools(loose.directory, roots), { encoder: path.join(loose.directory, 'cwebp'), decoder: path.join(loose.directory, 'dwebp') });
+  }
+  fs.chmodSync(open.directory, 0o777);
+  const viaLinks = tempDir('via-links');
+  for (const tool of ['cwebp', 'dwebp']) fs.symlinkSync(path.join(open.directory, tool), path.join(viaLinks, tool));
+  assert.equal(er.findWebpTools(viaLinks, roots), null);
+  fs.chmodSync(open.directory, 0o755);
+  assert.deepEqual(er.findWebpTools(viaLinks, roots), openPair);
+  fs.chmodSync(viaLinks, 0o777);
+  assert.equal(er.findWebpTools(viaLinks, roots), null);
+  const above = tempDir('above');
+  const below = standInTools({}, path.join(above, 'bin'));
+  const belowPair = { encoder: path.join(below.directory, 'cwebp'), decoder: path.join(below.directory, 'dwebp') };
+  for (const [mode, expected] of [[0o777, null], [0o757, null], [0o1777, belowPair], [0o775, belowPair], [0o755, belowPair]]) {
+    fs.chmodSync(above, mode);
+    asked = 0;
+    assert.deepEqual(er.findWebpTools(below.directory, roots), expected, `a directory above the pair of mode ${mode.toString(8)}`);
+    if (expected === null) assert.equal(asked, 0);
+  }
+  const linkedBelow = tempDir('linked-below');
+  for (const tool of ['cwebp', 'dwebp']) fs.symlinkSync(path.join(below.directory, tool), path.join(linkedBelow, tool));
+  fs.chmodSync(linkedBelow, 0o755);
+  assert.deepEqual(er.findWebpTools(linkedBelow, roots), belowPair);
+  fs.chmodSync(above, 0o777);
+  assert.equal(er.findWebpTools(linkedBelow, roots), null);
+  fs.chmodSync(above, 0o755);
+  const high = tempDir('high');
+  const deep = standInTools({}, path.join(high, 'mid', 'bin'));
+  fs.chmodSync(path.join(high, 'mid'), 0o755);
+  const deepPair = { encoder: path.join(deep.directory, 'cwebp'), decoder: path.join(deep.directory, 'dwebp') };
+  for (const [mode, expected] of [[0o777, null], [0o757, null], [0o1777, deepPair], [0o775, deepPair], [0o755, deepPair]]) {
+    fs.chmodSync(high, mode);
+    asked = 0;
+    assert.deepEqual(er.findWebpTools(deep.directory, roots), expected, `a directory two levels above the pair of mode ${mode.toString(8)}`);
+    if (expected === null) assert.equal(asked, 0);
+  }
+  const opening = tempDir('opening');
+  const entry = path.join(opening, 'links');
+  fs.mkdirSync(entry);
+  fs.chmodSync(entry, 0o755);
+  for (const tool of ['cwebp', 'dwebp']) fs.symlinkSync(path.join(good.directory, tool), path.join(entry, tool));
+  for (const [mode, expected] of [[0o777, null], [0o757, null], [0o1777, found], [0o755, found]]) {
+    fs.chmodSync(opening, mode);
+    asked = 0;
+    assert.deepEqual(er.findWebpTools(entry, roots), expected, `a directory above the entry of mode ${mode.toString(8)}`);
+    if (expected === null) assert.equal(asked, 0);
+  }
+  const spelling = tempDir('spelling');
+  const spelled = path.join(spelling, 'bin');
+  fs.symlinkSync(good.directory, spelled);
+  for (const [mode, expected] of [[0o777, null], [0o757, null], [0o1777, found], [0o755, found]]) {
+    fs.chmodSync(spelling, mode);
+    asked = 0;
+    assert.deepEqual(er.findWebpTools(spelled, roots), expected, `a directory above the entry as the tool path spells it of mode ${mode.toString(8)}`);
+    if (expected === null) assert.equal(asked, 0);
+  }
+});
+
+test('the tool lookup answers no pair on Windows, where it was never measured', () => {
+  const directory = tempDir('windows-tools');
+  fs.chmodSync(directory, 0o755);
+  for (const name of ['cwebp', 'dwebp', 'cwebp.exe', 'dwebp.exe']) fs.writeFileSync(path.join(directory, name), '', { mode: 0o755 });
+  let asked = 0;
+  const roots = () => {
+    asked += 1;
+    return [tempDir('project')];
+  };
+  assert.equal(er.findWebpTools(directory, roots, 'win32'), null);
+  assert.equal(asked, 0);
+  if (process.platform === 'win32') {
+    assert.equal(er.findWebpTools(directory, roots), null);
+    return;
+  }
+  assert.deepEqual(er.findWebpTools(directory, roots, process.platform), { encoder: path.join(directory, 'cwebp'), decoder: path.join(directory, 'dwebp') });
+  assert.equal(asked, 1);
+});
+
+test('add stores a verified lossless WebP in place of the PNG and records the captured file as its source', { skip: NO_STAND_IN_TOOLS }, () => {
+  const fx = fixture();
+  const { id, bundle } = begin(fx);
+  const width = 9;
+  const height = 6;
+  const picture = { width, height, pixels: sampleBytes(width * height * 3, 11) };
+  const captured = pngOf({ ...picture, filters: [4, 1, 2, 3, 0] });
+  const tools = verifiedTools(picture);
+  const scratch = scratchOf(fx);
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  for (const [name, time] of [['webp-stale', hourAgo], ['webp-fresh', new Date()], ['other', hourAgo]]) {
+    fs.mkdirSync(path.join(scratch, name), { recursive: true });
+    fs.utimesSync(path.join(scratch, name), time, time);
+  }
+  const coverageDirectory = process.env.NODE_V8_COVERAGE;
+  process.env.ZENSU_ERP_CANARY = 'leaked';
+  process.env.NODE_V8_COVERAGE = path.join(fx.data, 'coverage-canary');
+  let added;
+  try {
+    added = ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, 'shot.png', captured), viewport: '1440x900@1' }, 'The settings page after a reload', { toolPath: ['relative', tools.directory].join(path.delimiter) }));
+  } finally {
+    delete process.env.ZENSU_ERP_CANARY;
+    if (coverageDirectory === undefined) delete process.env.NODE_V8_COVERAGE;
+    else process.env.NODE_V8_COVERAGE = coverageDirectory;
+  }
+  const sha = hex(tools.webp);
+  assert.equal(added.lines[0], `zensu evidence report: e1 added to ${id} | image | image/webp ${width}x${height} | ${tools.webp.length} bytes | files/${sha}.webp | transcoded losslessly from a PNG of ${captured.length} bytes`);
+  assert.deepEqual(fs.readdirSync(path.join(bundle, 'files')), [`${sha}.webp`]);
+  assert.ok(fs.readFileSync(path.join(bundle, 'files', `${sha}.webp`)).equals(tools.webp));
+  assert.deepEqual(bindingOf(fx, id).files[sha], { name: `files/${sha}.webp`, type: 'image/webp', bytes: tools.webp.length, width, height, viewport: { width: 1440, height: 900, scale: 1 }, source_sha256: hex(captured) });
+  const calls = tools.calls();
+  assert.deepEqual(calls.map((entry) => entry.tool), ['cwebp', 'dwebp']);
+  const directory = calls[0].cwd;
+  assert.equal(path.dirname(directory), scratch);
+  assert.match(path.basename(directory), /^webp-/);
+  assert.deepEqual(calls[0].args, [...ENCODER_FLAGS, '-o', path.join(directory, 'target.webp'), path.join(directory, 'source.png')]);
+  assert.deepEqual(calls[1].args, [path.join(directory, 'target.webp'), '-pam', '-o', path.join(directory, 'decoded.pam')]);
+  for (const entry of calls) {
+    assert.equal(entry.cwd, directory);
+    assert.equal(entry.program, path.join(tools.directory, entry.tool));
+    assert.deepEqual(Object.keys(entry.env).filter((key) => !key.startsWith('__CF')), []);
+  }
+  assert.deepEqual(fs.readdirSync(scratch).sort(), ['other', 'webp-fresh']);
+  const profile = sampleBytes(200, 5);
+  const overlay = { width, height, channels: 4, pixels: sampleBytes(width * height * 4, 12) };
+  const tagged = pngOf({ ...overlay, filters: [3, 4], extra: [['iCCP', profileChunk(profile)], ['tEXt', Buffer.from('Software\u0000Example capture tool', 'latin1')]] });
+  const cleaned = er.sniff(tagged).clean();
+  const withProfile = verifiedTools(overlay, { webp: { profiles: [profile] } });
+  const second = ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, 'tagged.png', tagged) }, 'A translucent overlay', { toolPath: withProfile.directory }));
+  const taggedSha = hex(withProfile.webp);
+  assert.equal(second.lines[0], `zensu evidence report: e2 added to ${id} | image | image/webp ${width}x${height} | ${withProfile.webp.length} bytes | files/${taggedSha}.webp | dropped the metadata chunks tEXt | transcoded losslessly from a PNG of ${cleaned.length} bytes`);
+  assert.equal(bindingOf(fx, id).files[taggedSha].source_sha256, hex(tagged));
+  assert.deepEqual(privateScratch(fx), ['webp-fresh']);
+  ok(step(fx, id, { criteria: 'AC-001', evidence: 'e1,e2' }));
+  ok(call(fx, 'render', { report: id, verdict: 'PARTIAL' }));
+  assert.deepEqual(Object.values(manifestOf(bundle).files).map((file) => file.type), ['image/webp', 'image/webp']);
+  assert.match(fs.readFileSync(path.join(bundle, 'index.html'), 'utf8'), new RegExp(`<img src="files/${sha}\\.webp"`));
+  assert.match(fs.readFileSync(ok(call(fx, 'export', { report: id })).target, 'utf8'), /<img src="data:image\/webp;base64,/);
+});
+
+test('a transcode that cannot be verified keeps the PNG and names the reason on the add line', { skip: NO_STAND_IN_TOOLS }, () => {
+  const fx = fixture();
+  const { id, bundle } = begin(fx);
+  const width = 8;
+  const height = 5;
+  const profile = sampleBytes(120, 9);
+  let count = 0;
+  const attempt = (reason, called, prepare, spec = {}, overrides = {}) => {
+    count += 1;
+    const channels = spec.channels || 3;
+    const pixels = sampleBytes(width * height * channels, 100 + count);
+    const picture = { width, height, channels, pixels };
+    const captured = pngOf({ ...picture, ...spec });
+    const tools = verifiedTools(picture);
+    prepare(tools, pixels, captured);
+    const added = ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, `case-${count}.png`, captured) }, `Case ${count}`, { toolPath: tools.directory, ...overrides }));
+    assert.equal(added.lines[0], `zensu evidence report: e${count} added to ${id} | image | image/png ${width}x${height} | ${captured.length} bytes | files/${hex(captured)}.png | PNG kept: ${reason}`);
+    assert.equal(bindingOf(fx, id).files[hex(captured)].source_sha256, null);
+    const started = tools.calls().map((entry) => entry.tool);
+    if (typeof called === 'function') assert.ok(called(started), `${reason}: ${JSON.stringify(started)}`);
+    else assert.deepEqual(started, called, reason);
+    assert.deepEqual(privateScratch(fx), [], reason);
+  };
+  const differs = 'the decoded WebP differs from the PNG';
+  const both = ['cwebp', 'dwebp'];
+  attempt(differs, both, (tools, pixels) => {
+    const rgba = rgbaOf(pixels, 3);
+    rgba[rgba.length - 2] ^= 1;
+    tools.reply('dwebp', pamOf(width, height, rgba));
+  });
+  attempt(differs, both, (tools, pixels) => {
+    const rgba = rgbaOf(pixels, 3);
+    rgba[3] = 0xfe;
+    tools.reply('dwebp', pamOf(width, height, rgba));
+  });
+  attempt(differs, both, (tools, pixels) => tools.reply('dwebp', pamOf(width + 1, height, rgbaOf(pixels, 3))));
+  attempt(differs, both, (tools, pixels) => tools.reply('dwebp', pamOf(width, height, rgbaOf(pixels, 3)).subarray(0, 200)));
+  attempt(differs, both, (tools) => tools.plan('dwebp', {}));
+  attempt(differs, both, (tools, pixels) => {
+    const exact = path.join(tools.directory, 'exact.pam');
+    fs.writeFileSync(exact, pamOf(width, height, rgbaOf(pixels, 3)));
+    tools.plan('dwebp', { link: exact });
+  });
+  attempt(differs, both, (tools) => tools.plan('dwebp', { folder: true }));
+  const mkfifo = (process.env.PATH || '').split(path.delimiter).filter((entry) => path.isAbsolute(entry)).map((entry) => path.join(entry, 'mkfifo')).find((candidate) => fs.existsSync(candidate));
+  if (mkfifo) attempt(differs, both, (tools) => tools.plan('dwebp', { fifo: mkfifo }));
+  const openSync = fs.openSync;
+  fs.openSync = (file, ...rest) => {
+    if (String(file).endsWith(`${path.sep}decoded.pam`)) throw new TypeError('a fault that is no file-system error');
+    return openSync(file, ...rest);
+  };
+  try {
+    attempt('the transcode could not be completed', both, () => {});
+  } finally {
+    fs.openSync = openSync;
+  }
+  attempt(differs, both, (tools, pixels) => {
+    const rgba = rgbaOf(pixels, 4);
+    rgba[7] ^= 0x80;
+    tools.reply('dwebp', pamOf(width, height, rgba));
+  }, { channels: 4 });
+  const encoderOnly = ['cwebp'];
+  const answers = (bytes) => (tools) => tools.reply('cwebp', bytes);
+  attempt('the WebP has another size than the PNG', encoderOnly, answers(losslessWebp(width + 1, height)));
+  attempt('the WebP has another size than the PNG', encoderOnly, answers(losslessWebp(width, height - 1)));
+  attempt('cwebp wrote no lossless WebP', encoderOnly, answers(riff([['VP8 ', Buffer.alloc(12)]])));
+  attempt('cwebp wrote no lossless WebP', encoderOnly, answers(riff([['VP8X', Buffer.from([0x02, 0, 0, 0, width - 1, 0, 0, height - 1, 0, 0])], ['ANIM', Buffer.alloc(6)]])));
+  attempt('cwebp wrote no lossless WebP', encoderOnly, answers(Buffer.from('this is no image at all')));
+  attempt('cwebp wrote no lossless WebP', encoderOnly, answers(Buffer.alloc(0)));
+  attempt('the WebP carries metadata', encoderOnly, answers(losslessWebp(width, height, { exif: true })));
+  attempt('the WebP carries metadata', encoderOnly, answers(losslessWebp(width, height, { xmp: true })));
+  attempt('the ICC profile did not survive', encoderOnly, answers(losslessWebp(width, height, { profiles: [profile] })));
+  const tagged = { extra: [['iCCP', profileChunk(profile)]] };
+  attempt('the ICC profile did not survive', encoderOnly, answers(losslessWebp(width, height)), tagged);
+  attempt('the ICC profile did not survive', encoderOnly, answers(losslessWebp(width, height, { profiles: [sampleBytes(120, 10)] })), tagged);
+  attempt('the ICC profile did not survive', encoderOnly, answers(losslessWebp(width, height, { profiles: [profile, profile] })), tagged);
+  attempt('the WebP is not smaller', encoderOnly, (tools, pixels, captured) => tools.reply('cwebp', losslessWebp(width, height, { pad: captured.length })));
+  attempt('cwebp failed', encoderOnly, (tools) => tools.plan('cwebp', { exit: 3 }));
+  attempt('cwebp wrote no file', encoderOnly, (tools) => tools.plan('cwebp', {}));
+  attempt('dwebp failed', both, (tools) => tools.plan('dwebp', { exit: 1 }));
+  const onlyTheEncoderIfAny = (started) => started.length <= 1 && started.every((tool) => tool === 'cwebp');
+  attempt('cwebp ran past 250 ms', onlyTheEncoderIfAny, (tools) => tools.plan('cwebp', { sleepMs: 20000 }), {}, { limits: { toolMs: 250 } });
+  attempt('cwebp could not be started', [], (tools) => fs.writeFileSync(path.join(tools.directory, 'cwebp'), '#!/nonexistent/interpreter\n', { mode: 0o755 }));
+  assert.deepEqual(fs.readdirSync(path.join(bundle, 'files')).filter((name) => !name.endsWith('.png')), []);
+  assert.equal(fs.readdirSync(path.join(bundle, 'files')).length, count);
+  const blocked = fixture();
+  const blockedId = begin(blocked).id;
+  fs.rmSync(scratchOf(blocked), { recursive: true, force: true });
+  fs.writeFileSync(scratchOf(blocked), 'a file where the scratch directory belongs');
+  const picture = { width, height, pixels: sampleBytes(width * height * 3, 199) };
+  const idle = verifiedTools(picture);
+  const kept = ok(call(blocked, 'add', { report: blockedId, kind: 'image', file: runFile(blocked, 'blocked.png', pngOf(picture)) }, 'A capture', { toolPath: idle.directory }));
+  assert.match(kept.lines[0], /\| image\/png 8x5 \| [0-9]+ bytes \| files\/[0-9a-f]{64}\.png \| PNG kept: the scratch directory is unavailable$/);
+  assert.deepEqual(idle.calls(), []);
+});
+
+test('the pixel comparison reads a decoded image in several blocks, and a difference in any of them or a file that ends early keeps the PNG', { skip: NO_STAND_IN_TOOLS }, () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  const width = 300;
+  const height = 900;
+  const stride = width * 4;
+  const rowsPerBlock = Math.floor((1024 * 1024) / stride);
+  const head = pamOf(width, height, Buffer.alloc(0)).length;
+  assert.ok(height > rowsPerBlock && height < 2 * rowsPerBlock, 'the decoded image spans two read blocks');
+  let count = 0;
+  const add = (channels, change) => {
+    count += 1;
+    const picture = { width, height, channels, pixels: sampleBytes(width * height * channels, 400 + count) };
+    const captured = pngOf(picture);
+    const tools = verifiedTools(picture, { webp: { pad: 3 + count } });
+    tools.reply('dwebp', change(pamOf(width, height, rgbaOf(picture.pixels, channels))));
+    const added = ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, `blocks-${count}.png`, captured) }, `Blocks ${count}`, { toolPath: tools.directory }));
+    assert.deepEqual(tools.calls().map((entry) => entry.tool), ['cwebp', 'dwebp']);
+    assert.deepEqual(privateScratch(fx), []);
+    return { line: added.lines[0], captured, webp: tools.webp };
+  };
+  const flipped = (offset) => (pam) => {
+    pam[head + offset] ^= 1;
+    return pam;
+  };
+  for (const channels of [3, 4]) {
+    const stored = add(channels, (pam) => pam);
+    assert.equal(stored.line, `zensu evidence report: e${count} added to ${id} | image | image/webp ${width}x${height} | ${stored.webp.length} bytes | files/${hex(stored.webp)}.webp | transcoded losslessly from a PNG of ${stored.captured.length} bytes`);
+  }
+  const block = rowsPerBlock * stride;
+  const changes = [
+    [3, flipped(block - 1), 'the last byte of the first block'],
+    [3, flipped(block), 'the first byte of the second block'],
+    [3, flipped(height * stride - 1), 'the last byte'],
+    [4, flipped(height * stride - 4), 'the last pixel of an image with alpha'],
+    [3, (pam) => pam.subarray(0, head + block), 'a file cut after the first block, which its size gives away'],
+  ];
+  for (const [channels, change, label] of changes) {
+    const kept = add(channels, change);
+    assert.equal(kept.line, `zensu evidence report: e${count} added to ${id} | image | image/png ${width}x${height} | ${kept.captured.length} bytes | files/${hex(kept.captured)}.png | PNG kept: the decoded WebP differs from the PNG`, label);
+  }
+});
+
+test('a PNG outside what a lossless WebP can hold stays PNG with its reason and starts no tool', { skip: NO_STAND_IN_TOOLS }, () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  const width = 6;
+  const height = 4;
+  const tools = standInTools();
+  let count = 0;
+  const kept = (reason, spec, overrides = {}) => {
+    count += 1;
+    const pixels = sampleBytes(width * height * 3, 200 + count);
+    const captured = pngOf({ width, height, pixels, ...spec });
+    const added = ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, `kept-${count}.png`, captured) }, `Kept ${count}`, { toolPath: tools.directory, ...overrides }));
+    assert.equal(added.lines[0], `zensu evidence report: e${count} added to ${id} | image | image/png ${width}x${height} | ${captured.length} bytes | files/${hex(captured)}.png | PNG kept: ${reason}`);
+  };
+  kept('it is not an 8-bit truecolor image', { colour: 0 });
+  kept('it is not an 8-bit truecolor image', { depth: 16 });
+  kept('it is interlaced', { interlace: 1 });
+  kept('it carries a tRNS chunk, which a WebP cannot hold', { extra: [['tRNS', Buffer.alloc(6)]] });
+  kept('it carries gAMA without sRGB or iCCP', { extra: [['gAMA', Buffer.from([0, 1, 0x86, 0xa0])]] });
+  kept('its pHYs chunk does not declare square pixels', { extra: [['pHYs', Buffer.from([0, 0, 0, 2, 0, 0, 0, 1, 1])]] });
+  kept('it holds more than 23 pixels', {}, { limits: { maxTranscodePixels: 23 } });
+  kept('its pixel data cannot be read', { idat: zlib.deflateSync(Buffer.alloc(11)) });
+  assert.deepEqual(tools.calls(), []);
+  assert.deepEqual(privateScratch(fx), []);
+});
+
+test('without a tool path, or with one that names no absolute directory holding the tools, add stores the PNG with the step-2 line', () => {
+  const fx = fixture();
+  const { id, bundle } = begin(fx);
+  const empty = tempDir('empty');
+  const toolPaths = [undefined, '', 'bin', ['', '.', 'node_modules/.bin'].join(path.delimiter), empty, path.join(empty, 'missing')];
+  toolPaths.forEach((toolPath, index) => {
+    const bytes = png(4, 3, 20 + index);
+    const added = ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, `plain-${index}.png`, bytes) }, 'A capture', toolPath === undefined ? {} : { toolPath }));
+    assert.equal(added.lines[0], `zensu evidence report: e${index + 1} added to ${id} | image | image/png 4x3 | ${bytes.length} bytes | files/${hex(bytes)}.png`);
+  });
+  assert.deepEqual(Object.values(bindingOf(fx, id).files).map((file) => [file.type, file.source_sha256]), toolPaths.map(() => ['image/png', null]));
+  assert.equal(fs.readdirSync(path.join(bundle, 'files')).length, toolPaths.length);
+  assert.deepEqual(privateScratch(fx), []);
+});
+
+test('a pair that is incomplete, inside the project or its work tree, or switched off leaves the step-2 add and starts no tool', { skip: NO_STAND_IN_TOOLS }, () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  const width = 4;
+  const height = 3;
+  let count = 0;
+  const silent = (target, tools, overrides, label) => {
+    count += 1;
+    const pixels = sampleBytes(width * height * 3, 300 + count);
+    const bytes = pngOf({ width, height, pixels });
+    const prepared = tools(pixels);
+    const added = ok(call(target.fx, 'add', { report: target.id, kind: 'image', file: runFile(target.fx, `silent-${count}.png`, bytes) }, 'A capture', overrides(prepared)));
+    assert.match(added.lines[0], new RegExp(`^zensu evidence report: e[0-9]+ added to ${target.id} \\| image \\| image/png ${width}x${height} \\| ${bytes.length} bytes \\| files/${hex(bytes)}\\.png$`), label);
+    assert.deepEqual(prepared.calls(), [], label);
+  };
+  const here = { fx, id };
+  const working = (directory) => (pixels) => verifiedTools({ width, height, pixels }, { directory });
+  const onPath = (prepared) => ({ toolPath: prepared.directory });
+  silent(here, () => standInTools({ dwebp: null }), onPath, 'cwebp without dwebp');
+  silent(here, working(path.join(fx.root, 'node_modules', '.bin')), onPath, 'a pair inside the project root');
+  const workTree = tempDir('work-tree');
+  silent(here, working(path.join(workTree, 'bin')), (prepared) => ({ toolPath: prepared.directory, chain: { receiptPath: '', editLandingEscaped: false, workTree, workTreeFault: null, bashPath: 'bash' } }), 'a pair inside the chain work tree');
+  for (const config of [{ user: { webp: 'off' } }, { project: { webp: 'off' } }, { user: { webp: 'auto' }, project: { webp: 'lossy' } }, { user: { webp: false } }]) {
+    silent(here, working(), (prepared) => ({ toolPath: prepared.directory, config }), `config ${JSON.stringify(config)}`);
+  }
+  const top = repo({ label: 'monorepo' });
+  const application = path.join(top, 'packages', 'app');
+  fs.mkdirSync(application, { recursive: true });
+  const nested = fixture({ root: application });
+  const below = { fx: nested, id: begin(nested).id };
+  silent(below, working(path.join(top, 'tools')), onPath, 'a pair elsewhere in the repository of a project root below its top');
+  const picture = { width, height, pixels: sampleBytes(width * height * 3, 399) };
+  const outside = verifiedTools(picture);
+  const proof = ok(call(nested, 'add', { report: below.id, kind: 'image', file: runFile(nested, 'proof.png', pngOf(picture)) }, 'A capture', { toolPath: outside.directory }));
+  assert.match(proof.lines[0], /\| image\/webp 4x3 \| .* \| transcoded losslessly from a PNG of [0-9]+ bytes$/);
+});
+
+test('evidence.report.webp transcodes only while every layer that sets it says auto, and begin discloses what switched it off', () => {
+  const unknown = 'zensu evidence report: evidence.report.webp must be auto or off, so no image is transcoded';
+  const stands = 'zensu evidence report: the user configuration switched WebP transcoding off, and a project configuration can switch it off but never on';
+  const read = (config) => {
+    const { webp, disclosures } = er.normalizeConfig(config);
+    return [webp, disclosures];
+  };
+  for (const config of [undefined, {}, { user: {} }, { user: { webp: 'auto' } }, { project: { webp: 'auto' } }, { user: { webp: 'auto' }, project: { webp: 'auto' } }]) {
+    assert.deepEqual(read(config), ['auto', []], JSON.stringify(config));
+  }
+  for (const layer of ['user', 'project']) {
+    assert.deepEqual(read({ [layer]: { webp: 'off' } }), ['off', []]);
+    for (const value of ['lossy', 'AUTO', 'Off', ' auto', '', true, false, null, 0, ['auto'], { mode: 'auto' }]) {
+      assert.deepEqual(read({ [layer]: { webp: value } }), ['off', [unknown]], `${layer}: ${JSON.stringify(value)}`);
+    }
+  }
+  assert.deepEqual(read({ user: { webp: 'auto' }, project: { webp: 'off' } }), ['off', []]);
+  assert.deepEqual(read({ user: { webp: 'off' }, project: { webp: 'off' } }), ['off', []]);
+  assert.deepEqual(read({ user: { webp: 'off' }, project: { webp: 'auto' } }), ['off', [stands]]);
+  assert.deepEqual(read({ user: { webp: 'off' }, project: { webp: 'lossy' } }), ['off', [unknown]]);
+  assert.deepEqual(read({ user: { webp: 'auto' }, project: { webp: 1 } }), ['off', [unknown]]);
+  const stood = begin(fixture(), {}, FEATURE, { config: { user: { webp: 'off' }, project: { webp: 'auto' } } });
+  assert.equal(stood.lines[0], stands);
+  const refusedValue = begin(fixture(), {}, FEATURE, { config: { project: { webp: 'lossy' } } });
+  assert.equal(refusedValue.lines[0], unknown);
+  const quiet = begin(fixture(), {}, FEATURE, { config: { project: { webp: 'off' } } });
+  assert.doesNotMatch(quiet.lines.join('\n'), /webp|WebP/);
+});
+
+test('the rendered page carries one content security policy right after its charset, with the digest of its one style element', () => {
+  for (const entry of corpusCases().filter((item) => item.spec.expect.rendering)) {
+    for (const [mode, images] of [['bundle', "'self' file:"], ['export', 'data:']]) {
+      const html = er.renderDirectory(entry.directory, { mode }).html;
+      const lines = html.split('\n');
+      const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)];
+      assert.equal(styles.length, 1, entry.name);
+      const style = crypto.createHash('sha256').update(styles[0][1]).digest('base64');
+      const policy = `default-src 'none'; img-src ${images}; style-src 'sha256-${style}'; base-uri 'none'; form-action 'none'`;
+      assert.equal(lines[lines.indexOf('<meta charset="utf-8">') + 1], `<meta http-equiv="Content-Security-Policy" content="${policy}">`, `${entry.name} in ${mode} mode`);
+      assert.equal((html.match(/Content-Security-Policy/g) || []).length, 1, entry.name);
+      assert.equal(lines.indexOf('<meta charset="utf-8">'), 3, entry.name);
+      assert.doesNotMatch(html, /\sstyle="/, entry.name);
+    }
+  }
 });

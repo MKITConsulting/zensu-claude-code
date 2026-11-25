@@ -57,6 +57,18 @@ export ZENSU_CONFIG="$WORK/config.json"
 printf '{}\n' > "$ZENSU_CONFIG"
 unset CLAUDE_AGENT_TYPE ZENSU_CHAIN ZENSU_EDIT_LANDING_GATE ZENSU_ACCEPTANCE_GATE 2>/dev/null || true
 
+ENCODER_ONLY="$WORK/tools-encoder-only"
+TOOL_PAIR="$WORK/tools-pair"
+TOOL_RAN="$WORK/tool-ran"
+mkdir -p "$ENCODER_ONLY" "$TOOL_PAIR"
+chmod 755 "$ENCODER_ONLY" "$TOOL_PAIR"
+for stub in "$ENCODER_ONLY/cwebp" "$TOOL_PAIR/cwebp" "$TOOL_PAIR/dwebp"; do
+  printf '#!/bin/sh\n: > "%s"\nexit 97\n' "$TOOL_RAN" > "$stub"
+  chmod 755 "$stub"
+done
+SUITE_PATH="$PATH"
+export PATH="$ENCODER_ONLY:$SUITE_PATH"
+
 PROJ="$WORK/project"
 mkdir -p "$PROJ"
 git -C "$PROJ" init -q
@@ -638,6 +650,41 @@ else
   check "R23 the rules/report.md answers to a criterion.no-image and a verdict.contradiction refusal render: a skip row and PARTIAL, FAIL, a missing matrix row written first and PASS, and PARTIAL for a P0 skip row a later row cannot clear ($R23)" FAIL
   cat "$WORK/r23-no-image.txt" "$WORK/r23-contradiction.txt" "$WORK/r23-missing.txt" "$WORK/r23-skipped.txt" 2>/dev/null
   show
+fi
+
+R24=""
+PAIR_RUN="$PROJ/.zensu/verify-feature-runs/r9"
+mkdir -p "$PAIR_RUN"
+node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from(process.argv[2], "base64"))' "$PAIR_RUN/gray.png" 'iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAAAAAC4HznGAAAAEElEQVR42mPQsPRiiM6pBQAGTgHwC3mCbwAAAABJRU5ErkJggg=='
+cp "$PNG_SOURCE" "$PAIR_RUN/shot.png"
+bash "$LOG" --report-begin --run-dir "$PAIR_RUN" --mode local --drivers browser >"$OUT" 2>"$ERRF" <<'EOF'
+feature: The settings page saves the chosen locale
+AC-001: The locale persists after a reload
+EOF
+PAIR_ID="$(sed -n 's/^zensu evidence report: begun \(vr1_[0-9]*_[0-9a-f]*\) .*/\1/p' "$OUT")"
+[ -n "$PAIR_ID" ] || R24="$R24 begin"
+PATH="$TOOL_PAIR:$SUITE_PATH" bash "$LOG" --report-add --report "$PAIR_ID" --kind image --file "$PAIR_RUN/gray.png" >"$OUT" 2>"$ERRF" <<'EOF'
+A grayscale capture of the settings page
+EOF
+RC=$?
+cat "$OUT" "$ERRF" > "$WORK/r24-pair.txt"
+R24_KEPT=' | PNG kept: it is not an 8-bit truecolor image'
+case "$(uname -s)" in
+  (MINGW*|MSYS*|CYGWIN*) R24_KEPT='' ;;
+esac
+if [ "$RC" -ne 0 ] || ! grep -q "^zensu evidence report: e1 added to $PAIR_ID | image | image/png 3x2 | 73 bytes | files/[0-9a-f]*\.png$R24_KEPT\$" "$OUT"; then R24="$R24 pair-first($RC)"; fi
+PATH="$ENCODER_ONLY:$TOOL_PAIR:$SUITE_PATH" bash "$LOG" --report-add --report "$PAIR_ID" --kind image --file "$PAIR_RUN/shot.png" >"$OUT" 2>"$ERRF" <<'EOF'
+The settings page after a reload shows the new locale
+EOF
+RC=$?
+cat "$OUT" "$ERRF" > "$WORK/r24-encoder-only.txt"
+if [ "$RC" -ne 0 ] || ! grep -q "^zensu evidence report: e2 added to $PAIR_ID | image | image/png [0-9]*x[0-9]* | [0-9]* bytes | files/$(basename "$PNG_SOURCE")\$" "$OUT"; then R24="$R24 encoder-only($RC)"; fi
+[ ! -e "$TOOL_RAN" ] || R24="$R24 a-tool-was-started"
+if [ -z "$R24" ]; then
+  check "R24 --report-add hands the caller's PATH to the module: a tool pair first on PATH keeps a grayscale PNG with its reason, an encoder without its decoder ahead of a pair leaves the add line as it was, no tool is started, and on Windows, where the lookup answers no pair, both lines stay plain" PASS
+else
+  check "R24 --report-add hands the caller's PATH to the module: a tool pair first on PATH keeps a grayscale PNG with its reason, an encoder without its decoder ahead of a pair leaves the add line as it was, no tool is started, and on Windows, where the lookup answers no pair, both lines stay plain ($R24)" FAIL
+  cat "$WORK/r24-pair.txt" "$WORK/r24-encoder-only.txt" 2>/dev/null
 fi
 
 unit_check_done "R0z every unit file the registry gives this suite was graded"
