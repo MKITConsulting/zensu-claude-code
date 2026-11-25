@@ -167,9 +167,9 @@ green row would be a false all-clear.
   `v7.6.6`, 2026-10-19). `ALIASES` also holds `ral`: `Remove-Alias` declares it, and
   `CreateDefault()` defines it when it imports the engine snap-ins, but the Utility manifest
   exports only `fhx`, so that table lists no `ral` and `UNIX_ALIASES` leaves it to a native
-  program. The conformance case failed on `ubuntu-latest` for it in CI run 39297604179. It
-  checks on a non-Windows host that each `UNIX_ALIASES` entry exists there.
-- The consent prefilter's PowerShell arm and its `tr -d` set, which now strips backticks, and
+  program. The conformance case checks on a non-Windows host that each `UNIX_ALIASES` entry
+  exists there.
+- The consent prefilter's PowerShell arm and its `tr -d` set, which strips backticks, and
   `strippedText` in the consent module move together; the hook fallbacks strip backticks too.
 - `OPAQUE_ARGUMENT` and the `__unjudged__` and `__unreadable__` lines between the gate's inline node
   and its shell side.
@@ -182,9 +182,9 @@ green row would be a false all-clear.
 
 ## Tests
 
-`tests/structure/powershell-command-v1.test.js` holds the corpus, including the inputs a read-only
-red team found: property setters, `.ForEach` with a method name, literal concatenations and a
-Unicode dash before `-h`. Its conformance case parses the
+`tests/structure/powershell-command-v1.test.js` holds the corpus, including property setters,
+`.ForEach` with a method name, literal concatenations and a Unicode dash before `-h`. Its
+conformance case parses the
 corpus with `[System.Management.Automation.Language.Parser]::ParseInput`, requires every
 `CommandAst` name among the analyzer's commands and every alias `CreateDefault()` defines in `ALIASES`; it is
 required on win32 and skipped where no PowerShell is installed. It reads the host's major version

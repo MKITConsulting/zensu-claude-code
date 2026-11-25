@@ -11,9 +11,9 @@ paths:
 
 # Reviewer-Spawn Grant (`runSpawnGrant` in `hook-dispatch-v1.js` + `reviewer-spawn-allow-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
-The preventive half of the section above. That one DIAGNOSES a classifier refusal after the
+The preventive half of `.claude/rules/host-refused-reviewer-spawn.md`. That one DIAGNOSES a classifier refusal after the
 spawn is already lost; this one keeps the refusal from happening, by returning
 `permissionDecision: "allow"` on the `Agent|Task` matcher for Zensu's own confined reviewers.
 
@@ -60,7 +60,7 @@ the check alone. Under the full dispatcher the capability check blocks that stat
 aggregation lets any deny, defer or ask outrank the grant. `A16` pins that the entry point always
 exits 0; do not "harden" it into a gate.
 
-**The order of the four conditions is a cost order, and the shell body is gone.** The decider
+**The order of the four conditions is a cost order, held in JS, not in shell.** The decider
 runs first because it reads the payload alone and rejects nearly every spawn; the principal, the
 bind and the config read follow. `A40` pins that order inside `runSpawnGrant`. The payload copy
 is the first `MAX_PAYLOAD_BYTES + 1` bytes with NUL bytes removed, what the shell's `head -c` and
@@ -71,8 +71,8 @@ two equal. A line break in `MSYS2_ENV_CONV_EXCL` fails the bind as `zensu_msys_e
 sourced, so a damaged installation gets no grant.
 
 **Four conditions, all required:** main principal, a bound Session Control record,
-`hooks.reviewerSpawnAutoAllow` not exactly `false`, and set membership. **The armed-chain
-condition was specified and then REJECTED on discovery** — `plan-review-worker` and
+`hooks.reviewerSpawnAutoAllow` not exactly `false`, and set membership. **An armed-chain
+condition is REJECTED** — `plan-review-worker` and
 `pr-review-worker` are spawned by `/zensu:plan-review` and `/zensu:pr-team-review`, neither of
 which arms a build chain or calls `--workflow-begin`, so a chain condition would ship a grant
 missing two of the five. The lease alternative was rejected too: the lease is minted by skill
@@ -93,7 +93,7 @@ surfaces, deliberately unequal: the SessionStart banner line is silenceable by
 renders in BOTH states. Same reasoning as `reviewerSpawnPermissionCheck` — hiding the rows
 under the config key would reinstate the defect the feature removes.
 
-**The doctor coupling has a sharp edge that cost ten green checks once.** A row that warns
+**The doctor coupling has a sharp edge.** A row that warns
 whenever the decision module cannot be loaded fires on every plugin root that PREDATES this
 feature, which is most doctor fixtures. The rule is asymmetric: an absent HOOK means the
 feature is not installed — silent, and the ordinary exposure rows already give that reader the
@@ -101,8 +101,8 @@ right advice; hook present but module missing IS worth a row, because the hook t
 silently while the banner says a grant is in force. `reviewerSpawnGrantRows` RETURNS the
 resolved grant state and `configBlock` threads it into `permissionExposureRows`, because the
 auto-mode advice is only correct when the grant is not already covering the spawn it
-recommends a rule for. That thread introduced `ROW_LEVEL`, a THIRD map beside
-`classifyPermissionExposure` and `ROW_TEXT` — the two-map rule in the section above now has an
+recommends a rule for. That thread adds `ROW_LEVEL`, a THIRD map beside
+`classifyPermissionExposure` and `ROW_TEXT`, so the two-map rule in the section above has an
 exception, and a kind missing from `ROW_LEVEL` is a warning.
 
 **Version.** The hook can GRANT, so it is NOT the advisory shape the hook-inventory exemption
@@ -127,17 +127,16 @@ which compiles every matcher as an unanchored regular expression. That is not th
 reading: it can call a group wired that the host does not fire, and miss one the host fires. The
 browser consent gate's `hookRegistered` in `hooks/lib/verify-consent-v1.js` reads the same
 `hooks.json` through the same module under `READINGS.HOST`, the host's own matcher reading. The
-grant row keeps `READINGS.REGEX` because sharing the reader was to change neither row's answers;
+grant row keeps `READINGS.REGEX` so that the shared reader changes neither row's answers;
 moving it onto `READINGS.HOST` re-decides what this row reports and belongs in this grant's own
 review. `.claude/rules/browser-consent-gate.md` records every difference, so a change to the
 module re-decides both the grant row and the consent probes there.
 Operator-facing accounts: `docs/gates.md` §"Reviewer-Spawn Grant", the hook row and the
 `reviewerSpawnAutoAllow` row in `docs/configuration.md` — plus, in that SAME file, the
 `### Hooks (N)` header, the prose count and its `#hooks-N` link, and separately the
-`configuration.md#hooks-N` cross-link in `docs/architecture.md`. `test-readme-hook-count-sync`
-H2 turns red on the header count and H3 on any inconsistent reference; `docs/architecture.md`
-was outside H3's file list until this change added it, so that cross-link was the one
-occurrence nothing scanned, `docs/build-workflow.md` §"The preventive layer", and the
+`configuration.md#hooks-N` cross-link in `docs/architecture.md` (`test-readme-hook-count-sync`
+H2 turns red on the header count and H3 on any inconsistent reference, that cross-link
+included), `docs/build-workflow.md` §"The preventive layer", and the
 reviewer-spawn bullets in `skills/doctor/SKILL.md` — do not restate a COUNT here, because the
 next row added invalidates it; `A24` in `test-reviewer-spawn-allow.sh` is what holds the roster
 against the renderer, and its phrase list is the thing to extend when a row is added.
@@ -164,11 +163,10 @@ new warning bullet placed above the exposure one fails that pin while naming the
   precedes that host's permission layer at all — which is a measurement, not an assumption.
 - **`reviewerSpawnGrantRows` both renders and returns**, so the grant state the exposure check
   consumes is a side effect of a render call and the ORDER of the two calls in `configBlock` is
-  load-bearing. Reversing them yields `grantActive === undefined` and restores the wrong
+  load-bearing. Reversing them yields `grantActive === undefined` and gives the wrong
   auto-mode advice. The sibling check in the same file models the alternative
   (`classifyPermissionExposure` decides, `ROW_TEXT` words), and splitting this one the same way
-  is the standing fix. Left as is deliberately: the split would touch the one function three
-  review findings had just corrected.
+  is the standing fix. Left as is deliberately.
 - **`ROW_LEVEL` could travel inside the verdict.** `classifyPermissionExposure` already returns
   per-verdict objects, so a `level` field would delete the third map and restore the two-map
   rule stated above it. A missing entry defaults to WARN, which is the safe direction, so this
@@ -178,8 +176,6 @@ new warning bullet placed above the exposure one fails that pin while naming the
   names `/zensu:doctor` as the authoritative check for exactly that reason. A shared
   installed-ness predicate — a `--grant-state` mode on the decider that both surfaces call —
   is the uncompromised answer and is not implemented.
-- **One review finding was REFUTED, recorded so it is not "fixed" later.** A round-2 reviewer
-  reported that nothing derives the confinement check from the grant set, having grepped the
-  shell suite only. `tests/structure/reviewer-spawn-allow-v1.test.js` does exactly that: it maps
-  each member to `agents/<name>.md` and requires the exact read trio, so widening
-  `REVIEWER_TYPES` with an unconfined agent fails there.
+- **The confinement check is derived from the grant set.**
+  `tests/structure/reviewer-spawn-allow-v1.test.js` maps each member to `agents/<name>.md` and
+  requires the exact read trio, so widening `REVIEWER_TYPES` with an unconfined agent fails there.

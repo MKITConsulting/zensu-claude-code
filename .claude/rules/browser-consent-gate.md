@@ -35,17 +35,16 @@ paths:
 
 # Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 `/zensu:verify-feature` drives the browser through `playwright-cli` (`@playwright/cli`), which the
-user installs once, with plain Bash calls. The plugin ships NO MCP server any more: `.mcp.json`,
-`scripts/playwright-mcp.sh`, `scripts/playwright-mcp-proxy.js` and `mcp-runtime/` are gone, and
-`.claude-plugin/plugin.json` declares no `mcpServers`. The bundled `@playwright/mcp` server was
-started for every session that loaded the plugin, and each start materialized a private npm runtime
-of several hundred megabytes whether or not a browser was ever opened — that cost is the whole
+user installs once, with plain Bash calls. The plugin ships NO MCP server: there is no `.mcp.json`,
+and `.claude-plugin/plugin.json` declares no `mcpServers`. A plugin-scoped `@playwright/mcp` server
+would start for every session that loads the plugin, and each start would materialize a private npm
+runtime of several hundred megabytes whether or not a browser is ever opened — that cost is the whole
 reason for this design, so do not reintroduce a plugin-scoped MCP server to "restore" a control.
 
-The controls the MCP-era capability broker held moved into two places: a PreToolUse/PostToolUse pair of
+The controls live in two places: a PreToolUse/PostToolUse pair of
 hook-dispatcher checks on the `Bash|PowerShell` matcher (`browser-consent` and
 `browser-consent-recorder`, whose bodies `hooks/checks/pre-browser-navigation-consent.sh` and
 `hooks/checks/post-browser-navigation-consent.sh` are thin wrappers around
@@ -84,11 +83,10 @@ unless a case names one, because that arm marks every PowerShell call.
 
 **SCOPE is `zensu-verify-*` sessions only, and that is a decision, not an omission.** Gating every
 `playwright-cli` call would deny a user's own browser skills — which legitimately use `eval`,
-`run-code`, cookies and state files — in every session, which is the overreach the MCP-era matcher
-already produced against a user's own `playwright` server. The cost is stated wherever the gate is
+`run-code`, cookies and state files — in every session. The cost is stated wherever the gate is
 described: a model that opens a browser under a session name it chose itself is outside the gate,
 and the skill's instruction to use only the printed session is prose, not a boundary. **One
-exception, decided after a measured bypass:** a call on any session is judged when its text
+exception:** a call on any session is judged when its text
 names a `verify-feature-runs` directory or passes a config, because a signed-in run config opened
 outside the gate restores its state unjudged (see "Other sessions" below). That exception costs a
 user's own browser skills something, stated here so it is not rediscovered as a defect: on every
@@ -348,7 +346,7 @@ first such opener (`nameAfterConstruct`) every later occurrence counts however i
 because that construct can trim what follows: `$(basename playwright-cli.json .json)` and zsh's
 `${${:-playwright-cli.json}:r}` run the CLI. The rule never looks for where the construct ends,
 since a quoted or escaped closer, a `case` pattern or a heredoc inside it would end it early and
-turn an under-count into a pass. The price is a false refusal, as at the old substring reading,
+turn an under-count into a pass. The price is a false refusal
 for a word that opens a construct and then names a run's own `playwright-cli.json`, such as
 `"$(git rev-parse --show-toplevel)/.zensu/verify-feature-runs/r/playwright-cli.json"`; read that
 file through the Grep tool or a path that opens no substitution. A name that a variable or a
@@ -363,8 +361,7 @@ the name, such as `~/my-playwright-cli`, counts: bounding the characters before 
 undo escapes that decode to a slash. The operand of `cd` or `pushd` (`DIRECTORY_BUILTINS`) never
 counts; the gated `indirect` test and the bodies the lexer cannot judge keep the substring
 reading of `namesCli`. The lexer's own reading of where a substitution ends is the limit of this
-rule: a `case` pattern's `)` closes it early there, so a name the pattern hides stays unseen,
-exactly as at the old reading.
+rule: a `case` pattern's `)` closes it early there, so a name the pattern hides stays unseen.
 `binaryStem` in the same module strips a binary suffix, so `CLI_MARKERS` and `cliToken` share the
 one suffix set. With the `runs` arm an off-session call or a hidden
 CLI denies `RUN_DIR_OFF_SESSION`. With the `config` arm each literal `--config` value and each
@@ -423,8 +420,7 @@ ungated `-s=zvprobe-state1` session opening a `storageState` config came up sign
 `parsePolicyTargets`, the full synchronous parse of `ZENSU_VERIFY_NAVIGATION_POLICY_V1`
 (`policyContractFault` stays its top-level half). Three consumers CALL it and none re-spells it: the
 gate (`readPolicy`), the helper (`run`, `--check-policy`) and the doctor wrapper
-(`ZDOC_VERIFY_POLICY_FAULT`). The MCP-era hand copy inside the broker's `parsePolicy` died with the
-broker. DNS happens in exactly one place, the helper's `resolveRemoteHost` at run-config time, and
+(`ZDOC_VERIFY_POLICY_FAULT`). DNS happens in exactly one place, the helper's `resolveRemoteHost` at run-config time, and
 the gate then requires the resulting pin for a remote hostname; a policy parse never resolves.
 
 **`localhost` is a local origin, exactly and without a pin.** `isLocalHost` in the floor is the one
@@ -490,15 +486,15 @@ the prompt is denied that origin at `open`; stdout stays one token or the config
 
 **The evidence boundary is the ORIGIN in both modes; the route gate is retired.** An approved
 origin — a consent-prompt Yes, or a policy target with `evidenceMode: declared-safe` — covers
-every page on it at any path. The per-route layer failed in practice: pages whose path carries
-identifiers minted on every run (`/teams/:teamId/sprints/:sprintId`) could never be listed
-exactly, so every protected scenario on them ended PARTIAL. What was removed: the gate's
-`NOT_POLICY_ROUTE` refusal, the recipe route reader behind the prompt's route line
-(`declaredRoutesFromRecipe`, `readRecipeRoutes`, `promptRoutes`), the route operand of
-`--check-policy`, and the exact-route
-coverage the skill demanded of `validate.evidenceSafety`, which is now an optional
-data-classification declaration that gates nothing. Do not reintroduce routes as prompt context
-either: a listed route reads to the human as a limit nothing enforces. **Compatibility is
+every page on it at any path. A per-route layer cannot work: pages whose path carries
+identifiers minted on every run (`/teams/:teamId/sprints/:sprintId`) cannot be listed
+exactly, so every protected scenario on them would end PARTIAL. So the gate has no
+`NOT_POLICY_ROUTE` refusal, the prompt has no route line and no recipe route reader
+(`declaredRoutesFromRecipe`, `readRecipeRoutes`, `promptRoutes`), `--check-policy` takes no
+route operand, and the skill demands no exact-route coverage of `validate.evidenceSafety`,
+which is an optional data-classification declaration that gates nothing. Do not reintroduce
+routes as prompt context either: a listed route reads to the human as a limit nothing
+enforces. **Compatibility is
 one-directional and deliberate:** `parsePolicyTargets` accepts a target with exactly
 `evidenceMode` and `origin` (`POLICY_TARGET_KEYS`) or with a `routes` list beside them
 (`LEGACY_POLICY_TARGET_KEYS`); `legacyRoutesFault` still shape-checks that list at
@@ -519,11 +515,10 @@ pass ONE entry parser (`policyOriginEntry`) and ONE floor (`policyFloorFault`): 
 origin in a remote policy obeys the target floor, one in a local policy is loopback or public
 HTTPS (`FLOOR_REASONS.NETWORK_ONLY_HTTPS` otherwise), and the hostname rule
 (`FLOOR_REASONS.HOSTNAME_PATTERN`: an IP literal, or `[a-z0-9._-]` only and no leading dot) binds
-targets too. That
-is a deliberate tightening, not a side effect: playwright-core turns each allowed origin into the
+targets too. That is deliberate, not a side effect: playwright-core turns each allowed origin into the
 URL glob `<origin>/**` (`originOrHostGlob` in the bundled `coreBundle.js` of 0.1.21, unchanged in
 0.1.23 and 0.1.24), so a `*`,
-`{` or `,` in a hostname was a browser-side wildcard the parser used to accept. The leading dot
+`{` or `,` in a hostname would be a browser-side wildcard. The leading dot
 is refused for layer 1: the proxy bypass grammar reads it as every subdomain, while a trailing
 dot or an empty label inside the name stays part of the literal name. The run config
 stays ONE plain `network.allowedOrigins` list and `runConfigShape` keeps its key set, so
@@ -566,12 +561,12 @@ a session whose config that flagged call wrote, in
 `validate.networkOnly` schema in `skills/autopilot/rules/config.md`; and the policy row of the
 doctor report.
 
-**No execution marker, and why.** The MCP-era gate wrote a per-session marker so that a SEPARATE
-process, the broker, could tell whether the gate had run before it self-approved an origin. With no
-broker, nothing consumes such a marker, so the whole family (`writeExecutionEvidence`,
-`classifyExecution`, the `ZDOC_VERIFY_EXEC` wire and the doctor's `verify-feature gate:` row) was
-removed rather than ported. The consequence is the first residual below, and it must not be papered
-over with a marker nothing reads.
+**No execution marker, and why.** A per-session marker serves only a SEPARATE process that must
+tell whether the gate had run before it self-approves an origin. There is no such process, so
+nothing consumes a marker, and the whole family (`writeExecutionEvidence`, `classifyExecution`,
+the `ZDOC_VERIFY_EXEC` wire and the doctor's `verify-feature gate:` row) does not exist. The
+consequence is the first residual below, and it must not be papered over with a marker nothing
+reads.
 
 **`/zensu:doctor`** probes `command -v playwright-cli` (`ZDOC_PLAYWRIGHT=present|absent`) and reads
 the version through `hooks/lib/playwright-cli-version-v1.js` (`cliMain` with `--lookup --execute`),
@@ -746,11 +741,11 @@ announces a prompt rather than a capability the plugin hands itself.
   helper the shell it runs in; the helper's unit case in
   `tests/structure/verify-browser-config.test.js` pins both texts with the helper's suffix.
   `ambientOverride` folds the letter case of a name on win32 for both callers.
-- `scripts/` is now in the Session Control digest unconditionally (see §"Runtime Lineage"), because
+- `scripts/` is in the Session Control digest unconditionally (see §"Runtime Lineage"), because
   the helper lives there.
 - `adopt_hook_expected` in `tests/structure/test-versioned-plugin-upgrade.sh` exempts the pre hook,
   which cannot deny the adoption command.
-- The Session Control `mutating_control` attack no longer names a browser tool: it asks the reviewer
+- The Session Control `mutating_control` attack names no browser tool: it asks the reviewer
   for a Bash `curl` to the local canary, so only the reviewer-capability gate can deny it and its
   `Zensu capability gate (reviewer-capability-v1) deny:` reason stays deterministic (`scripts/session-control-claude-wrapper.sh`,
   `evals/session-control/lib/live-evidence.js`, `evals/session-control/tests/wrapper-selftest.sh`,
@@ -839,9 +834,8 @@ for its `@playwright/cli` install pins.
 
 **Known gaps, accepted and named:**
 
-- **Hooks switched off host-side leave `playwright-cli` unconstrained.** The retired broker refused
-  to self-approve without the gate's marker, so a disabled hook ended in a refusal; nothing stands
-  in that position now, and the doctor reports registration, never execution.
+- **Hooks switched off host-side leave `playwright-cli` unconstrained.** No second component
+  refuses when the gate did not run, and the doctor reports registration, never execution.
 - **Other session names are ungated** — see SCOPE — except for the "Other sessions" rules, which
   judge only what the command text shows, and which refuse a user's own state-restoring, INI,
   unreadable or variable-held config on every session. A command that only echoes the CLI's name

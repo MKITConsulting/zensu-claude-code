@@ -17,14 +17,13 @@ paths:
 
 # Converged Max-Rounds Attempts (`_zensu_bound_convergence` + `convergence` in `review-ledger-v1.js`)
 
-An Autopilot-bound `/zensu:build` chain that reached `hooks.autoFixMaxRounds` closed as
-`max-rounds` and blocked its run with `TDD_MAX_ROUNDS` whatever the reviews had left open. Observed
-on 2026-11-13: three review rounds, a self-review with no must-fix and a terminus that exited 0
-still left the run `BLOCKED`, with five deferred SUGGESTION entries as the only open ledger entries.
-The way out was `/zensu:reset-review-limit` and a whole new attempt, whose fresh first round
-re-reviews the cumulative diff and usually reaches the cap again. The attempt now closes as
-`converged`, and the run returns to its `returnStage` as after a `pass`, when the chain's findings
-ledger shows no open defect.
+An Autopilot-bound `/zensu:build` chain that reaches `hooks.autoFixMaxRounds` closes its attempt
+as `converged`, and the run returns to its `returnStage` as after a `pass`, when the chain's
+findings ledger shows no open defect. Otherwise the attempt closes as `max-rounds` and blocks its
+run with `TDD_MAX_ROUNDS`, whose way out is `/zensu:reset-review-limit` and a whole new attempt:
+its fresh first round re-reviews the cumulative diff and usually reaches the cap again. A
+`max-rounds` close whatever the reviews left open would block even a run whose self-review found
+no must-fix and whose only open ledger entries are deferred SUGGESTION entries.
 
 **One owner of the decision.** The bound `--chain-done` arm in `hooks/lib/zensu-log.sh` decides,
 through `_zensu_bound_convergence`, and no other site writes `converged`:
@@ -47,12 +46,12 @@ through `_zensu_bound_convergence`, and no other site writes `converged`:
   max-rounds hand-off named. `_zensu_bound_convergence` hands the document's path over as
   `ZENSU_RL_STATE`, and `reviewRoundOf` reads it through `readBoundedJson` of
   `edit-landing-receipt-v1.js`. Every other answer is `not converged`, a check that throws and a
-  `node` that cannot run included, so every fault keeps the earlier behaviour.
+  `node` that cannot run included, so every fault leaves the `max-rounds` close in place.
 - The terminus prints the `CONVERGENCE —` line as soon as it decides, before any gate runs, so a
   refusal that keeps the chain open still names the verdict, and after a `converged` verdict a
   `CONVERGED CLOSE —` line that names the exit below. `converged` then takes the `pass` arm: the
   terminal edit-landing gate, the bound full-suite gate and the acceptance gate all run, and their
-  three lines stay byte for byte as they were, because `A0d` in
+  three lines stay byte for byte as they are, because `A0d` in
   `tests/structure/test-acceptance-gate.sh` and `T1b` in
   `tests/structure/test-terminal-edit-landing-gate.sh` match them; `T1b` also reads the
   `pass|converged)` arm label.
@@ -68,7 +67,7 @@ edit can remove, such as a `failed` full suite, takes the self-review's one fix 
 round is spent, the `CONVERGED CLOSE —` line, `MAX_LEDGER_STEP` and finalize step 1 of
 `skills/self-review/SKILL.md` name the same exit: `--chain-done --outcome max-rounds`, whose arm
 runs no pass gate, closes the attempt as `max-rounds` and blocks the run with `TDD_MAX_ROUNDS`,
-which `/zensu:reset-review-limit` and `RESUME` handle as before. The `CONVERGED CLOSE —` line
+which `/zensu:reset-review-limit` and `RESUME` handle. The `CONVERGED CLOSE —` line
 prints on every converged decision, a successful one included, so finalize step 1 ties the exit to
 its stop for a spent fix round, never to the line alone: after a successful seal the rerun is
 refused (`M7d`), and the step's stale-failure rule would then withhold the report. After the exit
@@ -100,15 +99,15 @@ it a must-fix candidate of the self-review, and `deferred` for SUGGESTION. A
 a `parked` line for the earlier id at that severity instead, so a deferred suggestion the final review
 raised again blocks the close. The step then asks for the marker, and for the terminus's
 `CONVERGENCE —` line in the final report's `How I built it` line, which finalize step 2 of the
-self-review skill names too. The standalone and self-review-off texts are unchanged (`MR3`, `M3a`):
-a standalone hand-off still says the code-reviewer chain is marked converged, because only a bound
+self-review skill names too. `MR3` and `M3a` pin the standalone and self-review-off texts:
+a standalone hand-off says the code-reviewer chain is marked converged, because only a bound
 chain can close as `converged`, so no attempt outcome shares the word there. The bound hand-off calls
 the review loop it ends (`codeReviewDone`) closed instead (`M7`), because there `converged` names an
 attempt outcome. The Stop hook's self-review resume reason, the review flowchart in
 `docs/architecture.md` and the opening of `skills/self-review/SKILL.md` speak of the closed loop for
 every chain.
 
-**The schema half is additive.** `converged` joined every closed outcome list: `payloadValid`,
+**The schema half is additive.** `converged` is in every closed outcome list: `payloadValid`,
 `stateValid`, `deliveryInvariants`, the head-update rule, the Stop reconcile, the
 `autopilot_finish_tdd_attempt` case and the rearm case in `zensu-autopilot-state.sh`;
 `tdd_autopilot_context`, both outcome sets, the finish CAS and the hand-off completion list in
@@ -151,7 +150,7 @@ and 2 of `skills/self-review/SKILL.md`, whose body size the `self-review` entry 
   `NOT-REPRODUCED`: the ledger keeps the severity, and the decision does not read the reproduction
   line.
 - A candidate the self-review leaves unfixed records no ledger transition, so it keeps blocking: the
-  attempt closes as `max-rounds`, as every bound max-rounds attempt did before this change.
+  attempt closes as `max-rounds`.
 - A `fixed` line proves an edit, not a fix (`.claude/rules/round-prepare.md`), and the ledger and the
   marker are model-authored run-log text in a session-writable directory, so a wrong `fixed` line, a
   marker written for a review whose findings never reached the ledger, or a forged ledger line can

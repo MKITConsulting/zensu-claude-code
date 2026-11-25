@@ -20,10 +20,10 @@ paths:
 
 # Review Convergence (`review-ledger-v1.js` + `hooks.reviewConvergence`)
 
-The `/zensu:build` auto-fix loop used to re-review with a full mandate until a round had no
-routable finding. Measured over 471 real chains: a mean of 3.3 review rounds, 39% needing four
-or more, and in rounds two and later 51% of the rounds were suggestions-only while 5% carried a
-CRITICAL finding. The loop did not converge because nothing bounded what a LATE round may route.
+A `/zensu:build` auto-fix loop that re-reviews with a full mandate until a round has no routable
+finding does not converge, because nothing bounds what a LATE round may route. Measured over 471
+real chains of such a loop: a mean of 3.3 review rounds, 39% needing four or more, and in rounds
+two and later 51% of the rounds were suggestions-only while 5% carried a CRITICAL finding.
 
 **Routing narrows in the main thread, never in agent prompts.** The post-review hook never
 reads the reviewer's findings (`tool_response`), and a repo persona may ignore any tag an agent
@@ -69,9 +69,9 @@ RP5 in `evals/config-gate/test-review-convergence-directive.sh`.
 
 **FAIL-OPEN IS THE CONTRACT.** The classification runs only for a re-review launched from the
 post-review directive AND only when `review-round-scope-v1.js` and `review-ledger-v1.js` both
-answer `status=ok`. Any other answer routes that review exactly as before and logs
+answer `status=ok`. Any other answer routes that review without the classification and logs
 `CONVERGENCE UNAVAILABLE — <reason>`. The Stop-hook resume directive has no convergence clause,
-so a resumed review also routes as before. The routing read answers `degraded` on a malformed
+so a resumed review also routes without it. The routing read answers `degraded` on a malformed
 `FINDING LEDGER` line (an anchor carrying a backtick, `$(` or `${` included), more than
 `MAX_ENTRIES` entries, an unreadable or out-of-root log, an earlier-round registration of a new
 id, and a registration that reuses a known id with another state or another anchor. The last two
@@ -83,8 +83,9 @@ anchor is idempotent, because a deferred finding is ledgered at classification t
 ledgers an IMPORTANT deferral `parked`, while the fix-round form writes `parked` only in the `critical` arm. Every cause
 is judged per generation: a problem before the last marker never degrades the generation after it.
 
-**One verdict, two consumers, opposite safe directions.** For routing, `degraded` means "route as
-before", which is safe. For the reports it would mean "no rows", which silently drops the very
+**One verdict, two consumers, opposite safe directions.** For routing, `degraded` means "route
+without the classification", which is safe.
+For the reports it would mean "no rows", which silently drops the very
 findings convergence deferred. So `/zensu:self-review` and both `## Open` renderers read with
 `--report`: it lists every parseable entry under `status=partial` plus a
 `FINDINGS LEDGER PARTIAL — <reason>` row, and a log that cannot be read at all adds a
@@ -184,7 +185,7 @@ together with `parked` and the `G<g>:` qualifier, so no released reader predates
   paraphrase; a security finding's paraphrase names only its class, but the location and class of
   an open one are still disclosed wherever the run log is published.
 - **The saving is unmeasured end to end.** Re-measure with the run-log heuristic that produced
-  the figures above; the new `FINDING LEDGER` lines make that measurement structural.
+  the figures above; the `FINDING LEDGER` lines make that measurement structural.
 
 **Port-relevant.** The lib is host-neutral and zero-dependency. The host half is the clause,
 the key and its reader, the skill directives, and the `FINDING LEDGER` line format.

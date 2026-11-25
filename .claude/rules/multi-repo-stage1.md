@@ -9,25 +9,25 @@ paths:
 
 # Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 Stage 1 of `docs/multi-repo-chains-spec.md` §5. It ships NO multi-root capability; it
 removes the SILENT GREEN a chain produced when its work landed in a repository the
 anchor cannot see. Four behaviours, three files, one shared claim grammar.
 
-**Stages 2 and 3 were redesigned on 2026-10-21 and are not built** (spec §6 to §9). The
-sealed carrier of §6.1.1 is superseded: code roots are declared at arming with
+**Stages 2 and 3 (spec §6 to §9) land behind `CODE_ROOTS_ENABLED` in
+`hooks/lib/code-roots-v1.js`, which is `false`.** Code roots are declared at arming with
 `--tdd-begin --code-root <label>=<path>`, kept as `codeRoots` in the workflow document as a
 declaration that bounds accidents, not intent, and claimed as `@<label>/<path>`; the
-cross-repository check is a `crossrepo` perspective inside the review fan-out. The design
-ships in five pull requests behind `CODE_ROOTS_ENABLED` in a new `code-roots-v1` module, and
-until the last one flips it, everything below is all of multi-repo that runs. A stage-2 change
+cross-repository check is a `crossrepo` perspective inside the review fan-out.
+`.claude/rules/multi-repo-code-roots.md` records what is built. While the switch is off,
+everything below is all of multi-repo that runs. A stage-2 change
 to the audit, the terminus or the doctor row must keep every rule here for the anchor and for
 an undeclared foreign root.
 
 **The terminus judges the receipt's VERDICT, never its existence.** The audit writes
 its receipt BEFORE its own exit status, carrying `clean` as a field rather than as a
-precondition for writing, so an existence-and-not-a-symlink test accepted a receipt
+precondition for writing, so an existence-and-not-a-symlink test would accept a receipt
 recording `EDIT NOT LANDED`. `_tc_receipt_verdict` in `hooks/lib/zensu-log.sh` reads it
 once per completion and answers `clean` / `unclean` / `no-verdict` / `unknown-schema` /
 `unreadable` / `unparseable` / `unavailable`, and everything but `clean` refuses with
@@ -66,7 +66,7 @@ forcing them to fabricate a receipt would make the gate look enforced where ther
 claim to verify. When a channel exists but does not resolve, the verb DISCLOSES
 `EDIT LANDING GATE UNRESOLVED` on stderr instead of exempting silently.
 
-**The claim grammar has ONE owner.** `zensu-edit-landing.sh` already extracted
+**The claim grammar has ONE owner.** `zensu-edit-landing.sh` extracts
 `IMPL completed — files:` / `WIRED — files:` claims for grading; `--inventory` reports
 the same extraction read-only — `claimed-files=<n>`, `bare-wired=<n>` and one
 `foreign-root<TAB><root>` line per distinct non-anchor root — without a change set, a verdict or a
@@ -83,11 +83,10 @@ parsed contract:** both `zensu-log.sh` readers read `claimed-files=` with `sed -
 doctor splits on the first TAB and matches the literal `foreign-root`.
 **The key is `claimed-files=` and NOT `claims`, because the receipt carries a field of
 that name holding a DIFFERENT quantity** — this one counts named FILES, the receipt's own
-`claims` counts claim ENTRIES, and an earlier revision of this section named both `claims`,
-which is the conflation the rename removed.
+`claims` counts claim ENTRIES, and one name for both would conflate the two quantities.
 **The grammar is ANCHORED.** A claim is `<label> <marker>` at the start of the message,
 after an optional bracketed timestamp prefix. The label runs to the first marker, holds at
-most `CLAIM_LABEL_TOKEN_BUDGET` (5) tokens and no `'`, `"` or `|`, and an empty label
+most `LABEL_TOKEN_BUDGET` (5, `hooks/lib/edit-landing-claims-v1.js`) tokens and no `'`, `"` or `|`, and an empty label
 grades as step `(none)`. The two `files:` markers take an em dash, an en dash or a plain
 hyphen — the `[—–-]` class `review-round-scope-v1.js` admits — written as three LITERALS,
 never as a bracket class: a multibyte bracket expression matches single bytes under
@@ -96,12 +95,13 @@ hyphenated IMPL claim no verdict at all and misreads a hyphenated WIRED claim as
 entry; the census below holds 9 such lines in 4 logs. Accepting them grades MORE lines, so
 re-running the audit over the same log after an in-lineage upgrade can turn a clean receipt
 unclean — the audit doing its job, with no receipt or wire-format change, hence `patch`.
-The `WIRED (verified, no change)` exemption carries no dash and is unchanged. A bare
+The `WIRED (verified, no change)` exemption carries no dash, so the dash class does not touch it.
+A bare
 `<step> WIRED` still needs ONE step token, because the bare word is a weak signal. The
 budget is measured: across 1,462 local run logs (2026-09-24),
 9,667 claim lines had the contract shape and 296 did not, and 272 of those are multi-word
 labels such as `Step 3`, `FIX ROUND 2` or an unbracketed ISO timestamp — a one-token rule
-dropped them, silently in every log that also held a contract-shaped claim. A line that
+would drop them, silently in every log that also held a contract-shaped claim. A line that
 only mentions a marker — a `PRECONDITION DRIFT` note, the `TDD COMPLETE — … 1 WIRED`
 tally, a correction note quoting `'IMPL completed — files:'` — is not a claim, and neither
 is a line opening with one of the audit's own verdict heads (`EDIT LANDED`,
@@ -132,14 +132,14 @@ canonicalizes the claim's nearest existing ancestor before comparing it with the
 root, so a macOS `/var` spelling of the anchor is in-root rather than foreign; a genuinely
 foreign claim is reported `UNVERIFIED (foreign root)` and NAMES the root, found by walking
 up for a `.git` entry — a filesystem walk, never a `git` invocation inside a repository
-this session does not own. It counts as `UNVERIFIED`, so the receipt shape and the
-`EDIT LANDING AUDIT —` tally line are unchanged and no receipt field was added.
+this session does not own. It counts as `UNVERIFIED`, so it needs no receipt field and no
+tally of its own in the `EDIT LANDING AUDIT —` line.
 
 **FOUR kinds, and every consumer must handle all four.** `absolute_claim_verdict` answers
 `in-root`, `foreign`, `unrooted` or `undetermined`, the last carrying exhaustion of
 `CLAIM_ANCESTOR_BUDGET` (64 ancestors) — a DISTINCT status from "walked to the top and found
-nothing", because collapsing the two graded such a claim IN-ROOT on the audit path and silently
-SHORTENED the `--inventory` foreign-root list on the other. `INV_CLAIM_BUDGET` (2000) caps the
+nothing", because collapsing the two would grade such a claim IN-ROOT on the audit path and
+silently SHORTEN the `--inventory` foreign-root list on the other. `INV_CLAIM_BUDGET` (2000) caps the
 inventory loop the same way. Both dispatches — `normalize_claim`'s and the `--inventory` `case`
 — ENUMERATE the known-silent kinds and REFUSE the residual, which is the part to keep: a naive
 catch-all faults on every ordinary in-root claim and makes `--inventory` exit 2 on every normal
@@ -155,26 +155,22 @@ such a path must revisit that `case` too. The product of the two budgets is NOT 
 the watchdog above the child has no deadline on a host without `timeout`, so a shared
 total-probe counter is the standing fix and is not taken.
 
-**`claimRootSafeNames` consumes the OWNER's display rules, and there are THREE render
-bounds rather than one.** The row echoes a filesystem path a model is asked to relay, which is
+**`claimRootSafeNames` consumes the OWNER's display rules, and the doctor and the shell keep
+separate render bounds.** The row echoes a filesystem path a model is asked to relay, which is
 the same question the autopilot rows answer for a run id, so it applies `forgesReportRow`
 beside the control-byte and backtick tests — a `label : value` pair, a double space, a
 separator-adjacent modifier letter, a Default_Ignorable code point and an orphan combining
 mark are none of them control bytes — and the ANCHOR passes through the same predicate, not
-a weaker inline one. `AUTOPILOT_RENDER_MAX` is the doctor's; `CLAIM_ROOT_RENDER_MAX` in
-`zensu-edit-landing.sh` and `_TC_STEM_RENDER_MAX` in `zensu-log.sh` are the two shell ones,
-and BOTH were bare `200` literals until the round that named them — which is strictly worse
-than the `CLAIM_`-prefixed twin this paragraph used to record removing, because the
-`grep -nE 'AUTOPILOT_|autopilot[A-Z]|createHash'` recipe §"Autopilot Run Scope" prescribes
-cannot see either spelling. **The three screens are a SUBSET of the doctor's, never parity**,
-and saying "the same set" was wrong in both directions: `forgesReportRow` consults SEVEN
-rules, `render_claim_root` and `_tc_render_stem` carry FOUR each, and the three named Unicode
-row-forgery classes need a JS regex that a POSIX shell `case` cannot express. **Both shell
-screens are LOCALE-PINNED** (`local LC_ALL=C`) and repair a UTF-8 sequence the byte cut
-splits: `${#v}` and `${v:0:N}` count and cut characters under a UTF-8 locale and BYTES under
-C, and `[[:cntrl:]]` matches the C1 range under an ISO8859 one, so unpinned they did
-different things on the same input and a non-interactive shell with no `LANG` took the byte
-branch. §"Marker-Block Carriers" records the same class for the two marker hooks and resolves
+a weaker inline one. `AUTOPILOT_RENDER_MAX` is the doctor's bound. Both shell paths,
+`zensu-edit-landing.sh` and `zensu-log.sh`, source one screen, `zensu_safe_render` in
+`hooks/lib/zensu-safe-render.sh`, bounded by `ZENSU_RENDER_MAX`. **The shell screen is a
+SUBSET of the doctor's, never parity:** `forgesReportRow` consults SEVEN rules, and the three
+named Unicode row-forgery classes need a JS regex that a POSIX shell `case` cannot express.
+**The shell screen is LOCALE-PINNED** (`local LC_ALL=C`) and repairs a UTF-8 sequence the byte
+cut splits: `${#v}` and `${v:0:N}` count and cut characters under a UTF-8 locale and BYTES
+under C, and `[[:cntrl:]]` matches the C1 range under an ISO8859 one, so an unpinned screen
+does different things on the same input and a non-interactive shell with no `LANG` takes the
+byte branch. §"Marker-Block Carriers" records the same class for the two marker hooks and resolves
 it by measuring through `node`, which is not available on a path that runs per emitted line.
 **Every claim-derived value at every emit is screened, not only the three UNVERIFIED arms** —
 step 5b b) tells the model to copy every non-`EDIT LANDED` line VERBATIM into the run log, the
@@ -210,21 +206,21 @@ in `skills/build/references/audit.md` and step 10.1 in `references/review-chain.
 superseded, the §5 heading and the pin roster at the end of §10) together with
 `docs/multi-repo-chains-overview.html` and `docs/multi-repo-chains-principle.html`, which
 carry the same status lede and the same superseded facts in their own words. Naming the
-spec alone was wrong and produced real drift: `test-multi-repo-doc-consistency.sh` X7
+spec alone is not enough: `test-multi-repo-doc-consistency.sh` X7
 requires the literal `stages 2 and 3 are REDESIGNED, NOT ENABLED` in all three and forbids the
 retired `stages 2 and 3 are BLOCKED`, so a status reword is a
 deliberate three-file edit, and the overview's finding cards restate terminus behaviour
-that §2 now marks superseded.
+that §2 marks superseded.
 
-**The review round that followed the first draft changed five things in the
-production halves, and each one is a rule rather than a tidy-up.**
+**Five rules of the production halves follow, and each one is a rule rather than a
+tidy-up.**
 
 **Every `git` call in the audit library runs through `_el_git`, which unsets the
 discovery and config-injection variables.** `REPO_ROOT` / `REPO_CANON` decide which
 absolute claims `absolute_claim_verdict` calls FOREIGN, so an ambient `GIT_DIR` or
 `GIT_WORK_TREE` moves the anchor and silently empties the doctor's topology row —
 and the same variables move the change UNION that decides landed versus not-landed.
-`--tdd-complete` already scrubbed the same names for its own count through
+`--tdd-complete` scrubs the same names for its own count through
 `_tc_git` — fifteen as of this writing, and see §"Requirements-Table Gate" for why the
 numeral is a witness rather than the contract; the library is spawned as a CHILD and
 inherits the caller's environment, so it has to scrub for itself. Neither caller passes a filtered `env`, deliberately:
@@ -232,45 +228,44 @@ the scrub belongs where the `git` call is, or the next caller re-opens it.
 
 **The receipt reader discriminates an I/O fault from a CONTENT fault.** Every `fs`
 failure carries an errno `.code`; `JSON.parse` throws a `SyntaxError` that carries
-none. One unconditional `catch` reported `EACCES`, `EIO` and the ENOENT race against
+none. One unconditional `catch` would report `EACCES`, `EIO` and the ENOENT race against
 the shell's own `-f` test as "does not parse as an edit-landing receipt" — naming the
 wrong cause AND prescribing a remedy, re-run the audit, that would hit the same
-fault. The `unreadable` refusal text was widened to cover a failed read rather than
-only a non-regular or oversized file.
+fault. The `unreadable` refusal text covers a failed read as well as a non-regular or
+oversized file.
 
 **The retirement of the previous generation's receipt runs on the SUCCESS arm of
 `--tdd-begin`, never above it.** `autopilot_begin_standalone_tdd` refuses a held
 workspace and several storage and argument faults, and on that arm the PREVIOUS
-generation is still the live one — so retiring first left a live chain with no
-receipt and its own `--tdd-complete` then refused with "no edit-landing receipt for
+generation is still the live one — so retiring first would leave a live chain with no
+receipt, and its own `--tdd-complete` would then refuse with "no edit-landing receipt for
 this session", a cause that never happened. Nothing reads the receipt between the two
-points, so the earlier position bought nothing. `Z8c` pins the offset, because a
+points, so an earlier position buys nothing. `Z8c` pins the offset, because a
 failing begin cannot be staged from that suite.
 
 **The library's signal traps TERMINATE.** A bash trap handler that RETURNS resumes
 the script, so `trap cleanup EXIT INT TERM` over a `cleanup` ending in `return 0`
-made the doctor's 5 s `spawnSync` deadline unenforceable — and worse, `cleanup`
-unlinked `CLAIMS_FILE` mid-run while the log loop's next `>>` recreated it, so the
-inventory then counted only the claims logged after the signal. `trap cleanup EXIT`
-stays; `INT` and `TERM` get handlers that clean up and exit.
+would make the doctor's 5 s `spawnSync` deadline unenforceable — and worse, `cleanup`
+would unlink `CLAIMS_FILE` mid-run while the log loop's next `>>` recreates it, so the
+inventory would count only the claims logged after the signal. `trap cleanup EXIT`
+covers exit; `INT` and `TERM` get handlers that clean up and exit.
 
 **The run log is resolved on BOTH arming channels.** Gating the resolution on
-`_tc_armed -eq 0` made the stem bind unreachable on the DOMINANT path — a dirty tree
-— where a `clean: true` receipt describing some other run log satisfied the verdict
+`_tc_armed -eq 0` would make the stem bind unreachable on the DOMINANT path — a dirty tree
+— where a `clean: true` receipt describing some other run log would satisfy the verdict
 test unchallenged. The INVENTORY stays gated on the zero-change arm, because arming
-is the only thing it is for, and it is now bounded through the shared
-`zensu_run_bounded` ladder rather than spawned without a deadline while the doctor
-bounds the identical call.
+is the only thing it is for, and it is bounded through the shared
+`zensu_run_bounded` ladder, as the doctor bounds the identical call.
 
 **`auditedRunLog` answers a TYPED result.** `{path}` resolved, `{reason}` something
 is wrong with the tree, `{}` nothing to check. Collapsing the middle class into
-silence made a symlinked `.zensu/logs`, an escaping `log` and a symlinked run log
+silence would make a symlinked `.zensu/logs`, an escaping `log` and a symlinked run log
 read exactly like a project that never ran an audit — the same tamper class the two
-disclosed branches beside it already refuse to hide. A clean `ENOENT` stays silent,
+disclosed branches beside it refuse to hide. A clean `ENOENT` stays silent,
 because `.zensu/logs` is gitignored and absent in most projects. The logs directory
 is additionally bounded against the project root, which the leaf `lstat` cannot see:
 it is blind to a RELOCATED `.zensu` component, and the sibling derived-channel reader
-in `zensu-log.sh` already carried that assertion.
+in `zensu-log.sh` carries that assertion too.
 
 **The rendered stems are SCREENED and the compared stems are not.** `_tc_receipt_log`
 comes out of a receipt in `<project>/.zensu/state/`, which this file records as
@@ -292,27 +287,25 @@ writer's file with `tdd_edit_landing_receipt`, `receiptFile` and the packet's `r
 rename that misses one fails there. And ONE artifact still has TWO readers inside
 `--tdd-complete`: `_tc_receipt_verdict`'s hardened descriptor-side read, and the requirements
 gate's own read a hundred lines below it, which re-parses the same session-writable file with
-a window in between. **State what that second reader IS, because an earlier revision of this
-paragraph described a shape that no longer exists**: it was `lstatSync` + `readFileSync` with
-no `O_NOFOLLOW`/`O_NONBLOCK`, and it is now the same hardened
+a window in between. **The second reader is the same hardened
 `openSync(O_RDONLY|O_NOFOLLOW|O_NONBLOCK)` + `fstatSync` + bounded loop the verdict reader
-uses. So the residual is the double READ and its TOCTOU window, not a weaker open; the
-durable answer is unchanged — have the verdict reader return the resolved,
-containment-checked log and have the requirements gate take it as input. Neither was taken
-inside a change set already several review rounds deep.
+uses.** So the residual is the double READ and its TOCTOU window, not a weaker open; the
+durable answer is to have the verdict reader return the resolved,
+containment-checked log and have the requirements gate take it as input, and that second
+standing fix is not taken.
 
 **The receipt's session-key fallback asks the ONE shell predicate, in a subshell.** When the
 core's `session-key` verb cannot answer (no `node`, or no `session-control-core-v1.js` beside
 the script), the receipt name is built from the RAW `--session` operand, so the operand must
 have the canonical key shape before it reaches a path. The test is
 `zensu_session_key_canonical` from `hooks/lib/zensu-session.sh`, which lists the hex digits
-instead of using a range. The range it replaced collated. Measured on macOS `/bin/bash`
+instead of using a range, because a range collates. Measured on macOS `/bin/bash`
 3.2.57, `[[ "$SESSION_ID" =~ ^scv1_[0-9a-f]{64}$ ]]` accepted `scv1_` plus 63 hex digits plus
 `A`, `B` or a Latin-1 letter such as `à` under `en_US.ISO8859-1`, `de_DE.ISO8859-1`,
 `fr_FR.ISO8859-1` and `en_US.ISO8859-15`, and rejected `A` and `B` under C, `en_US.UTF-8` and
 `de_DE.UTF-8`. None of those locales admitted `/` or `.`, and the predicate rejects both as
-non-hex characters, so the traversal property held before and holds now; what the range let
-through was a key whose receipt name `--tdd-complete` never reads. **The library is sourced in
+non-hex characters, so the traversal property holds either way; what a range lets
+through is a key whose receipt name `--tdd-complete` never reads. **The library is sourced in
 a subshell and only on this fallback.** Measured on `5d62161b`, sourcing it adds 32 functions,
 10 constants and about 31 KB of exported definitions to the process and to every child it
 spawns, and sourcing it at the top of the script would put that load on every run, the
@@ -337,8 +330,8 @@ operands, and only where the core cannot answer.
 channel.** The audit draws the split `_zensu_unqualified_change_count` in `zensu-log.sh` and
 `workTree` in `evidence-run-v1.js` draw: `rev-parse --is-inside-work-tree` printing `true` is a
 work tree; a host without `git`, the probe printing `false` (a bare repository, a root inside
-`.git`) or failing with git's own `not a git repository` is outside git and grades as before
-(`UNVERIFIED` / `PENDING PREDICATE`); every other failure is a fault. `git_fault` re-runs the
+`.git`) or failing with git's own `not a git repository` is outside git and grades
+`UNVERIFIED` / `PENDING PREDICATE`; every other failure is a fault. `git_fault` re-runs the
 failed command under `LC_ALL=C` through `_el_git` and keeps git's first message line, because a
 localized git otherwise turns a root outside git into a fault. The rule covers every later git
 call on the grading path too: `--show-toplevel`; a HEAD probe exiting anything but 0, or 1 for an
@@ -347,7 +340,7 @@ baseline naming no commit stays a skipped hint and never reaches a failing `diff
 peel runs before the audit scope is bound, so `auditScope.baseline` holds a full commit id or
 nothing and the review packet's baseline check accepts what the audit persisted; `M2b` and `G8a`
 pin both); and any listing that exits non-zero. `union_add` captures each listing before it appends, so git's status
-and the write's status are no longer one status, and a failed append dies with its own message.
+and the write's status stay apart, and a failed append dies with its own message.
 Each one is a fault because reading it any other way grades claims: a refusal read as "not a git
 work tree" grades every claim `UNVERIFIED` or `PENDING PREDICATE`, an aborted HEAD probe read as
 an unborn branch grades every TRACKED claim `EDIT LANDED` through `ls-files --cached` (a silent
@@ -365,8 +358,8 @@ green), and a failed listing grades a landed edit `EDIT NOT LANDED`. **Decided p
   written, an explicit `--receipt` included, is the earlier round's or the checkpoint this run
   wrote before grading; it is rewritten with `clean: false` and an `auditFailure` cause, and its
   `auditScope` stays. An earlier round's `clean: true` receipt would otherwise stand in for an
-  audit that could not run once git recovers, and removing the file, which an earlier revision
-  did, threw away the dirty set and the pending claims the retry needs. A mark that fails is
+  audit that could not run once git recovers, and removing the file would throw away the dirty
+  set and the pending claims the retry needs. A mark that fails is
   `RECEIPT REFUSED`, and the old file then still stands. `--tdd-complete` refuses on its own
   count while the fault lasts and on the nonclean verdict after git recovers, `--chain-done`
   refuses with `the latest audit did not complete`, and all three send the author to fix git and
@@ -376,7 +369,7 @@ green), and a failed listing grades a landed edit `EDIT NOT LANDED`. **Decided p
   line and names the fault on stderr. Counting needs no git, and `--tdd-complete` arms on that
   figure as a lower bound; it never reaches the inventory on such a fault anyway, because its
   shared count answers `unavailable` first.
-- **The doctor's topology row needed no code change.** `claimInventory` discards any non-zero
+- **The doctor's topology row needs no arm of its own.** `claimInventory` discards any non-zero
   answer and renders `NOT checked against the anchor — the inventory command did not complete`,
   a missing check. An inventory that graded against `PROJECT_ABS` instead of git's top level
   would leave the row silent for an anchor-only log, a clean topology the refusal never showed.
@@ -411,8 +404,8 @@ the added fields break none of them.
   into the sibling with `..` keeps the anchor's grading as well. A relative claim into a work
   tree NESTED under the anchor is not this gap: it is placed (the redactor bullet below).
 - **The claim-armed scope needs a channel.** With neither `--plan` nor a receipt — the
-  flag-free recovery spelling of `--tdd-complete` — a zero-change chain keeps the
-  pre-stage-1 exemption, silently, because nothing identifies its run log.
+  flag-free recovery spelling of `--tdd-complete` — a zero-change chain stays exempt,
+  silently, because nothing identifies its run log.
 - **The doctor row needs a receipt.** Before the first audit there is nothing that names
   this session's run log, so the row cannot fire; after the audit, the audit's own failure
   has already named the root. The row's value is that it persists across turns.
@@ -427,9 +420,8 @@ the added fields break none of them.
   same channel is recorded above; this is the BIND gap beside it, and the suite does not reach it
   either — `Z6`/`Z6a` drive the no-`--plan` path for arming only and `Z7`/`Z7a` pin the stem bind
   with `--plan` passed.
-- **The redactor decides which half of stage 1 is reachable.** No ordinal: this bullet carried
-  "the FOURTH known gap" while sitting fifth in its own list, which is what a hand-maintained
-  position always does to a list that grows.
+- **The redactor decides which half of stage 1 is reachable.** No ordinal: a hand-maintained
+  position in a list that grows goes stale.
   `zensu-log.sh append` passes every message through `zensu-artifact-redact-v1.js` and `.log` is a
   redaction bucket, so a claim naming a sibling repository under `$HOME` is rewritten to `~/...`
   BEFORE it lands in the run log. `absolute_claim_verdict` has three call sites:
@@ -458,8 +450,9 @@ the added fields break none of them.
   repository top it would name a DIFFERENT file: a dirty same-named file at the top would grade an
   unlanded claim `EDIT LANDED`. **The rebuild root is `PROJECT_ABS`, never `REPO_ROOT`**:
   the placeholder denotes the root the writer derived from the log path, which is the `--project`
-  root in every shipped caller. In that subdirectory topology the audit can therefore accept a
-  claim it used to refuse, because it now grades the file the author named. `X16b`–`X16f` in
+  root in every shipped caller. In that subdirectory topology the audit therefore accepts a
+  landed claim that grading the stripped remainder would refuse, because it grades the file the
+  author named. `X16b`–`X16f` in
   `tests/structure/test-edit-landing-audit.sh` build their run log through the production writer
   and pin the nested repository both ignored and not ignored, the in-anchor claim beside it and
   the inventory line; `X16g` pins the rebuild root against a dirty same-named file at the
@@ -475,7 +468,7 @@ the added fields break none of them.
   already computed (`PLACED_VERDICT`, so the walk runs once): `UNVERIFIED (foreign root)` naming
   the nested root plus a `foreign-root` line, or `UNVERIFIED (undetermined root)` plus an inventory
   fault (`X38`/`X38a`). A kind the dispatch does not know is rebuilt as well, so the absolute arm's
-  closed case refuses it. Every other answer keeps the relative spelling and its existing grading:
+  closed case refuses it. Every other answer keeps the relative spelling and the anchor's grading:
   an in-anchor claim, the `X6` sibling bound, and a relative claim that resolves OUT of the anchor
   with `..` or through a symlink, whose sibling root therefore goes unreported (`X6a`, a named
   bound). **A fork-free pre-check decides whether the walk runs at all.**
@@ -491,7 +484,8 @@ the added fields break none of them.
   claimed files (p99 129). `X37` counts `dirname` spawns through a `PATH` stub and requires twenty
   in-anchor claims to spawn no more than one, and `X37b` the same for twenty `./`-spelled ones.
   Stopping at the first missing component also keeps a malformed claim, such as a space-separated
-  file list with 75 slashes found in a local log, on its old verdict instead of exhausting the
+  file list with 75 slashes found in a local log, on its relative-claim verdict instead of
+  exhausting the
   64-level budget, whatever `.` or empty segments it carries (`X39`/`X39a`). **The walk can still
   outrun the deadline**, at about 240 claims that reach a nested tree or a symlink by that
   measurement, so `--inventory` prints `claimed-files=` from a counting pass BEFORE it classifies
@@ -503,9 +497,10 @@ the added fields break none of them.
   and `check-ignore` refuses a path inside it with exit 128, so a claim naming a file inside it
   could only grade `EDIT NOT LANDED` against the anchor, with a remedy nobody can perform. It
   grades `UNVERIFIED (foreign root)` naming the submodule root instead, as its absolute spelling
-  already did. A claim naming the submodule path itself is the anchor's own gitlink and grades
+  does. A claim naming the submodule path itself is the anchor's own gitlink and grades
   against the anchor's change set, `EDIT LANDED` when the submodule moved, and a claim under an
-  uninitialized submodule, which has no `.git`, grades as before (`X36`–`X36b`). `X16h`–`X16l`
+  uninitialized submodule, which has no `.git`, keeps the anchor's grading (`X36`–`X36b`).
+  `X16h`–`X16l`
   build their run log through the production writer and pin a relative claim into the nested
   repository both ignored and not ignored, the in-anchor claim beside it and the inventory line;
   `X34` pins the symlink into the nested tree. The `~` half stays a stated bound: `$HOME` names
@@ -515,7 +510,7 @@ the added fields break none of them.
   file writes it raw, with `printf` or a heredoc, which matches no redaction rule and cannot show
   what the production writer does to a claim. The durable fix for the rest is to
   un-substitute `<home>` and `~` against the same roots the redactor used, before classifying, the
-  way `<project>` now is. **Version: `patch`**: no schema field, strict key set, hook, matcher,
+  way `<project>` is. **Version: `patch`**: no schema field, strict key set, hook, matcher,
   config key or attestation moves, and the receipt keeps its shape. The audit now fails a
   relative nested claim it used to pass as `EDIT LANDED (untracked-by-design)`, so re-running it
   over the same log after an in-lineage upgrade can turn a clean receipt unclean — the audit doing
@@ -555,8 +550,7 @@ the added fields break none of them.
   but the rule it departs from is one this file states repeatedly: a check that did not run must
   never be indistinguishable from one that passed, and a SUPPRESSED check emits an explicit
   switched-off row rather than silence (`hooks.reviewerSpawnPermissionCheck`,
-  `implStopNudgeAfter: 0`). The uncompromised answer is a disclosed skip; it is not taken, and
-  the departure is recorded HERE so the next reviewer does not have to re-derive it.
+  `implStopNudgeAfter: 0`). The uncompromised answer is a disclosed skip; it is not taken.
 - **`ci-shard-weights.v1.json` has no entry for the grown edit-landing suite, and it must not
   get an estimated one.** That file's own note requires a real CI figure and this repository's
   rule is that a ceiling or a weight comes from a green measurement, never from an estimate. The
@@ -568,18 +562,17 @@ the added fields break none of them.
   dependency is a lazy guarded `require`, and it carries the audit library's
   `git rev-parse` calls onto the doctor's path behind a 5 s timeout — the work-tree probe and
   `--show-toplevel`, plus `git_fault`'s re-read of a failed one — SCRUBBED, all through
-  `_el_git`, which is what this bullet used to get wrong while the same section said the
-  opposite thirty lines above it. The residual is the subprocess and its deadline, never an
+  `_el_git`. The residual is the subprocess and its deadline, never an
   unscrubbed environment. Rejecting a second JS copy
-  of the claim grammar was right; a subprocess is not the only way to keep one owner. **The
+  of the claim grammar is right; a subprocess is not the only way to keep one owner. **The
   standing fix is a host-neutral `edit-landing-claims-v1.js`** that the shell loads from its
   `node -e` and the doctor `require`s — the shape `rule-block-v1.js` already ships for a
-  cross-language carrier. It is now HALF taken: `hooks/lib/edit-landing-claims-v1.js` owns the
+  cross-language carrier. It is HALF taken: `hooks/lib/edit-landing-claims-v1.js` owns the
   claim grammar and the extraction, and the shell grader, `--inventory`, round-prepare, the round
   scope and `append` read it (`.claude/rules/claim-syntax-and-work-tree.md`), while the doctor
   row still spawns the library for its inventory rather than requiring the module. No numeral here on
   purpose — this file's own rule is that a hand-maintained count is what a driven loop cannot
-  catch, and the one that stood here was stale within the change that wrote it.
+  catch.
 - **Windows is UNVERIFIED for all four behaviours.** None of the three suites is in
   `tests/profiles/windows-ci.v1.json`; `test-edit-landing-audit.sh` and
   `test-tdd-complete-receipt-gate.sh` run on the weekly Windows Safety structure shard,

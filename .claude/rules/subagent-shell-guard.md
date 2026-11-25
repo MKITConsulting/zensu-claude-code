@@ -185,8 +185,8 @@ grows past 64 directories is denied (`directories`).
 - In-place edits of a file list stay unjudged. Extending the `find` rule to `sed -i` would catch
   only a `find` without a name test, while `grep -rl old . | xargs sed -i …` and
   `sed -i … $(grep -rl old .)` keep a file list the parse cannot see; the known gap says so.
-- Accident prevention, not confinement. A parse of the command text cannot confine a shell, which
-  is why the gate denied every command tool before this grant. A deliberately obfuscated command
+- Accident prevention, not confinement. A parse of the command text cannot confine a shell. A
+  deliberately obfuscated command
   such as `d=.zen; ls "$d"su/state` passes the guard. An OS sandbox is the real boundary.
 - A helper name counts only in a command outside `READ_ONLY_COMMANDS` (a `find` with `-exec` is
   outside it), so reading this repository's own hooks and writing a commit message that names one
@@ -222,7 +222,7 @@ grows past 64 directories is denied (`directories`).
   decodes to a line break cannot add a line to its tab-separated output. Its node child emits each
   distinct line once (a `Set`), because the walker and the token scan find the same invocation, and
   the shell resolves the workflow's tools once per run (`zensu_workflow_tools`), so the cost of a
-  call no longer grows with repeated invocations. Before either reading runs it compares the
+  call does not grow with repeated invocations. Before either reading runs it compares the
   payload with the binder's exported `MAX_PAYLOAD_BYTES` and turns an oversized Bash command that
   names `zensu`, in any letter case or with quotes or backslashes inside the name, into the size
   deny of `zensu_emit_oversized_payload_deny`.

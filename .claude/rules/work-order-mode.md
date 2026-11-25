@@ -62,7 +62,7 @@ before they resend, and a resend is a replay. Every helper verb that gets the ve
 maps it through `endedResult`; the post-tool hook builds its own notice from the ended marker.
 
 **The CLI prints the backend's error code**, and the runtime reads the `--json` error line first
-and the first `(status N, code X)` group second (zensu-cli PR 26). A failure without a status is
+and the first `(status N, code X)` group second. A failure without a status is
 transient only when it shows that no answer came: the CLI did not finish, printed no `error:` line,
 or its line matches `NO_ANSWER_RE` (Go's `<Method> "<url>": …` transport error, `reading response
 body`, `invalid … response|list`, or a network failure such as `connection refused`). Every other
@@ -106,17 +106,17 @@ The readings create a character only inside an ANSI-C string, so an inner text a
 `<` or `>` only when the raw text holds one of the three: `bash -c $'zensu \x3e/dev/null auth login'`
 spells the operator in its own `$'…'`, and `bash -c eval\ \$\'git\ \\x3e/dev/null\ push\'` gets its
 `$'` only from the outer shell's quote removal. So
-every finding the released gate gave stays exactly as it was, a false one included (`>printenv`
-still reads as `printenv`), also where a `-c` string or an eval body would now give another one
-first (`bash -c 'printenv >/dev/null'; git push` stays `push`), and a redirection between a noun
+every finding of the plain pass stands exactly, a false one included (`>printenv` reads as
+`printenv`), also where a `-c` string or an eval body would give another one first in redirection
+mode (`bash -c 'printenv >/dev/null'; git push` stays `push`), and a redirection between a noun
 and its verb (`zensu work >/dev/null heartbeat 1`) keeps the plain finding, which names the target
 as the verb. A memo keyed by mode, depth and text analyzes each distinct text once per call: a
-1.4 MiB command took 453 ms against the released gate's 194 ms, and 4,000 nested `bash -c` calls
-with redirections 98 ms against 42 ms (measured on the development Mac).
+1.4 MiB command took 453 ms against 194 ms for the plain pass alone, and 4,000 nested `bash -c`
+calls with redirections 98 ms against 42 ms (measured on the development Mac).
 
 In redirection mode `shellCommands` drops the operator, its operand word, attached or after blanks,
 and a descriptor number or `{name}` glued to an operator that starts with `<` or `>`
-(`REDIRECTION_DESCRIPTOR_RE`); the `&` of `&>`, `2>&1` and `>&2` then no longer ends the command.
+(`REDIRECTION_DESCRIPTOR_RE`); the `&` of `&>`, `2>&1` and `>&2` then does not end the command.
 Each reading has its own table in `REDIRECTION_OPERATORS`. `bash` reads `<`, `>`, `>>`, `<<`, `<<-`,
 `<<<`, `<>`, `<&`, `>&`, `>|`, `&>` and `&>>`. `posix` reads the same without `&>` and `&>>`,
 because a POSIX shell's `&` there ends the command: dash runs `printf` in `true &>f printf x`
@@ -134,10 +134,11 @@ The second pass also reads the `$(…)` and backtick spans of a heredoc body who
 unquoted, which the shell expands, through `heredocBodies` in `hooks/lib/bash-source-write-parse.js`,
 the scanner `stripHeredocs` uses, so both agree on where a body starts and ends. A quoted body, an
 escaped `\$(`, a `<(…)`, which a body does not expand, and a body's plain text are never read as
-commands. The second pass can therefore only add a deny: `zensu >/dev/null auth login`,
-`2>/dev/null git push`, `gh 2>/dev/null pr create`, `env > env.txt`, which writes the session token
-into a file, and `cat <<EOF` with a `$(git push)` line were allowed before. A generated corpus
-compared with the released gate left 951 redirect-free commands unchanged and changed no finding in
+commands. The second pass can therefore only add a deny, and it denies these calls, which the
+plain pass allows: `zensu >/dev/null auth login`, `2>/dev/null git push`,
+`gh 2>/dev/null pr create`, `env > env.txt`, which writes the session token into a file, and
+`cat <<EOF` with a `$(git push)` line. A generated corpus compared with the plain pass alone left
+951 redirect-free commands unchanged and changed no finding in
 210,378 placements of bash operators. It checked 47,810 placements of `&>` and `&>>` against their
 POSIX meaning too, 6 of which only that meaning denies. Of 71,715 placements of zsh-only spellings,
 8 report bash's finding, because bash keeps the digit before `&>` as an argument, and 10 leave a call
@@ -174,8 +175,8 @@ work-order branch prefix, `wo-`. A change on the service side means changing the
 the suites keep passing against behavior Zensu no longer has.
 
 **A work-order run keys its team review by the order, not by the run**:
-`team-review:v1:<sha256(canonical({headSha,orderId}))>`. A key derived from the run, as decision
-13 of the S3 plan proposed, finds a review only while the order's `autopilot_run_id` still names
+`team-review:v1:<sha256(canonical({headSha,orderId}))>`. A key derived from the run finds a
+review only while the order's `autopilot_run_id` still names
 the run that published it; the backend overwrites that field with every accepted stage, so a third
 attempt could not find the first attempt's review. The key has FOUR spellings that move together:
 `workOrderReviewOperationKey` in the worker of `hooks/lib/zensu-autopilot-state.sh`, the shell
@@ -183,8 +184,8 @@ helper `autopilot_work_order_review_operation_key` there, `workOrderReviewKey` i
 `hooks/lib/work-order-v1.js`, and the validation sentence in
 `skills/pr-team-review/references/delegated.md`. The unit case `the order-bound review key
 matches the state library helper` compares the first three; `_autopilot_team_review_payload_identity_critical`
-accepts the order key only after the run key failed, so a run without `workOrder` keeps its exact
-old path.
+accepts the order key only after the run key failed, so a run without `workOrder` takes exactly
+the run-key path.
 
 **`TEAM_REVIEW_IMPORTED` relaxes one delivery invariant, and only for work-order runs.** An
 imported review's head may be an ancestor of the `PR_OPENED` head instead of equal to it, because
@@ -229,7 +230,8 @@ runs outside the lease as well; `move_to_cloud` pushes the branch past `--push`,
 lease against the head Zensu recorded, continues the session in the cloud and archives it here; and
 `send_message` asks another running session to take work up. Claude Desktop 2.42304.0 replaced the
 task chip with a `start_session` proposal (read from its bundle on 2026-10-18), so a deny of
-`spawn_task` alone left the work skill's "never open a task chip" rule unguarded there. The server
+`spawn_task` alone would leave the work skill's "never open a task chip" rule unguarded there.
+The server
 is therefore judged by its prefix: a tool a later Claude Desktop adds stays denied until
 `INERT_SESSION_TOOLS` names it. The same bundle, read again on 2026-10-19, registers eight tools on
 the `ccd_session` server: `spawn_task` only when `start_session` is not offered; `start_session`,
@@ -241,7 +243,7 @@ proposal nobody started, `mark_chapter` only marks a chapter in the transcript,
 could start in, and `read_widget_context` only reads a widget's state. On the `ccd_session_mgmt`
 server only `send_message` is judged. Claude Desktop supplies all of these tools itself, so a
 work-order session the launcher starts with `claude -p` has none of them; the deny guards a work
-order bound inside a Claude Desktop session. The code `chip` predates the other denies and stays,
+order bound inside a Claude Desktop session. Every one of these denies keeps the code `chip`,
 because the module's non-hook gate output carries it.
 
 Each tool the gate starts to deny is a call it used to allow, so the change alters the capability
@@ -258,16 +260,15 @@ and no test reads those sentences, so they move with the gate by hand.
 **The Stop budget counts review progress, and waits on review seats by time.** `stopDecision`
 ends the order after three Stops in a row with one progress key. The ledger part of that key,
 `<runId>:<events.length>`, stands still for a whole team review: the seats run in the background,
-the main thread ends turns, and the ledger moves only at `TEAM_REVIEW_PUBLISHED`. The 2026-10-20
-smoke saw two Stops during one review, with three seats finished between them. So the key gains
-`#<progress>`, the summed revisions of the session's evidence leases (`leaseProgress` in
+the main thread ends turns, and the ledger moves only at `TEAM_REVIEW_PUBLISHED`. So the key
+carries `#<progress>`, the summed revisions of the session's evidence leases (`leaseProgress` in
 `hooks/lib/review-evidence-lease-v1.js`), which every create, bind, result, seal and close raises;
 and a Stop while an active lease has a bound or retrying seat before
 `min(expires_at_ms, created_at_ms + MAX_TTL_SECONDS * 1000)` blocks without counting. The wait is
 bounded by that deadline rather than by a Stop count, because the lease TTL is the plugin's own
 ceiling on a review, and how often the main thread stops while it waits depends on how it waits,
 not on how long the seats take. After the
-deadline, three Stops without progress end the order as before. A read that fails returns no
+deadline, three Stops without progress end the order. A read that fails returns no
 progress: the Stop reuses the recorded key of the same ledger part and counts, so a fault never
 resets the count or extends the wait. A bare ledger key, which a failed read leaves when no
 suffixed key of that ledger part was recorded, counts as the same key once a read succeeds, so a
@@ -292,7 +293,7 @@ claims no stage budget. The `wait` mode enters through `hookLeaseWait`, which an
 from one `lstat`, without binding, when the session has no records directory in the store, and in
 every other case binds and reads as `hookLeaseProgress` does: the interceptor runs on every Stop it
 would count, and a session that never created a lease has nothing to read. The child runs through
-`zensu_run_bounded`; an expired, failed or empty answer counts the Stop as before. Both hooks
+`zensu_run_bounded`; an expired, failed or empty answer counts the Stop. Both hooks
 therefore wait on one predicate; each reads it once per Stop, so a store that changes between the
 two reads can count one Stop in one hook only. Only a nonterminal run reads the store. Pins: the
 Stop, lease-reader, wait-mode and wait-entry cases in
@@ -354,7 +355,7 @@ registration.
   work-order suites skip there, because Node cannot start their shell-script fake `zensu` without a
   shell. `tests/profiles/windows-native-structure.v1.json` lists all five as excluded.
 - `usage` lines and the cost cap belong to slice S4, other order kinds to slice S9.
-- Every Stop of a session with a nonterminal run now binds once more in Node in the work-order
+- Every Stop of a session with a nonterminal run binds once more in Node in the work-order
   hook, and every Stop the Autopilot interceptor would count spawns the evidence hook's wait mode,
   which binds once more when the session has a records directory in the store; each bind measures
   the runtime digest again. The added latency is unmeasured.

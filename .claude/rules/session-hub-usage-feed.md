@@ -83,33 +83,28 @@ session through its function-hook stream layer. This plugin would do that on eve
 installed on, with or without the Hub, for a feature only the Hub reads. U7 holds the module to
 `turn.complete` and `session.measure`.
 
-**Out-of-date records, 2026-10-29.** Before this rule the module wrote on every measure whose
-`e.changed` named `cost` or `rateLimits` and stamped the time of the write. On 2026-10-29 fifteen
-sessions of three accounts wrote within 90 seconds, the sessions of each account at one and the
-same second, weekly readings 5 to 26 points below a report their own account had made 30 to 143
-minutes earlier (joined to accounts through Claude Desktop's session records on 2026-11-02). Read
-from the Claude Code 2.1.316 binary on 2026-11-02: the engine raises `session.measure` at the end
-of a turn when a unit moved and on every change of the account's limit status, a change of the
-status alone counts as `rateLimits` changed, and the input's `rateLimits` are always the windows of
-the last response the engine applied. The engine also changes the status without a response, for
-example when it takes over limits a remote session reports or when a usage-limit wall ends, so
-such a measure carried windows of any age and the old rule gave them a fresh time. What changed the
-status of those sessions at once is not known.
+**Why `e.changed` proves nothing.** Read from the Claude Code 2.1.316 binary on 2026-11-02: the
+engine raises `session.measure` at the end of a turn when a unit moved and on every change of the
+account's limit status, a change of the status alone counts as `rateLimits` changed, and the
+input's `rateLimits` are always the windows of the last response the engine applied. The engine
+also changes the status without a response, for example when it takes over limits a remote
+session reports or when a usage-limit wall ends, so such a measure carries windows of any age,
+and a record stamped at the time of the write would give them a fresh time.
 
-**Live check, 2026-10-18.** Run by the session that started this work, with the owner's approval:
+**Live check, 2026-10-18.** Run with the owner's approval:
 the module installed as a throwaway plugin from a local directory marketplace into the real
 `~/.claude`, the usage directory created by hand at 0700. Within two minutes 31 Claude Desktop
-engines (2.1.299) that were already running loaded it live, with no prompt and no restart, so the
-plan's assumption that a running engine loads a newly installed module only after
-`/reload-plugins` is wrong. Each wrote a record from `session.start`, and those records carried
+engines (2.1.299) that were already running loaded it live, with no prompt and no restart, so a
+running engine needs no `/reload-plugins` to load a newly installed module.
+Each wrote a record from `session.start`, and those records carried
 each engine's last API response: in one account, records written within 80 seconds ranged from
 13 % / 63 % (an engine idle since 16:38) to 37 % / 70 % (the only busy engine), and only the busy
-engine matched `get_usage` (37 % / 70 %, same resets). That is why `session.start` writes nothing
-now. Every record joined `~/.claude/sessions/<pid>.json` by `sessionId`, and six distinct weekly
+engine matched `get_usage` (37 % / 70 %, same resets). That is why `session.start` writes nothing.
+Every record joined `~/.claude/sessions/<pid>.json` by `sessionId`, and six distinct weekly
 reset times showed engines of at least six accounts.
 
-**Live re-check, 2026-10-18 19:54–20:05.** The same session ran the fixed module as probe version
-0.1.1 and reloaded it in every running Desktop engine through `claude plugin disable` and
+**Live re-check, 2026-10-18 19:54–20:05.** Probe version 0.1.1 of the module, which wrote nothing
+on `session.start`, was reloaded in every running Desktop engine through `claude plugin disable` and
 `enable`. No idle engine wrote anything after the reload, so no burst of start records appeared;
 only the about eleven busy engines wrote, at their turns. Three of them each wrote two consecutive
 records with identical percentages (48 % / 73 % at 19:55:49 and again at 19:57:13, for one), so
@@ -126,15 +121,15 @@ printed. A module whose `register` throws leaves the classic hooks and skills ru
 
 - `tests/mods/usage-feed.test.ts` runs under `claude plugin test .`: the record's exact fields and
   its stamp, the end of the answered turn rather than the write; nothing written without a newer
-  proof, the status change of 2026-10-29 and the first measure after a load included; a moved,
+  proof, a status change with no response and the first measure after a load included; a moved,
   appeared or reset window proving a reading and a window that only left proving nothing; every
   answered turn, a subagent's too, writing again at steady windows; an interrupted, failed or
   refused turn and one without `usage` proving nothing; `/clear`; a directory that appears later
   keeping the reading's time; nothing written on `session.start` or while the directory is missing
   or is a file or link; malformed session ids; the config-root ladder; malformed windows; and a
   failed write that the next measure repeats. An op answered by a test hook returns `{ value }` or
-  `{ deny }`. The file passed on 2.1.301, 2.1.305 and 2.1.316 on 2026-11-02, and 8 of its 15 tests
-  failed against the module before this rule. `claude plugin test` does not descend into
+  `{ deny }`. The file passed on 2.1.301, 2.1.305 and 2.1.316 on 2026-11-02. `claude plugin test`
+  does not descend into
   `node_modules` (measured on 2.1.301 with a planted failing test). CI has no Claude Code, so CI
   never runs this file.
 - `tests/structure/test-session-hub-usage-feed.sh`, in `ciStructureTests`, reads the module as

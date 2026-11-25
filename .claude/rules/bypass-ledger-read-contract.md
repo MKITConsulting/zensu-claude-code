@@ -6,7 +6,7 @@ paths:
 
 # Bypass Ledger Read Contract (`tdd_bypasses`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 `tdd_bypasses` is the ONE member of the `_tdd_read_validated_state` reader family
 that signals an unreadable document through its EXIT STATUS rather than an echoed
@@ -21,13 +21,13 @@ first-arming case and must not be reported as damage.
 
 **No rendering site consumes that status directly.** `zensu_bypass_display`, beside the
 constants in `hooks/lib/zensu-tdd-phase.sh`, owns the whole ladder — including a
-catch-all that fails CLOSED on an unknown status, which three hand-rolled copies
-previously got backwards by testing `-eq 1` and falling silent instead. Its second
+catch-all that fails CLOSED on an unknown status, where a hand-rolled copy that tests
+`-eq 1` falls silent instead. Its second
 argument decides ONLY what an absent document renders: `text` for a terminus that must
 disclose (`--bypass-list`, the post-review delegate), the default `empty` for a clearing
 verb (`--tdd-begin`, `--tdd-reset`) and for a Stop release, where a clean ENOENT means
-nothing was ever recorded. It re-raises `tdd_bypasses`' status, so `--bypass-list` still
-exits **3** on a non-zero read — distinct from its pre-existing exit 2 for an unavailable
+nothing was ever recorded. It re-raises `tdd_bypasses`' status, so `--bypass-list`
+exits **3** on a non-zero read — distinct from its exit 2 for an unavailable
 session identity. `tdd_add_bypass`'s own dedupe is the one exception: it consumes the raw
 value inside a `case` word and discards the status by design. `tdd_bypass_recorded` is a
 membership test, not a rendering site: it answers 0 only when a readable ledger names the

@@ -31,12 +31,12 @@ answer is the Zensu workflow, and never asked when the project configures a defa
 autopilot or pilot answer is never remembered, so the question comes back after it; implementing
 directly becomes the session's route only through an explicit `/zensu:delivery-route --direct`
 or the config key.
-The mechanism is a session marker plus a config key; the question itself is unchanged
-(`.claude/rules/plan-approval-delivery-route.md`). The measured
+The mechanism is a session marker plus a config key; the question itself is the one
+`.claude/rules/plan-approval-delivery-route.md` describes. The measured
 reason: across this machine's transcripts from 12 June to 20 September 2026 the question was
 asked 835 times in 539 sessions, and a session marker plus a configured `build` default would have
-removed 488 of the 678 decisive answers. Before this, the only switch was `autoTdd:false`, which
-removes the workflow together with the question.
+removed 488 of the 678 decisive answers. The only other switch, `autoTdd:false`, removes the
+workflow together with the question.
 
 ## The ladder has one owner
 
@@ -84,7 +84,7 @@ The helper `hooks/lib/zensu-delivery-route.sh` refuses every verb except
 `--build | --direct | --auto | --status`, the config reader answers `ask` for any other value, and
 clause (C)'s bar on the two routes in a headless run is byte-identical: a decided route replaces
 only the DEFAULT that (C) names. The `D13` slices in `tests/structure/test-plan-approved-delegate.sh`
-hold that; the new directive text sits outside the (B) and (C) slices.
+hold that; this feature's directive text sits outside the (B) and (C) slices.
 
 ## Two writers
 
@@ -100,13 +100,14 @@ preference taken from the approval or request text record nothing, and both dire
 model never to record `--direct` itself. The default for a refused question or a
 `ZENSU HUMAN PRESENT:` field reading `no` runs the workflow and records nothing in both
 directives, and the plan gate's (C) clause in both heredocs, the reminder's two full texts and its
-ask short line say so: no person chose the route, and a live run told only to skip the question
-borrowed the Yes arm and recorded `build`. The question says what outlives it: the plan question's
+ask short line say so: no person chose the route, and a run told only to skip the question can
+borrow the Yes arm and record `build`. The question says what outlives it: the plan question's
 workflow option and the reminder's Yes state that the answer is remembered for the rest of the
 session, the other question's requests included unless that question is switched off, through
 one Bash call the user may be asked to allow, the direct option and the No state
-that they decide only that plan or request, and `/zensu:delivery-route` changes the route. The
-option LABELS are unchanged, because `evals/plan-approval-hook` selects by label.
+that they decide only that plan or request, and `/zensu:delivery-route` changes the route. Those
+statements sit in the option descriptions, never in the LABELS, because
+`evals/plan-approval-hook` selects by label.
 
 **Only the fail-safe answer is recorded automatically.** The reminder asks per request and the
 plan gate per plan, but both read one marker. A recorded `direct` would let one quick "No" to the
@@ -132,8 +133,8 @@ redirect, a non-regular check, the rename, and a regular-file post-condition aft
 directory swapped in after the check makes `mv -f` succeed with nothing recorded. The
 `-L` test narrows the temp-leaf window and does not close it; the closing O_NOFOLLOW open costs a
 node spawn on every write and is not taken. The cleanup trap is EXIT-only and INT, TERM and HUP
-only exit (130, 143, 129): a cleanup handler on the signals themselves returned into the write,
-which then resumed and could re-create the temp leaf through a plain redirect without O_EXCL.
+only exit (130, 143, 129): a cleanup handler on the signals themselves returns into the write,
+which then resumes and can re-create the temp leaf through a plain redirect without O_EXCL.
 The state directory is created with `mkdir -p -m 700`, and a failed call is still accepted when it
 left a directory that is not a symlink: Git Bash on Windows creates the directory and then fails
 the mode change with `Permission denied`, so a fresh project could never record a route there.
@@ -168,11 +169,11 @@ another way, such as a path joined from the bare stem in node, or written by ano
 ## Linked sessions inherit `build`
 
 A session another Claude Desktop session started (`start_session`, fresh or forked context) has its
-own CLI session id and key, so the parent's marker never reached it: over 424 linked sessions
+own CLI session id and key, so the parent's marker does not reach it: over 424 linked sessions
 measured on 2026-10-18, none opened with a decided route, the 6 whose parent had recorded the workflow route
 included. Its first prompt is the brief the parent wrote, and the reminder answers it as a typed
-prompt (a fresh brief classifies as `session-brief`, which the reminder treats as typed), so a route
-named in a brief acted as the user's own preference. The measurements and decisions are in
+prompt (a fresh brief classifies as `session-brief`, which the reminder treats as typed), so
+without the brief note a route named in a brief acts as the user's own preference. The measurements and decisions are in
 `docs/superpowers/specs/2026-10-18-linked-session-route-design.md`.
 
 **Lineage comes from the desktop's own records, located through the hook environment.**
@@ -225,8 +226,8 @@ root (`parent-context-unavailable`). The check is the rule of `privateRecordsDir
 `claude-code-sessions` 0755, the account directories 0700 (nine) or 0755 (one), the organization
 directories 0700 (all 39) and the records 0600 (all 4058), each owned by the user. A group write
 bit is refused even where the group holds the user alone, as under the umask 002 of a
-user-private-group setup; such a session loses the inheritance and the brief note, so it behaves
-as it did before inheritance. The check never judges the parent's project root, whose
+user-private-group setup; such a session loses the inheritance and the brief note. The check
+never judges the parent's project root, whose
 `realDirectory` call passes `anyOwnerOrMode`: `realDirectory` has no default policy and throws a
 `TypeError` for a call that names none. The parent's
 project root comes from the parent's Session Control record (`sessionKey`
@@ -322,7 +323,8 @@ session, `--restore-root`, a re-anchor or a new CLI session id under the same de
 find it absent on a prompt the user typed. The desktop's own `completedTurns`, which its result
 handler raises after every successful turn and which is absent before the first, is the
 session-wide fact; the module reads it as the sixth field of its line, `first` or `later`. The lead is
-added on the parsed JSON, never in a third heredoc, so `P1`, `P2` and `R13` are untouched. A retry
+added on the parsed JSON, never in a third heredoc, so it leaves the heredocs that `P1`, `P2` and
+`R13` grade alone. A retry
 that resolves `linked` answers `linked`, because a later prompt is the user's own. The plan gate adds
 no sentence: its fast path (B) reads only the user's own approval message, and its heredocs sit close
 to `D44`'s 9,000-character bound.
@@ -344,7 +346,7 @@ one pass, so a value is never scanned for another placeholder. When node cannot 
 delivery-route wrapper still emits valid JSON with the skill sentence in place of the command, so
 the directive is never routed to silence, and it puts the brief lead right after the
 `additionalContext` opener, in either spelling the hooks emit, so the note survives the fallback;
-the primer emits nothing, as before. The reminder's other
+the primer emits nothing. The reminder's other
 three shapes are `printf` literals through the same wrapper, never a third heredoc: the CI note, the
 decided line it sends on every prompt while the field reads `build` or `direct`, and the short line it
 sends on a later `ask` prompt of a context generation that already received the full text
@@ -471,8 +473,8 @@ route: a route change moves only the field, and every shape of the reminder carr
   gives), and `hooks/lib/zensu-marker-write.sh`, the one write sequence every helper of a
   `zensu-config.sh` marker sources: it, `zensu-tdd-mode.sh`, `zensu-full-suite.sh` and
   `zensu-linked-session.sh`.
-- Both heredocs of BOTH ask-hooks; the parity helper's `P1`/`P2` needle lists carry the new
-  literals.
+- Both heredocs of BOTH ask-hooks; the parity helper's `P1`/`P2` needle lists carry this
+  feature's literals.
 - The route-default block and the `_ZENSU_ROUTE_QUESTION_LIVE` guard in
   `hooks/session-start-banner.sh`, and the recap in both `hooks/session-start-primer.sh`
   heredocs.
@@ -598,7 +600,7 @@ together.
 - Every prompt without an active chain pays up to two further `node` spawns in the reminder:
   `zensu_default_delivery_route` when the marker does not decide, and the substitution on every
   emission. Unmeasured, on a hook registered without a `timeout`.
-- Windows is unverified for the new suite: it runs only in the weekly Windows Safety structure
+- Windows is unverified for `tests/structure/test-delivery-route.sh`: it runs only in the weekly Windows Safety structure
   shard, with no blocking PR-shard entry by design.
 - `/zensu:delivery-route` cannot be exercised live from a `--plugin-dir` checkout in a session
   bound to the installed plugin, because the sibling-root rule refuses the bind; its behavioural
@@ -608,8 +610,7 @@ together.
   renames, for the zen-mode marker alone; `zensu_write_session_marker` re-opens its `mktemp` leaf
   through a plain redirect that the `-L` refusal only narrows, for the five markers
   `zensu-config.sh` owns (tdd-mode, delivery-route, inherited-route, linked-session and
-  full-suite). The difference is historical: this change moved the tdd-mode sequence into a
-  shared library, not onto zen-mode's primitive. Unifying the two is a separate change, because R8f-R8j and T9g-T9k drive the shell sequence through PATH shims for `mktemp` and
+  full-suite). Unifying the two is a separate change, because R8f-R8j and T9g-T9k drive the shell sequence through PATH shims for `mktemp` and
   `mv`, R8k pins its shape, and all of them would be re-authored with it.
 - The desktop record format is private and unversioned; the resolver was written against Claude
   Desktop 2.42304.0 on macOS. Drift reads as `none` or `unresolved`, which is the ladder without
@@ -648,8 +649,8 @@ together.
   example, leaves the answer uncached, so the module starts again on the next prompt. The test
   covers the read-only and the foreign-owned directory, the common cases.
 - The desktop records and the parent's markers are ordinary user-writable files. A forged lineage
-  can add the workflow, because only `build` is inherited; drop the brief note, which is the
-  behavior from before inheritance; or mark a prompt the user typed as another session's brief,
+  can add the workflow, because only `build` is inherited; drop the brief note, so a route named
+  in the brief acts as the user's own preference; or mark a prompt the user typed as another session's brief,
   so a route preference in that one prompt decides nothing and the field answers. Under a field
   that reads `direct` (the own marker or `hooks.defaultDeliveryRoute`) that removes review: a
   request for the workflow typed into that prompt is implemented directly. The effect covers that
@@ -685,8 +686,8 @@ together.
   on.
 - The brief is recognized through `completedTurns` in the own desktop record, a private field. A
   first turn that ended in an error leaves it absent, so a re-resolution after such a turn still adds
-  the note; a desktop build that never writes it makes every re-resolution `first`, which is the
-  behavior from before the check; and the field must be on disk before the next prompt's hook reads
+  the note; a desktop build that never writes it makes every re-resolution `first`, so the linked
+  marker's absence alone decides the note; and the field must be on disk before the next prompt's hook reads
   it, which the desktop's save after each result makes likely but which was not observed live.
 - A linked session that is already running when the release carrying this arrives resolves its
   lineage on its first prompt under the new runtime. It gets no brief note, because its

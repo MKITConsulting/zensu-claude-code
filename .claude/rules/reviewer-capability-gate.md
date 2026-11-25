@@ -32,7 +32,7 @@ untrusted agent output, and the auto-mode classifier reviews it with `onBlock: "
 - **Decided before the `cwd` is canonicalized.** The handback resolves no path. The
   unusable-cwd deny tells the principal to report to the main thread, and under the handback
   contract this tool is the only way to do that. The bind, digest and workflow revalidation
-  still run first, so every bind-failure deny still wins. `pathResolutionProfile` now also
+  still run first, so every bind-failure deny still wins. `pathResolutionProfile` also
   picks the handback profile; a new principal branch lands in both uses.
 - **The deny text names the channel.** Every other tool of the two profiles is denied with
   `… only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report`.
@@ -50,14 +50,14 @@ untrusted agent output, and the auto-mode classifier reviews it with `onBlock: "
 - **The workflow result tool, `StructuredOutput`.** A Claude Code workflow gives an agent it
   spawns with a result schema the host tool `StructuredOutput` and hands that tool's input to
   the workflow script as the agent's result; an agent that never calls it counts as failed.
-  Measured on 2026-10-11: a `zensu:review-aspect` agent spawned by a workflow with a schema was
-  offered the tool, this gate denied it as outside the read trio, and the run failed.
+  Measured on 2026-10-11: a `zensu:review-aspect` agent spawned by a workflow with a schema is
+  offered the tool, and denying it as outside the read trio fails the run.
   `WORKFLOW_RESULT_TOOL` is therefore admitted for the two `HANDBACK_PROFILES` beside the
   handback, before the `cwd` is resolved. Its input is the script's own schema, so no field set
   is checked and no path rule applies; the premise is that the tool returns data to the script
   that spawned the agent and does nothing else. The review template
   `templates/workflows/zensu-review-v1.js` rests on it: its finders and refuters run as
-  `zensu:review-aspect` under `reviewer-readonly-v1`. The tool left the `HOST_NON_READ_TOOLS`
+  `zensu:review-aspect` under `reviewer-readonly-v1`. The tool is not in the `HOST_NON_READ_TOOLS`
   roster; case variants and look-alike MCP names stay denied, and the evidence workers stay on
   their lease trio. **Version: `patch`** — the gate denies strictly less.
 
@@ -77,12 +77,11 @@ attempts, every one ended with its pure-JSON result as final text. Admitting the
 workers first needs the `SubagentStop` reader to take the result from the handback.
 
 **Neutral children** (`host-profile-v1`) may use every tool except what reaches Zensu's own
-state or runs commands outside `Bash`. Decided on 2026-10-24 after the newcomer audit of 0.27.0 (D5-01, D6-01, D7-02): the tool
-ALLOWLIST that confined neutral children protected at accident level only, because `Bash` was
-already granted behind a guard that is not a sandbox, while it silently took browser,
-context-mode, desktop and every other MCP tool from users who had installed them. The allowlist
-(`HOST_PROFILE_TOOLS`, `HOST_PROFILE_MCP_READ_TOOLS`, `hostProfileAllowance`,
-`MCP_COMMAND_SEGMENT_RE`) is gone; do not reintroduce it.
+state or runs commands outside `Bash`. No tool ALLOWLIST confines them: one protects at
+accident level only, because `Bash` is granted behind a guard that is not a sandbox, while it
+silently takes browser, context-mode, desktop and every other MCP tool from users who installed
+them. Do not reintroduce the allowlist (`HOST_PROFILE_TOOLS`, `HOST_PROFILE_MCP_READ_TOOLS`,
+`hostProfileAllowance`, `MCP_COMMAND_SEGMENT_RE`).
 
 `hostProfileToolViolation` and `neutralViolation` still deny, for every tool:
 
@@ -108,10 +107,9 @@ every other tool the gate cannot tell a read from a write, so:
   denied as if it were a write (`unknownTool` in `neutralViolation`);
 - any input string that names Zensu state is denied through `shellGuard.inputMention`, the
   guard's text rules (`textMention`: a protected form, a `.zensu` segment, `/proc/<pid>/environ`)
-  without its shell parse. That keeps `.zensu` out of a browser or context-mode search call,
-  which the allowlist used to deny outright. It also refuses a GitHub comment that merely
-  mentions `.zensu/plans`; that false positive is the Bash guard's own, and it is still less than
-  the old outright deny;
+  without its shell parse. That keeps `.zensu` out of a browser or context-mode search call. It
+  also refuses a GitHub comment that merely mentions `.zensu/plans`; that false positive is the
+  Bash guard's own, and narrower than denying the tool outright;
 - an input string that is, as a whole, one of the guard's `protectedParents` (a parent directory
   of the private data, the installed plugin or the session record, below `HOME` and outside the
   project's own parents) is denied through `parentMention`, the rule the Bash guard applies to a
@@ -119,7 +117,7 @@ every other tool the gate cannot tell a read from a write, so:
   passes;
 - a path input that is a multiply linked file is denied like a mutation of one.
 
-A known tool keeps exactly its old checks, so no input the allowlist admitted is denied now.
+A known tool keeps exactly its own checks; the rules in this list apply to unknown tools only.
 
 **Commands outside `Bash`.** Every Zensu command gate (the CLI write gate, the source-write
 gate, the secret scan, the browser consent gate) is registered on `Bash|PowerShell`, and the
@@ -142,13 +140,14 @@ a plugin root without the capability gate.
 
 - **Path heuristic.** `pathInputs` returns nothing for `NON_PATH_TOOLS` (`StructuredOutput`,
   `ReportFindings`, `SubagentHandback`, `AskUserQuestion`): they take no filesystem argument,
-  and a `target_files` key or a quoted patch header was misread as one. Every other tool keeps
+  and the heuristic would misread a `target_files` key or a quoted patch header as one.
+  Every other tool keeps
   the heuristic, MCP tools included, because a filesystem server's `read_text_file` takes a
   `path`.
 - **Remedy.** The command deny and the traversal deny end with `searchRemedy`: the real,
   non-hidden subdirectories of the project root that the traversal check admits, read at deny
   time and capped at `SEARCH_EXAMPLE_LIMIT`, or a `Read` fallback when none qualifies. With
-  the bare denies a subagent concluded that it could not search the tree at all.
+  a bare deny a subagent concludes that it cannot search the tree at all.
 - **Coupled sites.** `renderHostContext` in `hooks/lib/session-control-core-v1.js` names the
   boundary; `tests/structure/test-reviewer-capability-gate.sh` checks its key phrases, and
   `tests/structure/test-session-control-claude.sh` and
@@ -209,7 +208,7 @@ a failure, read the new bundle for the report tool's name and input schema, then
 - **The hook payload itself was not captured.** A headless probe could not run. The shape
   check rests on three observations: the host schema, the host building `tool_input` from the
   call's input, and 791 of 791 handback `tool_use` blocks in 332 local transcripts carrying
-  exactly `message`. If a host adds an input key, every reviewer report is denied again. The
+  exactly `message`. If a host adds an input key, every reviewer report is denied. The
   host cross-check does not see that case; the deny reason in the reviewer transcript names it.
 - **Only `auto` mode injects the tool.** In other modes the final plain text is delivered and
   this branch is never reached.

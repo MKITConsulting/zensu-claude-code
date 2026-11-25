@@ -18,13 +18,14 @@ paths:
 `session-hub@zensu` companion carries the maintained one as `/session-hub:session-trail`.
 `.claude/rules/session-hub-companion.md` says which copy each check grades.
 
-**A selector verb summarizes what its answer needs, not the machine.** `resolve()` used to build
-the full index before it tried the exact-id tier, and `--all` drops the project-directory filter,
-so every `show`, `takeover`, `handoff`, `adopt` and `release` process summarized every transcript
-modified inside `--days` and JSON-parsed every Claude Desktop record. Measured on 2026-10-12 on
-one machine: 2,415 transcripts (about 4.2 GiB decoded) and 3,034 records (335 MiB) per process,
-27-31 s CPU and up to 931 MB RSS, and a Session-Hub takeover runs that verb sequence 4 to 6
-times. After this change `show <uuid> --all --json` measured 0.34 s user CPU and 86 MB max RSS.
+**A selector verb summarizes what its answer needs, not the machine.** `--all` drops the
+project-directory filter, so building the full index before the exact-id tier would make every
+`show`, `takeover`, `handoff`, `adopt` and `release` process summarize every transcript
+modified inside `--days` and JSON-parse every Claude Desktop record. Measured on 2026-10-12 on
+one machine with the full index built first: 2,415 transcripts (about 4.2 GiB decoded) and 3,034
+records (335 MiB) per process, 27-31 s CPU and up to 931 MB RSS, and a Session-Hub takeover runs
+that verb sequence 4 to 6 times. With the targeted lookup, `show <uuid> --all --json` measured
+0.34 s user CPU and 86 MB max RSS.
 Two reads stay wide on purpose: every `local_*.json` is still read once as bytes, and only the
 records that carry the id are parsed; plain-text `show` also reads the first 64 KiB of every
 other admitted transcript to find its siblings.
@@ -38,7 +39,7 @@ other admitted transcript to find its siblings.
   candidate rows when there are any and over the full index otherwise. Tiers 3 to 7 always run
   over the full index, which `resolve()` builds lazily, so an id selector that settles at tier 1
   or 2 never builds it, while every other selector, the missing-selector order and the
-  `no session matched` text are today's.
+  `no session matched` text keep their full-index behavior.
 - `siblings()` filters the memoized index when one exists. Otherwise it reads the first
   `CWD_PROBE_BYTES` (64 KiB) of each admitted transcript and takes the first `"cwd":"…"` with a
   sticky match at the first literal occurrence, provided the line that holds it ends inside the
@@ -58,7 +59,7 @@ other admitted transcript to find its siblings.
   `"cliSessionId"` key carries each id; only those files are parsed, and `settledRecord` decides
   what they answer: matches in two stores settle the id as ambiguous (`CCD_AMBIGUOUS`, no
   `CCD_RECORD_PATHS` entry), and inside one store the last match in walk order wins.
-  `ccdIndex()` stays the full map for the surveys, settles every id through the same
+  `ccdIndex()` is the full map for the surveys, settles every id through the same
   `settledRecord`, and reuses the same memoized file listing, so a directory that cannot be read
   is counted once and both walks write the same `CCD_RECORD_PATHS` entry.
 
@@ -155,8 +156,7 @@ Measured on 2026-11-02 on macOS, the store, the 69 directories below it and its 
 belonged to the user with no group or other write bit, and the store held no symbolic link, so
 the check refuses nothing there. `umask 022` heads `test-session-trail-verdict.sh` and
 `test-session-trail-lineage.sh`, so their fixture stores pass under any runner umask. `OM0` to
-`OM4` in the verdict suite pin the check, `OM0` as the control; against the code before the
-check, `OM1` to `OM4` fail and the FIFO case hangs until its timeout. `OM5` pins the
+`OM4` in the verdict suite pin the check, `OM0` as the control. `OM5` pins the
 plugin-tree-incomplete diagnostic and the lazy load, `OM6` a refused `ccd-session-presets.json`
 in both forms, `OM7` a refused candidate passed over for a later one, `OM7b` a refused candidate
 after an accepted one, which is counted too, `OM8` and `OM9` the decisions a refused presets file and a refused,
@@ -281,8 +281,7 @@ desktop-record parse count through an `--import` preload, targeted-versus-full e
 `show --json`, `takeover --json` and the SIBLINGS line, the out-of-window fallback, the prefix
 ambiguity, the retention delta against a control, two desktop records carrying one id (`TL9`),
 siblings the probe cannot place (`TL10`) and the read scope of `release` keep-owner attribution
-(`TL11`). Against the code before this change seven of its twelve checks fail; the five that
-pass are the behavior-preservation controls.
+(`TL11`). Five of its twelve checks are the behavior-preservation controls.
 
 **Version: `patch`.** No schema field, strict key set, hook, matcher, config key or attestation
 change; `session-lineage-v1.mjs` is untouched.

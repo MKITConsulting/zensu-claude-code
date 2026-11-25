@@ -105,7 +105,7 @@ When the bind fails it sends the unbound variant instead, which names no reancho
 characters on every other prompt, pin it; N13 holds its command name, the hook's prefilter and
 the receipt entry's to the companion contract's `takeover.prefix`. The notice reaches only a
 prompt that carries the command: a linked session started from a brief, a takeover started
-through the Skill tool and a PLM older than this change get none. So the companion's briefs carry
+through the Skill tool and a PLM without this hook get none. So the companion's briefs carry
 the rule themselves (`plmGateCaution` in `trail.mjs`, the `Commits, when Zensu PLM is installed`
 line), `show` prints it as its `COMMITS` lines (`PLM_GATE_SHOW_LINES`), and
 `references/takeover.md` step 3 tells the model to read `hooks.bashWriteGate` rather than the
@@ -266,12 +266,8 @@ earlier in a `node:22-bookworm` container with no credentials and no `~/.claude`
 validations and `claude plugin tag --dry-run` ran without a login. That package requires Node 22,
 which is why these jobs set it up while the suites elsewhere run on Node 20.
 
-**Go-live order.** The `session-hub` entry ships in the catalog with this change (AC-001,
-AC-007, D2), so from the Zensu release that ships it until `session-hub--v1.0.0` is published,
-`claude plugin install session-hub@zensu` fails on a tag that does not exist. The order is:
-merge, release Zensu, then dispatch `Release Session Hub` with `mode: publish` right after.
-Open owner actions: that dispatch, and a tag ruleset for `refs/tags/session-hub--v*` and
-`refs/tags/v*` that admits only the release workflows.
+**Open owner action:** a tag ruleset for `refs/tags/session-hub--v*` and `refs/tags/v*` that
+admits only the release workflows.
 
 **Order of releases.** While both plugins ship the usage feed, both copies write
 `<session id>.json` under one rule, so PLM releases no later than the companion: an installed
@@ -279,8 +275,7 @@ PLM older than the companion writes by the older rule. `.github/scripts/session-
 enforces it in both `prepare-commit` and `publish-gate`: it takes the newest `vX.Y.Z` tag by
 version, ignoring pre-release tags, and refuses unless that tag carries `hooks/usage-feed.ts` and
 `hooks/usage-feed-contract.json` byte for byte as the companion's working tree and ships
-`hooks/user-prompt-session-hub-takeover-notice.sh`. H14 drives it on a scratch history. So the
-first companion release waits for the PLM release that ships this change. The order bounds
+`hooks/user-prompt-session-hub-takeover-notice.sh`. H14 drives it on a scratch history. The order bounds
 releases, not installs: a user who updates the companion and keeps an older PLM runs two writers
 by different rules until PLM is updated, and the last write wins. Both writers stay, because
 AC-006 keeps the schema and PLM's copy is frozen. The release that removes PLM's feed (P4) must
