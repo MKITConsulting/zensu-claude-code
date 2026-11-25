@@ -71,7 +71,8 @@ else
   check "each verify-feature exec provider and working_dir resolves against its own file's directory, where the pinned promptfoo 0.121.20 starts it, while file:// assertion values resolve against the config's directory" FAIL
 fi
 
-if grep -qF 'PROMPTFOO="${VERIFY_FEATURE_PROMPTFOO:-$PLUGIN_DIR/node_modules/.bin/promptfoo}"' "$RUNNER" \
+PINNED_BIN_DIR='node_modules/.bin'
+if grep -qF "PROMPTFOO=\"\${VERIFY_FEATURE_PROMPTFOO:-\$PLUGIN_DIR/$PINNED_BIN_DIR/promptfoo}\"" "$RUNNER" \
   && grep -qF 'if [ ! -x "$PROMPTFOO" ]; then' "$RUNNER" \
   && grep -qF 'VERIFY_FEATURE_PROMPTFOO must be an absolute path' "$RUNNER" \
   && grep -qF 'node "$OWNED_PROCESS" "$PROMPTFOO" eval' "$RUNNER" \

@@ -89,7 +89,10 @@ run: Promptfoo still ran an eval.
   `node_modules/.bin/promptfoo`, never one on `PATH`, so the pinned reading is the one that runs.
   `tests/structure/test-eval-harness-units.sh`, a `ciStructureTests` suite, resolves all three
   that way and pins `"promptfoo": "0.121.20"` in `package.json`, so a bump fails that check until
-  the reading is repeated.
+  the reading is repeated. Its runner pin builds the `node_modules/.bin` path from two parts: D9 of
+  `test-run-all-preflight-watchdog.sh` reads a contiguous binary path in a suite's text as an npm
+  dependency, and this suite reads only `package.json` and `run-eval.sh`, so it stays out of
+  `nodeDepsStructureTests` and runs without `npm ci`.
 
 **Version: `patch`.** CI, tests and docs, plus wrapper knobs that are read only when set: no
 schema, strict key set, hook, matcher or attestation moves.
