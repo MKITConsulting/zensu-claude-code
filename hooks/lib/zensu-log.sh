@@ -1584,6 +1584,7 @@ case "${1:-}" in
     ZENSU_ERP_EDIT_LANDING_ESCAPED="$_erp_escaped" \
     ZENSU_ERP_WORK_TREE="${_avr_work_tree:-}" \
     ZENSU_ERP_BASH="$_erp_bash" \
+    ZENSU_ERP_TOOL_PATH="${PATH:-}" \
     ZENSU_ERP_LABEL="$erp_label" \
     ZENSU_ERP_MODE="$erp_mode" \
       node -e 'require(process.env.ZENSU_ERP_LIB).main([process.env.ZENSU_ERP_MODE]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_ERP_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'

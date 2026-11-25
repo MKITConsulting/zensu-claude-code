@@ -1,8 +1,9 @@
 # Verify-Feature Evidence Report — Specification
 
-Status: draft, 2026-11-07. Build steps 1 and 2 of §9 are implemented: the core module, its
-`zensu-log.sh` verbs and the conformance corpus, and the wiring that has `/zensu:verify-feature`
-write a report on every run (`skills/verify-feature/rules/report.md`); nothing else described here
+Status: draft, 2026-11-07. Build steps 1 to 3 of §9 are implemented: the core module, its
+`zensu-log.sh` verbs and the conformance corpus, the wiring that has `/zensu:verify-feature`
+write a report on every run (`skills/verify-feature/rules/report.md`), and the verified lossless
+WebP transcode with the viewer's Content-Security-Policy (§6.5, §6.6); nothing else described here
 is. The spec plans four parts that
 ship from different repositories: the plugin (this repository), its ports to other hosts, the
 `zensu` CLI, and the Zensu service with its web viewer. For the CLI and the service it fixes
@@ -76,7 +77,7 @@ The plugin:
 | AC-009 | Rendering the same manifest and files twice yields byte-identical output. | spec |
 | AC-010 | The default store lies outside every git work tree. A configured store inside a work tree is refused unless git reports the path ignored. | spec |
 | AC-011 | Retention keeps the newest `evidence.report.keep` reports per repository and at most `evidence.report.maxBytes` in total, deleting the oldest first. The sweep never deletes the report being written. | spec |
-| AC-012 | When a lossless WebP encoder is available, images are stored losslessly transcoded, with the original's digest recorded. Without one they are stored as captured. No image is ever stored lossy or scaled, and each records its viewport and scale factor. | spec |
+| AC-012 | When a lossless WebP encoder and its decoder are available and the decoded WebP equals the capture pixel for pixel, an image is stored losslessly transcoded, with the original's digest recorded. Otherwise it is stored as captured. No image is ever stored lossy or scaled, and each records its viewport and scale factor. | spec |
 | AC-013 | Nothing leaves the machine unless the user asked for that publish step in this conversation or enabled it in the user-level config; a project-local `.zensu/config.json` can only switch publishing off. Before the first network call the step lists what will leave: destination, file count, file names and total size, and for a Zensu upload the tier's remaining quota. | spec |
 | AC-014 | The review summary goes through the VCS driver (`hooks/lib/zensu-vcs.sh`) to the open pull request (GitHub) or merge request (GitLab) of the current branch. It re-reads the request's state immediately before posting, attaches at most `evidence.report.prImages` images and never the bundle, and contains no local path. On any other forge it stops with the cause. | spec |
 | AC-015 | The Zensu upload sends the manifest, then only the files the service reports missing. An interrupted upload resumes, and publishing the same report twice changes nothing. Without a login, or with a CLI below the upload verb's floor, it stops with the remedy and changes nothing locally. | spec |
@@ -346,10 +347,35 @@ and visual evidence.
 
 ### 6.5 Images
 
-- The captured PNG is the source. With `cwebp` on `PATH`, `--report-add` transcodes it losslessly
-  and records the PNG's digest as `source_sha256`; the PNG itself is not kept. Without an encoder
-  the PNG is stored. Lossy encoding is never used, because evidence must show the pixels that
-  were captured.
+- The captured PNG is the source. With libwebp's `cwebp` and `dwebp` installed, `--report-add`
+  transcodes it losslessly (`cwebp -quiet -lossless -exact -z 6 -metadata icc`) and records the
+  PNG's digest as `source_sha256`; the PNG itself is not kept. Without the two tools the PNG is
+  stored. Lossy encoding is never used, because evidence must show the pixels that were captured.
+- **A WebP is stored only after it was verified.** The encoder does not refuse what it cannot
+  keep: measured with libwebp 1.6.0, a PNG with a gamma of 1.0 came back with other pixels, a
+  16-bit PNG was reduced to 8 bits without a message, and without `-exact` the colour under a
+  fully transparent pixel was lost (Appendix A). So the core decodes the PNG itself, has `dwebp`
+  decode the WebP, and compares width, height and every pixel, alpha included. It stores the WebP
+  only when they are equal, the file is a still, lossless WebP without EXIF or XMP, an ICC profile
+  of the PNG arrived unchanged and none was added, and the WebP is smaller than the PNG. In every
+  other case, and when a tool fails, writes no file or runs past 30 seconds, the PNG is stored and
+  the line `--report-add` prints ends with `PNG kept:` and the reason.
+- **Which PNGs are tried.** An 8-bit truecolor PNG, with or without alpha, that is not interlaced,
+  has no side longer than 16,383 pixels, the limit of a WebP, holds at most 33,554,432 pixels, and
+  carries no chunk a WebP cannot hold: a palette or a transparency chunk (`PLTE`, `tRNS`), a
+  background, histogram or suggested palette (`bKGD`, `hIST`, `sPLT`), colour signalling beyond a
+  profile (`cICP`, `mDCV`, `cLLI`), `gAMA` or `cHRM` without `sRGB` or `iCCP`, or a `pHYs` chunk
+  with unequal axes. Every other PNG is stored as PNG with its reason on the same line, and no
+  tool is started for it.
+- **Where the tools come from.** The transport hands the caller's `PATH` to the core, which reads
+  only its absolute entries, in order. The first entry that holds an executable `cwebp` decides:
+  `dwebp` must sit beside it, and neither the entry nor either file may lie inside the project
+  root, its work tree or the chain's work tree, so a repository never supplies the program. On
+  macOS and Linux the pair is also left unused when everyone may write its directory, one of the
+  two files or the directory a file really lies in, because another account could then replace
+  the program. The tools run by their resolved path, without a shell, with an empty environment
+  and under a time limit, inside a private directory below the store's `scratch` directory that
+  is removed afterwards. Without such a pair the add is the add of build step 2, line included.
 - **Pixels only, no metadata.** `--report-add` walks a PNG chunk by chunk to `IEND`: bytes after
   it, a truncated chunk, an animation and an unknown critical chunk are refused, and text, EXIF,
   time and private chunks are dropped before the file is stored. A WebP drops its EXIF, XMP and
@@ -373,7 +399,6 @@ and visual evidence.
   single-file export of the lossless set is about 6.4 MB. One screenshot averaged 232 KB as PNG
   and 107 KB losslessly transcoded; 41 of the 45 were taken at 1440 by 900 and 4 at 2880 by 1800.
   Appendix A holds the raw numbers.
-- An image beyond WebP's limit of 16,383 pixels per side stays PNG.
 - Caps: 50 MiB per file and 2,000 files per report, checked at `--report-add`, so every file a
   report holds can also be uploaded (§8.3). A report has no size cap of its own: it is split into
   files, and only `evidence.report.maxBytes` locally and the tenant's quota in Zensu bound it.
@@ -390,8 +415,48 @@ limitations and resources. The footer names the report id, the schema, the host 
 version. Light and dark follow `prefers-color-scheme`. Images load lazily with their dimensions
 set, so a large report opens fast.
 
-A Content-Security-Policy meta element that forbids scripts and network requests is added once it
-is measured not to block relative images on `file://` in Chrome, Safari and Firefox.
+`index.html` carries one Content-Security-Policy meta element, directly after its charset element:
+
+```text
+default-src 'none'; img-src 'self' file:; style-src 'sha256-<digest>'; base-uri 'none'; form-action 'none'
+```
+
+`<digest>` is the SHA-256 of the page's one `style` element, so the page's own style sheet applies
+and no other style does, a `style` attribute included. `export.html` carries the same element with
+`img-src data:`. The policy names the page's images and its style sheet and nothing else: no
+script, no frame, no font, no media and no request to a network.
+
+Measured on 2026-11-25 on `file://` in Chrome 158, Safari 27.2 and Firefox 161.0 (Appendix A): the
+page under the policy loads both a PNG and a WebP from its `files` directory and applies its style
+sheet, and in Chrome and Firefox its screenshot equals, pixel for pixel, the screenshot of the same
+page without the element. A probe page under the policy ran no inline script and no event handler
+and applied no injected style, and of the 17 or 18 kinds of request that the same page without the
+element sent to a loopback witness server it sent none, in all three browsers.
+
+**What the policy does not stop**, each measured:
+
+- **A navigation**, through a link or a meta refresh, in all three browsers.
+- **A `preconnect` hint**, which opened one connection that carried no request, in all three.
+- **An image named by any other local file**, in all three. `file:` matches every `file:` URL, and
+  in Chrome and Safari `'self'` alone already let such an image load. A `file:` URL with a host is
+  covered as well, and on Windows such a URL may make the system contact that host; that case is
+  unmeasured.
+- **In Firefox, anything loaded from a local file.** Firefox 161.0 applied none of the policy's
+  fetch directives to a `file:` URL: a script named by one ran, a style sheet applied and a frame
+  loaded under the policy, and `img-src 'none'` did not stop a local image. Chrome and Safari
+  stopped the script, the style sheet and the frame. Firefox did stop every inline script, style
+  and event handler and every request to the network.
+
+So the policy is the second line, not the first: the renderer escapes every value and writes no
+image address other than `files/<sha256>.<ext>`. A page that carries foreign markup despite that
+cannot reach a network through a subresource in any of the three browsers, and in Firefox it could
+still run a script that already lies on the reader's disk.
+
+`file:` stands beside `'self'` although no measured browser needs it: all three load the relative
+images under `img-src 'self'` alone. It is kept because Firefox's source derives `'self'` for a
+document without a host as a unique origin that matches nothing (read in `nsCSPUtils.cpp`, not
+measurable while Firefox exempts local files), so a version that begins to apply the policy to
+local files would otherwise hide a report's own images. It widens nothing that was measured.
 
 `--report-export` writes the same page with every file inlined as a `data:` URI, for a ticket
 attachment or an e-mail. That is how a report is shared without Zensu.
@@ -429,6 +494,9 @@ Three moments, three rules:
    remote mode, is published only after the user confirms that fact in the same turn, even when
    publishing is enabled in the config. Without a person present such a report is not published,
    and the run says so.
+
+A rendered page also carries the Content-Security-Policy of §6.6. It is a second line behind the
+renderer's escaping, and §6.6 names what it does not stop.
 
 ### 6.9 Without Zensu
 
@@ -493,7 +561,7 @@ Every key belongs to the `evidence.*` family of `docs/configuration.md`.
 | `evidence.report.dir` | unset, which keeps the store at `$CLAUDE_PLUGIN_DATA/evidence-report/v1` | user-level only | The store's parent: reports go to its `v1` directory. Refused inside a work tree unless git reports the path ignored. |
 | `evidence.report.keep` | `30` | merged | Reports kept per repository; a begin trims only its own repository. |
 | `evidence.report.maxBytes` | `2147483648` | user-level only | Size cap of the whole store. A project file cannot set it, because the sweep deletes other repositories' reports. |
-| `evidence.report.webp` | `auto` | merged | `auto` transcodes losslessly when `cwebp` is on `PATH`; `off` keeps PNG. |
+| `evidence.report.webp` | `auto` | on only when every layer that sets it says `auto`; a project file can switch it off but never on | `auto` stores a PNG as a verified lossless WebP when libwebp's `cwebp` and `dwebp` are found (§6.5); `off`, and any other value, keeps the PNG. |
 | `evidence.report.prImages` | `6` | merged | Images in the review summary, from 0 to 20. |
 | `evidence.report.publish` | `ask` | user-level only; a project file can only set `off` | `ask` publishes only on request. `pr`, `zensu` or `pr,zensu` publish after every run, subject to rule 3 of §6.8. |
 
@@ -506,6 +574,12 @@ deletes the reports of every repository in the store, so a committed file must n
 contributor's evidence is written, and `evidence.report.enabled` follows the `publish` rule: a
 user-level `false` stands, and a project file can switch reports off but never back on. Each
 ignored project value is disclosed by `--report-begin`.
+`evidence.report.webp` is stricter still, because transcoding starts two programs, a capability
+the plugin grants itself: it is on only when every layer that sets the key says `auto`. `off` in
+the user or the project layer, and a value that is neither word, switch it off. `--report-begin`
+discloses a user-level `off` that a project `auto` cannot lift, and a value that is neither word.
+A configuration file that cannot be read or parsed sets nothing, as for every other key, so an
+`off` in such a file does not apply until the file is repaired.
 
 ### 6.12 Versioning
 
@@ -535,6 +609,7 @@ What each host adapter owns:
 | Part | Host adapter |
 |---|---|
 | Transport | the verbs of §6.1, in the host's own helper |
+| Tool path | the caller's `PATH`, handed to the core with `--report-add`; without it the core starts no tool and every image stays as captured (§6.5) |
 | Store root | the host's own plugin data directory; each host keeps its own store |
 | Capture | the file-producing capture commands of its drivers (§6.3) |
 | Skill text | the host's invocation syntax and rule files |
@@ -730,10 +805,13 @@ Zensu.
 - Default: `--report-add` right after each inspected capture, never batched at the end, like the
   rule to record each criterion right after observing it.
 
-**Step 3 — Images and viewer** (plugin).
+**Step 3 — Images and viewer** (plugin, `patch`).
 
-- `cwebp` lossless when available.
-- Measure the Content-Security-Policy meta element on `file://` in Chrome, Safari and Firefox.
+- Lossless WebP through `cwebp` when it and `dwebp` are installed, stored only after the decoded
+  WebP equals the PNG pixel for pixel (§6.5). No test needs libwebp: the unit cases drive stand-in
+  tools, and the real tools were measured once (Appendix A).
+- The Content-Security-Policy meta element of §6.6, measured on `file://` in Chrome, Safari and
+  Firefox (Appendix A). Every rendering digest of the conformance corpus moved with it.
 
 **Step 4 — Review summary through the VCS driver** (plugin, `patch`).
 
@@ -853,14 +931,23 @@ costs and what it rejected.
   manifest, the residual of every plugin store.
 - **Images are not machine-screened** for personal data. The capture rules and the preview before
   publishing carry that.
-- **Encoder availability.** Without `cwebp` a report stays at PNG size.
+- **Encoder availability.** Without libwebp's `cwebp` and `dwebp` a report stays at PNG size, and
+  so does every image whose transcode cannot be verified (§6.5).
+- **The viewer's policy stops loads, not everything.** A navigation, a `preconnect` connection and
+  an image from another local file pass it in every measured browser, and Firefox applies it to
+  nothing that is loaded from a local file, a script included (§6.6). The renderer's escaping
+  stays the first line.
+- **Equal WebP files are stored once.** Two captures that become the same WebP, as two PNGs with
+  equal pixels can, share one file, and its entry keeps only the first capture's digest as
+  `source_sha256`.
 - **One file is at most 50 MiB.** A very long full-page screenshot at high resolution can exceed
   that and has to be taken in parts. Video, out of scope for version 1, will need multipart
   uploads.
-- **Unmeasured:** WebP attachments on GitHub, the multipart uploads call through `glab`, the
-  Content-Security-Policy meta element on `file://`, the file captures for the Android emulator
-  and for desktop windows, pre-signed uploads with digest enforcement on the service's object
-  store, and Windows paths.
+- **Unmeasured:** WebP attachments on GitHub, the multipart uploads call through `glab`, the file
+  captures for the Android emulator and for desktop windows, pre-signed uploads with digest
+  enforcement on the service's object store, and Windows paths. On Windows that includes the WebP
+  transcode, whose lookup reads `cwebp.exe` and `dwebp.exe` there, and the viewer's policy, a
+  `file:` URL with a host among it; the policy was measured on macOS only.
 - **A report is a snapshot.** It shows what held on its tree. The summary names head and tree, so
   a reader can tell it from the current state.
 - **Codex and Kiro wait** for their verify-feature ports before they can produce a report.
@@ -939,3 +1026,59 @@ the run config the run-config helper writes:
   by 900 PNG, so the device scale factor is 1; `--full-page` wrote 1440 by 2514 for the probe page.
 - The link the command prints is relative to the working directory and names a file in the run
   directory's `browser/` folder, so the skill adds it by its absolute path.
+
+Of 2026-11-24 and 2026-11-25, the basis of build step 3, on macOS 26.7.2:
+
+- libwebp 1.6.0 on its own (`cwebp` and `dwebp`): `cwebp -lossless -exact` followed by `dwebp`
+  returned an 8-bit RGB and an 8-bit RGBA image pixel for pixel. Without `-exact` the RGBA image
+  came back with other colour values under alpha 0. A PNG with `gAMA` 1.0 and neither `sRGB` nor
+  `iCCP` came back with other pixels. A 16-bit PNG was written as 8 bits without a message. With
+  `-metadata icc` the WebP's `ICCP` chunk held the PNG's profile byte for byte, and a PNG with
+  `iCCP` and `gAMA` 1.0 came back with other pixels.
+- The same tools through the core's add function: a 64 by 48 RGB PNG of 8,516 bytes was stored as
+  a WebP of 862 bytes, an RGBA one of 10,084 bytes as 86, and one with an ICC profile of 8,871
+  bytes as 1,424. A PNG with `sRGB` and `gAMA` 1.0 became the same WebP as the first. Kept as PNG,
+  each with its reason: `gAMA` 1.0 or 2.2 without `sRGB` or `iCCP`, `iCCP` with `gAMA` 1.0 (the
+  decoded WebP differed), 16-bit RGB and 8-bit grayscale. Three page captures: 1285 by 2204 from
+  Chrome, 150,582 bytes to 46,082 in 170 ms; 1285 by 2204 from Firefox, 186,462 bytes to 48,108 in
+  166 ms; a macOS window capture of 3384 by 2168, 463,147 bytes captured and 462,473 after its
+  `eXIf`, `iDOT` and `iTXt` chunks were dropped, to 144,566 in 1.6 s. A check outside the core
+  decoded every stored WebP again and found the captured pixels, and the scratch directory was
+  empty afterwards.
+- The viewer's policy, measured on the renderer's output: a report with one PNG and one WebP that
+  the core had transcoded, opened from `file://`. Chrome 158.0.8127.37, headless, over the DevTools
+  protocol. Firefox 161.0, headless, over WebDriver BiDi with a fresh profile, run from its disk
+  image. Safari 27.2 (21625.2.8.18.4): pages opened in the running browser and its window captured.
+  - Under the policy all three loaded both relative images and applied the page's style sheet. In
+    Chrome and Firefox both images reported their natural width of 480 and the style sheet its 24
+    rules, the full-page screenshot of `index.html` equalled that of the same page without the
+    element pixel for pixel, and so did `export.html`; Chrome reported no policy issue for the page
+    and Firefox no policy message. In Safari the window capture showed both images.
+  - `img-src 'self'` without `file:` loaded the relative images in all three as well.
+  - A probe block injected into the page, under the policy: no inline script, external script or
+    event handler ran, and no injected `style` element or `style` attribute applied, in all three.
+    A loopback witness server received none of the requests the same page without the element
+    sent: 18 kinds in Chrome and in Firefox, 17 in Safari, among them a script, a style sheet, an
+    `@import`, a font, a CSS background, an image, a `srcset`, an SVG image, an image input, a
+    table background, an image preload, a frame, an object, an embed, a video and an audio file.
+    Chrome reported 20 policy issues and Firefox 19 policy messages.
+  - A `base` element that named the witness server changed nothing under the policy in all three;
+    without the element both images broke and three requests reached the server.
+  - A submit of an injected form, started by the driver, was refused under the policy in Chrome
+    and Firefox. Safari was not driven, so it was not exercised there.
+  - Not stopped in all three: a meta refresh, which reached the witness server; a `preconnect`
+    hint, which opened one connection without a request, on a port of its own per browser and
+    variant; and an image named by a `file:` URL in another directory.
+  - Local files: with a script, a style sheet, a frame and an image named by `file:` URLs in
+    another directory, Chrome and Safari stopped the script, the style sheet and the frame under
+    the policy and under `img-src 'self'` alone, and loaded the image under both. Firefox ran the
+    script, applied the style sheet and loaded the frame and the image under the policy, under
+    `img-src 'self'` alone and under `img-src 'none'`, with no policy message.
+  - Not exercised, because the probe fired in no variant: a manifest link in all three, an icon
+    link in Chrome and Safari, and `prefetch` in Firefox and Safari.
+  - A first Firefox run used its headless `--screenshot` mode. It captured pages before their
+    images were painted, among them a page without any policy, so no figure here rests on it.
+- Read, not measured: in Firefox's `nsCSPUtils.cpp`, `'self'` for a document whose address has no
+  host is a unique origin that permits nothing; in Chromium's `csp_source.cc`, a source without a
+  host matches by scheme alone.
+- Windows was not measured: neither the transcode nor the policy.

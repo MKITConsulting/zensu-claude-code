@@ -745,6 +745,16 @@ the run sends it nowhere ([the evidence report spec](verify-feature-evidence-rep
   As a backstop a text that matches a secret pattern is refused and local paths are replaced
   before anything is stored, but nothing scans a screenshot or finds personal data in free text,
   so a signed-in run uses the dedicated test account with synthetic data of section 6.
+- **How a screenshot is stored.** As captured, or as a lossless WebP when libwebp's `cwebp` and
+  `dwebp` are installed and the report found that the WebP decodes to the captured pixels. A
+  screenshot it could not verify stays a PNG, and the line the add prints names the reason.
+  `evidence.report.webp` set to `off` keeps every PNG
+  ([Evidence Reports](configuration.md#evidence-reports)).
+- **What the page can do.** `index.html` carries no script, and a Content-Security-Policy that
+  names only its own images and style sheet. Opened from disk in Chrome, Safari or Firefox it
+  sent no request to a network when it was measured. The policy does not keep a link from being
+  followed, and Firefox does not apply it to files on your disk
+  ([the evidence report spec](verify-feature-evidence-report-spec.md), section 6.6).
 - **Its verdict is the run's verdict.** The report refuses a verdict its own records contradict,
   and the run then renders the verdict the refusal names, unless it only lacked the row of a
   criterion it passed, which it writes first; the report and the chat state the same verdict. A
