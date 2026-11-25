@@ -3870,13 +3870,13 @@ const MOVE_ALTERNATIVE = (pid) => [
 ];
 
 const RELEASE_AFTER = [
-  'LAST, whichever route you took: once your own worktree holds everything you still need from',
-  'the old one, run session-trail\'s release command for the old session from your own worktree.',
-  'It names every reason it refuses, such as a live session still working in the old worktree or',
-  'a nested repository inside it; a busy or unmeasured old session only needs --force on the re-run.',
-  'Otherwise it ends any keep anchor this plugin still holds there, so an archive no longer leaves',
-  'that worktree on disk, and says that the old session can now be archived or removed. It reports',
-  'uncommitted, unpushed and ignored files there without refusing over them; an archive deletes them with the worktree.',
+  'BEFORE THE REMAINING WORK, whichever route you took: once your own worktree holds everything you still need from the old one,',
+  'which is right after the carry-over or the move where one applies, run session-trail\'s release command for the old session from it. That is the takeover\'s last step, not the',
+  'work\'s: nothing it checks waits for the work you continue. It names every reason it refuses, such as a live session still working in the old worktree or a nested repository inside',
+  'it; a busy or unmeasured old session only needs --force on the re-run. Otherwise it ends any keep anchor this plugin still holds there, so an archive no longer leaves that worktree',
+  'on disk, and says that the old session can now be archived or removed: tell the user at once. While linked sessions of the old session are still to be continued, say instead that',
+  'its archive waits until each has carried its work over, which its own release reports, or the user leaves it behind. Hold this release back while one of them shared this worktree, or while its dry run',
+  'says that it would also end the keep anchor of another session, until the work of that session is carried over or the user leaves it behind. The release reports uncommitted, unpushed and ignored files there without refusing over them; an archive deletes them with the worktree.',
 ];
 
 // One table, four arms, two legs — and the ARM is chosen once, above the split.
@@ -6593,6 +6593,13 @@ function releaseArchiveLines(r, subject, v, state, others) {
   return lines;
 }
 
+function releasableHint(pad, alsoEnd, force) {
+  const apply = force ? '--apply --force' : '--apply';
+  return alsoEnd.length > 0
+    ? `${pad}Hold the release until the work of each session whose keep anchor it would also end is carried over or the user leaves it behind, and only then run release again with ${apply}. It then tells you that the old session can be archived or removed.`
+    : `${pad}Run release again with ${apply}. It then tells you that the old session can be archived or removed.`;
+}
+
 function cmdRelease(opts) {
   const r = hydrate(resolve(opts, opts._[1], 'a session never releases itself'));
   const selfId = selfSessionId();
@@ -6618,9 +6625,9 @@ function cmdRelease(opts) {
     blockers.push({ code: 'registry-incomplete', text: `The session registry in ${flatPath(SESSIONS)} could not be read completely (${why}), so a session that is still running could be taken for one that ended. Nothing is released until it reads cleanly.` });
   }
   if (v.level === 'BUSY') {
-    blockers.push({ code: 'source-busy', text: `The old session is busy: ${flatPath(v.reason)} Say so to the user in one line and run release again with --force: their request to release, or the takeover they confirmed, is the go.` });
+    blockers.push({ code: 'source-busy', text: `The old session is busy: ${flatPath(v.reason)} Say so to the user in one line and run release again with --force, first without --apply: their request to release, or the takeover they confirmed, is the go.` });
   } else if (isUnmeasuredProbablyFree(v) && !v.authorized) {
-    blockers.push({ code: 'source-unmeasured', text: `The old session is still registered and its queue was not measured: ${flatPath(v.reason)} Say so to the user in one line and run release again with --force: their request to release, or the takeover they confirmed, is the go.` });
+    blockers.push({ code: 'source-unmeasured', text: `The old session is still registered and its queue was not measured: ${flatPath(v.reason)} Say so to the user in one line and run release again with --force, first without --apply: their request to release, or the takeover they confirmed, is the go.` });
   }
   for (const blocker of autopilotReleaseBlockers(autopilotRunsOf(r), flatPath)) blockers.push(blocker);
   const hoursLeft = (record) => {
@@ -6754,11 +6761,12 @@ function cmdRelease(opts) {
     lines = [head('READY'), `${pad}${why}`, ...archiveText];
   } else if (!opts.apply) {
     verdict = 'releasable';
+    const alsoEnd = otherNotes('would also end', null);
     lines = [
       `${head('RELEASABLE')}   ${where}`,
       `${pad}would end ${endedNoun(toEnd.length)} and remove the ${keep.KEEP_FILENAME} marker; nothing was changed`,
-      ...otherNotes('would also end', null),
-      `${pad}Run release again with --apply${opts.force ? ' --force' : ''}. It then tells you that the old session can be archived or removed.`,
+      ...alsoEnd,
+      releasableHint(pad, alsoEnd, opts.force),
     ];
   } else {
     const result = keep.retireAnchors(subject.root, toEnd, now, idleMs);
