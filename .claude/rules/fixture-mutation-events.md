@@ -74,8 +74,9 @@ included, stays signalable, while a process it did not start stays out of reach.
 the browser process tree runs outside the boundary, and any process inside the sandbox can start
 that executable outside it with arguments of its choosing, so for the browser the boundary falls
 back to this file's detection. The eval grader fails a run whose Bash command text names a
-browser, a word check it also applies with line continuations joined and quotes, backslashes and
-backticks removed, and a name the shell assembles from a variable passes it. Linux `bwrap` is unmeasured for Chrome and ignores
+browser outside a read-only CLI probe (`evals/verify-feature/README.md` names both probe shapes),
+a word check it also applies with line continuations joined and quotes, backslashes and backticks
+removed, and a name the shell assembles from a variable passes it. Linux `bwrap` is unmeasured for Chrome and ignores
 the key. Moving together: the profile and the key's refusal in
 `scripts/claude-promptfoo-wrapper.sh`; the profile-rule check of
 `tests/structure/test-eval-harness-units.sh`, a `ciStructureTests` suite, which counts the

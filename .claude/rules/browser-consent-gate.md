@@ -1260,8 +1260,14 @@ the three arguments `fenceArgs` returns, compared byte for byte afterwards, and 
   with a compound command where the grader of that day admitted only the bare `command -v
   playwright-cli`, and with that one call replaced the check it failed passed in all three; and
   the live `example.com` page no longer showed the `Example Domain` heading the remote scenarios
-  of that day expected. The grader now admits a closed set of read-only probes and the remote
-  criteria name no page wording; no live run has measured that state yet.
+  of that day expected. The grader then admitted a closed set of read-only probes and the remote
+  criteria named no page wording. The live run of 2026-11-25 on `main` at `baa9b906`, with
+  playwright-cli 0.1.25 and Google Chrome 158.0.8127.37, passed 19 of 21 checks: every browser
+  scenario reached only the fixture or `https://example.com/`, and the local scenario ended with
+  PASS. Both failed checks were the grader refusing a read-only probe outside its closed set, a
+  pipe into `head` and a probe at the end of a Phase 0 command of `git` reads; the grader now also
+  admits a probe inside a compound command (`evals/verify-feature/README.md`), and re-graded with
+  it that run passes all 21 checks.
 
 UNMEASURED: Windows (M8); `msedge`, its prerelease channels and the prerelease Chrome channels
 (M9); Linux on x86-64; a service worker that stopped and started again (M7); a managed proxy
