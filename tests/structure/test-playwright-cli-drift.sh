@@ -273,8 +273,23 @@ printf 'not json\n' > "$METADATA"
 refuses "PD21 metadata that do not parse fail the check" 'the registry metadata do not parse as JSON'
 printf '{"name":"%s","versions":["%s"]}\n' "$PACKAGE" "$MEASURED" > "$METADATA"
 refuses "PD22 metadata without a version map fail the check" 'the registry metadata list no versions'
-rm -f "$METADATA"
-refuses "PD23 an unreadable registry fails the check" 'cannot read the @playwright/cli registry metadata'
+mkdir -p "$WORK/reset"
+cat > "$WORK/reset/curl" <<'SPY'
+#!/bin/sh
+printf 'curl %s\n' "$*" >> "$SPY_LOG"
+exit 56
+SPY
+chmod 755 "$WORK/reset/curl"
+: > "$WORK/reset.log"
+registry "$PACKAGE" "$MEASURED"
+got="$(export SPY_LOG="$WORK/reset.log" PATH="$WORK/reset:$PATH"; drift_run "$DRIFT")"
+calls="$(wc -l < "$WORK/reset.log" | tr -d ' ')"
+if [ "$got" = 'rc=1 none' ] && [ "$calls" = 1 ] \
+  && grep -Fq 'cannot read the @playwright/cli registry metadata' "$WORK/err"; then
+  check "PD23 a curl that gives up on the registry (exit 56, a connection reset) fails the check after one call" PASS
+else
+  check "PD23 a curl that gives up on the registry (exit 56, a connection reset) fails the check after one call (got '$got', calls $calls, stderr '$(head -n 1 "$WORK/err")')" FAIL
+fi
 
 REAL_CURL="$(command -v curl)"
 mkdir -p "$WORK/spy"
@@ -305,6 +320,10 @@ case "$spied" in
   *) pd24=FAIL ;;
 esac
 check "PD24 a drift run fetches the registry metadata with one curl and starts no package manager, archiver or CLI" "$pd24"
+FETCH='-fL --no-progress-meter --retry 3 --retry-all-errors --retry-delay 5 --retry-max-time 120 --proto-redir =https --max-time 60'
+expect "PD24b that curl hands curl -f, three retries of any error within two minutes, HTTPS-only redirects, 60 s per attempt and the Accept header" \
+  "$(sed -E 's| -o [^ ]+ ([^ ]+)$| -o FILE \1|' "$WORK/spy.log")" \
+  "curl $FETCH -H Accept: application/vnd.npm.install-v1+json -o FILE file://$METADATA"
 
 compare_run() {
   local rc
