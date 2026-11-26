@@ -85,15 +85,17 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 - `zensu link source <feature-id>` — Map source files (repeatable `--file`; covers bulk mapping)
 
 ### Security
-- `zensu security classify <id>` — Set classification, data sensitivity, auth, encryption, audit settings
+- `zensu security classify <id>` — Set classification, data sensitivity, auth, encryption, audit settings; it only keeps or raises the classification (none recorded counts as `internal`)
 - `zensu security posture <product-id>` — Product-wide security overview (product id is positional, not `--product`)
 - `zensu security analyze <id>` — Feature security analysis with score and requirements matrix (a read of the feature's security context, like `validate`, `suggest-tests` and `threat-model`; it persists nothing)
 - `zensu security validate <id>` — Check if feature passes release gate
 - `zensu security score <id>` — Get the feature's calculated security score and release-gate state
 - `zensu security add-test <id>` — Link a security test (`--file` and `--type` required: auth-bypass|injection|access-control|rate-limit|input-validation|data-exposure|header-security|dependency-scan|csrf|xss|ssrf)
-- `zensu security review <id>` — Complete a review (`--reviewer` and `--status` required: approved|rejected|conditional; optional `--type` manual|automated|external)
+- `zensu security review <id>` — Record a rejected or conditional review (`--reviewer` and `--status` required: rejected|conditional; optional `--type` manual|automated|external)
 - `zensu security suggest-tests <id>` — Get context for test recommendations
 - `zensu security threat-model <id>` — Get context for STRIDE threat model generation
+
+Lowering a classification, marking a pentest `passed` or the threat model `completed`, and approving a security review are decisions for an admin signed in to the Zensu web app: Zensu refuses each through the CLI with a `400`, and `/zensu:security-review` hands them on with the feature's browser link.
 
 ### Revisions
 - `zensu features revision <id>` — Create a versioned revision of a feature (`--scope-summary` required)
