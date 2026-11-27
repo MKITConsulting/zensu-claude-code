@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **verify-feature**: Measure the consent gate against playwright-cli 0.1.25 (#679)
 - **evals**: Close the remaining route short-line needle and README gaps (#672)
 - **session-trail**: Find Claude Desktop records in data folders of their own (#645)
+- **session-trail**: Name saved environments from every store a takeover reads (#657)
 - **evals**: Harden the route short-line probe and session-memory needle (#658)
 - **hooks**: Let a linked session inherit build from desktop stores of their own (#648)
 

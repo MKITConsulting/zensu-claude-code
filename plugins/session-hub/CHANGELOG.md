@@ -14,6 +14,7 @@ and this plugin adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **session-trail**: Release the old session before its remaining work (#671)
 - **session-trail**: Find Claude Desktop records in data folders of their own (#645)
+- **session-trail**: Name saved environments from every store a takeover reads (#657)
 - **hooks**: Let a linked session inherit build from desktop stores of their own (#648)
 - **autopilot**: Carry a durable run through a session-trail takeover (#651)
 
