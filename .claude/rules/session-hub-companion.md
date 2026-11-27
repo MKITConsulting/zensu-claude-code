@@ -58,7 +58,8 @@ references name a PLM doc by its GitHub URL, because an installed companion carr
 copies define must be equal once full-line comments are removed and the command names are mapped
 back, except the reviewed allowlist inside the check, each entry with its reason: the
 write-anchor removal (`parseArgs`, `COMMAND_FLAGS`, `refuseForeignFlags`, `cmdShow`,
-`cmdTakeover`, `cmdHandoff`), the GATE-probe removal (`canonicalPair`, `whereAdviceLines`), the
+`cmdTakeover`, `cmdHandoff`, of which `parseArgs`, `COMMAND_FLAGS`, `refuseForeignFlags` and `cmdTakeover`
+also carry the companion's plan pass, `takeover --plan`, `.claude/rules/session-trail-plan-card.md`), the GATE-probe removal (`canonicalPair`, `whereAdviceLines`), the
 core removal (`worktreeKeepModules`, `cmdRelease`), `hostPath`, which throws so an importer can
 catch a missing `claude-path-v1.js`, and `main`, which resolves the roots inside its dispatch
 guard so that throw is reported like a handler's. An allowlisted name both copies hold equal

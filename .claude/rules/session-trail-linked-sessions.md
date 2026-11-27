@@ -273,7 +273,10 @@ one line. Without the flag the table above decides alone.
 **The plan pass spells the value, and the run after the yes refuses without it.** The plan brief
 (`takeover` without `--force`) names the value for a yes that changes nothing, the names it marks
 start in listed order or `none`, and its lead tells the model to drop a name the user leaves out
-and add an if-named session the user names. The names go in single quotes, in the value line, the
+and add an if-named session the user names. The companion's plan card, `takeover --plan`, spells
+the same value line from the measured decisions, never from the rendered lines
+(`.claude/rules/session-trail-plan-card.md`). The names go in
+single quotes, in the value line, the
 lead, step 1 of `references/takeover.md` and the flag list of `references/commands.md`, because
 PowerShell passes an unquoted comma list as separate arguments: `--linked-start` then takes the
 first name and the rest land among the positionals, where `takeover` reads none of them, so

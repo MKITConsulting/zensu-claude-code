@@ -94,6 +94,13 @@ foreign run and `autopilot-claim` for every relocation claim, so a dry run lists
 exits 1. A transferred run left the tree or
 changed its owner to the running session, so it no longer blocks.
 
+**The companion's plan card is a further carrier, in the companion alone.** `takeover --plan`
+(`.claude/rules/session-trail-plan-card.md`) names each owned run and each relocation claim above its state
+heading by run id, cut at 48 characters, and stage, with the route `planCardRunRoute` words from the classes
+above, and lists below that heading the record paths, the pending stage, blocked code and next action, the
+unreadable records and each foreign run with its id, stage and record path. Its `planCardStage` renders the
+text of this module's private `stageText`, so a change to that wording moves both.
+
 **A foreign run is counted in the brief and named by `release`, and that split is the approved
 contract.** AC-007 of the plan behind this change keeps runs of another owner out of the
 `## Autopilot run` section, so the section only counts them, in one paragraph that says the
@@ -102,7 +109,9 @@ count, and the `autopilot-foreign-run` blocker names each run and stage with its
 which session drives it, then continue it with `/zensu:autopilot-adopt` from a session whose
 project root is `folder` or cancel it with `/zensu:autopilot-release` from such a session, and for
 an inner chain the finish-or-cancel text. Without the blocker a fork's run in the tree let
-`release --apply` hand that tree to Claude Desktop with the run inside.
+`release --apply` hand that tree to Claude Desktop with the run inside. The companion's plan card names each
+foreign run below its state heading as well, as data, because its item 7 asks the plan confirmation which
+session drives them; AC-007 binds the brief's section alone.
 
 **Slash commands only.** Every carrier names `/zensu:autopilot-adopt` and `/zensu:autopilot-release`
 and never `--confirm` or `zensu-log.sh`, the rule `.claude/rules/autopilot-run-scope.md` states for
