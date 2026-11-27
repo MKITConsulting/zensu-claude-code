@@ -776,7 +776,21 @@ abbreviated npm registry metadata of `@playwright/cli` with one `curl`, takes
 `PLAYWRIGHT_CLI_SOURCE_VERSION` and `PACKAGE_NAME` from the two modules, never from a copy, and
 prints a report whose first line is `<!-- zensu-playwright-cli-drift playwright-cli=X.Y.Z -->`
 when the highest stable version, compared by number, is above the measured one. A prerelease
-never counts, and the script never installs, downloads or runs the package. Every value it uses
+never counts, and the script never installs, downloads or runs the package. That `curl` carries
+a hand copy of the flags of `gitlab_it_fetch` (`.claude/rules/gitlab-live-check.md`, "Downloads
+retry within a bound."), with 60 s per attempt: `-f`, `--retry 3`, `--retry-all-errors`,
+`--retry-delay 5`, `--retry-max-time 120`, `--proto-redir =https` and `--no-progress-meter`.
+`--retry-all-errors` retries a transient connection reset (curl exit 56), which plain `--retry`
+never retries, instead of turning the nightly run red; `-f` keeps an HTTP error a failure once
+its retries are spent; a body cut short does not parse as JSON, so the check fails rather than
+reports from it; no retry is scheduled once two minutes have passed since the first attempt
+began, so a `Retry-After` past that window fails at once instead of sleeping through the job's
+ten-minute timeout; `--proto-redir =https` keeps every redirect hop on HTTPS, because the
+metadata decide which release the report tells a maintainer to install; and
+`--no-progress-meter` leaves each retry's warning in the job log. The flags are inlined rather
+than shared, because a CI script does not source the integration-test library of another
+subsystem, and no check compares the two copies: `PD24b` pins this one and `W61` and `W62` the
+other, so a change to either re-decides the other. Every value it uses
 is validated first: the package name, every version key through `validVersion`, and each
 entry's own name and version. The report therefore carries no upstream text but version
 numbers, and it spells `@playwright/cli` only inside code spans, because GitHub notifies the
@@ -797,7 +811,11 @@ issue from that branch's constant until the next nightly run on `main` corrects 
 pins the workflow graph, runs the script against fixture metadata with spies that admit one
 `curl` and no package manager, archiver or CLI, runs the compare, issue and `notify` steps
 against a fake `gh`, and requires three mutants (release order by text, an unanchored stable
-filter, a whole-body marker match) to give the wrong answer their cases refuse. Like
+filter, a whole-body marker match) to give the wrong answer their cases refuse. `PD24b`
+compares the whole command line of that `curl` with only the output file masked, so it fails when
+a flag goes missing, changes or is added; it pins the flags, and no suite run provokes a retry.
+`PD23` fails the fetch through a `curl` stand-in that exits 56, because the real `curl` spends
+15 s on three retries 5 s apart before it gives up on a missing `file://` registry. Like
 `tests/structure/test-gitlab-live-workflow.sh`, the guard of the GitLab `drift` and
 `drift-issue` jobs this workflow is modelled on, it skips its executed checks on Git Bash.
 **Release class: `patch`**: CI and tests only, and `.github/` is outside the Session Control

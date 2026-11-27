@@ -113,7 +113,11 @@ suite's API calls keep plain curl: they poll already, pipe their output, or must
 `W61` and `W62` record every curl call of `glab-install.sh` and `drift.sh` through a logging wrapper
 and compare the whole command line with only the output file and the URL masked, so they fail when
 a flag goes missing, an option is added anywhere, or either script calls curl itself. They pin the
-flags; no suite run provokes a retry.
+flags; no suite run provokes a retry. `.github/scripts/playwright-cli-drift.sh` carries a hand copy
+of these flags for its one npm registry fetch, with 60 s per attempt, which `PD24b` in
+`tests/structure/test-playwright-cli-drift.sh` pins. No check compares the two copies, so a change
+to the flags here re-decides that copy; its own reasons are in the release-signal paragraph of
+`.claude/rules/browser-consent-gate.md`.
 
 **Credentials and containers.** The token is written into the container as the `git` user through
 stdin, never through argv, and lives on the host only in the state directory (0700, files 0600).
