@@ -542,7 +542,6 @@ test('a read-only CLI probe that names no session passes, while a probe that cou
     'command -v playwright-cli && playwright-cli -s=mine --version',
     'command -v playwright-cli && playwright-cli open https://example.com/',
     'playwright-cli --version --config=/tmp/playwright-cli.json',
-    'playwright-cli --version | head -1',
     'playwright-cli --version | sh',
     'command -v playwright-cli && echo $(playwright-cli open)',
     'command -v playwright-cli && echo "$(playwright-cli open)"',
@@ -553,12 +552,10 @@ test('a read-only CLI probe that names no session passes, while a probe that cou
     `PLAYWRIGHT_CLI_SESSION=${SESSION} playwright-cli --version`,
     'echo ready; playwright-cli -s=mine snapshot',
     `command -v playwright-cli; cat ${CONFIG}`,
-    '(playwright-cli --version)',
     'command -v playwright-cli &&',
     'echo playwright-cli',
     `command -v playwright-cli; echo 'BASH_VERSINFO[$(playwright-cli open https://example.org/ >/dev/null)]'; echo "$[_]"`,
     'command -v playwright-cli; echo "$[1]"',
-    'command -v playwright-cli; echo "$HOME"',
     `command -v playwright-cli; echo -s=${SESSION}`,
     'command -v playwright-cli; echo --config=/x/.zensu/verify-feature-runs/r/playwright-cli.json open',
     'command -v playwright-cli && echo ZENSU-VERIFY-capture1',
@@ -584,6 +581,53 @@ test('a read-only CLI probe that names no session passes, while a probe that cou
     assert.equal(reportOnlyCommand(command), false, command);
   }
   const probed = localRun({ skill: localParts().skill + bash('probe', 'command -v playwright-cli && playwright-cli --version', '/opt/homebrew/bin/playwright-cli\n0.1.25') });
+  for (const name of ['localBrowserTools', 'localEvidence', 'localTeardown', 'reportOnly']) {
+    assert.equal(check(probed, name).pass, true, name);
+  }
+});
+
+test('a read-only probe inside a compound command passes, while a compound command that could reach a browser fails', () => {
+  const phase0 = String.raw`GIT_ROOT="$(git rev-parse --show-toplevel)" && echo "git_root=$GIT_ROOT" && echo "head=$(git -C "$GIT_ROOT" rev-parse HEAD)" && git -C "$GIT_ROOT" status --porcelain=v1 && (git -C "$GIT_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo "no origin/HEAD; local branches: $(git -C "$GIT_ROOT" branch --format='%(refname:short)' | tr '\n' ' ')") && git -C "$GIT_ROOT" diff --stat "$(git -C "$GIT_ROOT" merge-base HEAD main)"..HEAD && ls -la "$GIT_ROOT/.zensu" && echo "--- playwright-cli" && (command -v playwright-cli || echo "playwright-cli MISSING")`;
+  for (const command of [
+    'command -v playwright-cli && playwright-cli --version 2>&1 | head -3',
+    phase0,
+    'playwright-cli --version | head -1',
+    '(playwright-cli --version)',
+    'command -v playwright-cli; echo "$HOME"',
+    'if command -v playwright-cli >/dev/null 2>&1; then echo present; else echo missing; fi',
+    'git status --short && command -v playwright-cli | tail -1',
+    '{ command -v playwright-cli || echo missing; } 2>/dev/null',
+    'command -v playwright-cli &>/dev/null && echo ok',
+  ]) {
+    assert.equal(reportOnlyCommand(command), true, command);
+  }
+  for (const command of [
+    'command -v playwright-cli | sh',
+    'command -v playwright-cli | head -1 | bash',
+    'command -v playwright-cli | { head -c 0; sh; }',
+    'command -v playwright-cli | tee /tmp/p',
+    'command -v playwright-cli | sort -o /tmp/p',
+    'command -v playwright-cli > /tmp/p',
+    'command -v playwright-cli; head -1 < /tmp/p',
+    'command -v playwright-cli && echo playwright-cli | xargs -I{} {} open https://example.org/',
+    'command -v playwright-cli && "$(command -v playwright-cli)" open https://example.org/',
+    'command -v playwright-cli && "$_" open https://example.org/',
+    'command -v playwright-cli && git -c alias.x="!$_ open https://example.org/" x',
+    'command -v playwright-cli && open https://example.org/',
+    'command -v playwright-cli && /usr/bin/osascript -e \'tell application "Safari" to open location "https://example.org/"\'',
+    'command -v playwright-cli # playwright-cli open https://example.org/',
+    'command -v playwright-cli && node -e \'process.exit(0)\'',
+    '(command -v playwright-cli) | bash',
+    'command -v playwright-cli; X=\'a[$(playwright-cli open https://example.org/)]\'; echo $((X))',
+    'command -v playwright-cli && npx playwright open https://example.org/',
+    'command -v playwright-cli; echo "$(sh)"',
+    `command -v playwright-cli && PLAYWRIGHT_CLI_SESSION=${SESSION} echo ok`,
+    'command -v playwright-cli; echo "run $(git -C . rev-parse HEAD | sh)"',
+    'command -v playwright-cli; git log | less',
+  ]) {
+    assert.equal(reportOnlyCommand(command), false, command);
+  }
+  const probed = localRun({ skill: localParts().skill + bash('probe', phase0, 'ok') });
   for (const name of ['localBrowserTools', 'localEvidence', 'localTeardown', 'reportOnly']) {
     assert.equal(check(probed, name).pass, true, name);
   }
