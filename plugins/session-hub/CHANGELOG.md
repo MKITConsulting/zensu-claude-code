@@ -8,6 +8,12 @@ and this plugin adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-27
+
+### Added
+
+- **session-hub**: Add a read-only takeover plan pass with a bounded plan card (#691)
+
 ## [1.0.2] - 2026-11-25
 
 ### Fixed
