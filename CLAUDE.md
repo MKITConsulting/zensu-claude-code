@@ -26,11 +26,10 @@ Two narrow carve-outs admit non-English text, and only as match literals: verbat
 literals in hook directives (for example `'kein tdd'`), and eval grader alternations matched against
 model prose whose language the product does not control. Details: `.claude/rules/language.md`.
 
-A third clarification draws the line for consuming repositories. The commit messages,
-pull request text and review replies Zensu writes into a consuming repository follow
-that repository's language (`skills/autopilot/rules/conventions.md`). Zensu's own
-artifacts stay English there: `.zensu/plans/`, `.zensu/logs/`, run logs, and the
-section headings it appends to a pull request body.
+A third clarification draws the line for consuming repositories. The commit messages, pull request text and
+review replies Zensu writes into a consuming repository follow that repository's language
+(`skills/autopilot/rules/conventions.md`). Zensu's own artifacts stay English there: `.zensu/plans/`, `.zensu/logs/`,
+run logs, and the section headings it appends to a pull request body.
 
 ## Version Bumps
 
@@ -163,6 +162,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Session-Trail Open Task Chips (`openTaskChips` in `skills/session-trail/scripts/trail.mjs`)** — why every takeover carries the old session's open task chips, and from which record: `.claude/rules/session-trail-open-chips.md`
 - **Session-Trail Autopilot Runs (`autopilot-runs-v1.mjs` + `autopilotRunsOf` in `skills/session-trail/scripts/trail.mjs`)** — why a takeover names the old session's durable Autopilot runs, the route that carries each, the adoption question after the move and the release refusal: `.claude/rules/session-trail-autopilot-runs.md`
 - **Session-Trail Linked Sessions (`linkedSessions` in `trail.mjs` + `linked-sessions-v1.mjs`)** — why a takeover starts the old session's open linked sessions again, which of them qualify, the rendered `start_session` call and the contract capability the Session Hub reads: `.claude/rules/session-trail-linked-sessions.md`
+- **Session-Trail Plan Card (`planCard` in `plugins/session-hub/skills/session-trail/scripts/trail.mjs`)** — why the companion's takeover plan pass prints a bounded plan card with `--plan`, what the card holds and leaves out, the checks allowed before the plan confirmation and the measured baseline: `.claude/rules/session-trail-plan-card.md`
 - **Session-Trail Read-Only Git (`READ_ONLY_GIT` in `skills/session-trail/scripts/trail.mjs`)** — why every git call into another session's worktree takes no index lock, runs no fsmonitor hook, needs `diff.autoRefreshIndex=false` and runs with the `scrubGitEnvironment` scrub that `hooks/lib/git-environment-v1.js` owns: `.claude/rules/session-trail-read-only-git.md`
 - **Session-Trail Targeted Lookup (`idCandidateRows` / `ccdApp` in `skills/session-trail/scripts/trail.mjs`)** — why a selector verb summarizes only the transcripts its answer needs and parses only the matching desktop records, the one row builder every path shares, and where the desktop stores are found and named, all of them read and one session id in two of them read from neither: `.claude/rules/session-trail-targeted-lookup.md`
 - **Session-Trail Fork Anchor (`sessionAnchor` / `forkOwnCwd` in `skills/session-trail/scripts/trail.mjs`)** — why a forked session's worktree and branch come from its own records rather than the parent's copied ones, the live registry or the desktop record: `.claude/rules/session-trail-fork-anchor.md`
