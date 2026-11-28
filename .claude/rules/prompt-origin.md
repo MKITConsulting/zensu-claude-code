@@ -190,6 +190,26 @@ the router to treating a side-session brief as typed and to silence on a cross-s
 suite replaces that command with a fixed placeholder before it measures; without that, the same
 tree measured 5,699 and 5,775 characters at two install depths.
 
+## Process budget
+
+Under a fan-out burst every `node` start costs seconds: at a load average of 90 to 120 on 16 cores
+one took 1.6 to 2.9 s and a `git` start 0.25 to 0.4 s (`.claude/rules/session-delivery-route.md`
+§"The reminder's time budget"). Measured with a classifying `node` shim, macOS bash 3.2, with no
+config file naming a key the hook reads:
+
+| Hook | `node` children | Root verifications | Bound | Pin |
+|---|---|---|---|---|
+| `user-prompt-tdd-reminder.sh` | at most 9 on a linked first prompt | 1 | prompt deadline 20 s, registration 30 s | `L59` in `tests/structure/test-linked-session-route.sh` |
+| `user-prompt-worktree-keep.sh` | 4: the principal check, the session bind, the root verification and the module, which starts 2 `git` children | 1 | registration 20 s, no deadline | `K26` and `K26b` in `tests/structure/test-worktree-keep.sh` |
+
+Worktree-keep started 5 before its cut, the fifth being the idle-hours read, which
+`_zensu_config_bounded_int` now answers in shell (`.claude/rules/hook-process-budget.md`
+§"Config pre-check"). In the transcripts last written on 2026-11-20 the host cancelled it 119
+times at its then 10 s registration, recording 10.1 to 17.4 s. Why it verifies the root once
+without the memo, takes no prompt deadline and now registers 20 s, and what its two lifecycle
+halves count, is the process-budget paragraph of `.claude/rules/worktree-keep.md` and the one
+after it.
+
 ## Version
 
 `patch`, walked against `.claude/rules/runtime-lineage.md`: no schema field, no strict key set,
@@ -204,6 +224,9 @@ hook gains a `permissionDecision`. `session-brief` is a new return value of an i
 function that only hooks of the same installation read, and the reminder names it beside `typed`
 for its brief note, so that note's behaviour does not move. The reminder and the router going
 silent on a cross-session message changes advisory `additionalContext` only.
+
+The worktree-keep process budget is a `patch` as well; `.claude/rules/worktree-keep.md` walks it in
+its version paragraph.
 
 ## Known gaps
 

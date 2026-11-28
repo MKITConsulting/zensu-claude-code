@@ -178,7 +178,17 @@ no candidate file of `cfg()` names the key. Parsed JSON can carry the key only i
 that is not a readable regular file, or reads empty while non-empty, goes to node. `C1` in the
 budget suite holds the answers equal to the node reader over every config state it builds, a
 unicode-escaped key among them, and `C2` holds that the decided states start no `node`.
-`zensu_hook_enabled_strict` and the bounded getters take no such pre-check.
+`_zensu_config_bounded_int` takes the same pre-check and answers its default, so every bounded
+getter on a hook path starts no `node` while no file names its key: the worktree-keep hooks read
+`worktreeKeepIdleHours` on every run (the process-budget paragraph of
+`.claude/rules/worktree-keep.md`). A file
+that names the key still goes to node, which applies the range and the integer test. `K29` in
+`tests/structure/test-worktree-keep.sh` holds the idle-hours getter equal to the node reader over
+an absent file, other keys, a global and a project value, an escaped key and an out-of-range value,
+and `K30` requires every getter the file defines to answer its default without `node`, and the
+same default from the forced node reader. `zensu_hook_enabled_strict` takes no such pre-check: a
+present file it cannot parse must withdraw its grant, and the pre-check would read such a file as
+naming no key.
 
 - **The read is bounded.** Bash reads a file one byte per system call here, so the pre-check
   reads at most `_ZENSU_CONFIG_PRECHECK_BYTES` (16384) bytes and sends a longer file to node.

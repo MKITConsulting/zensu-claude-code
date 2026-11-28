@@ -1064,8 +1064,8 @@ reviewer_denial_notes_reap() {
   # The SAME TTL the doctor ages a note out against, read from the same config
   # key. A note past it is the one the doctor's own row calls safe to delete.
   # `</dev/null` for the same reason the writer below carries it: this runs inside the
-  # lease, and the shared config getter spawns `node` with no redirect of its own, so it
-  # cannot be placed in the callee.
+  # lease, and the shared config getter spawns `node` with no redirect of its own whenever
+  # its shell pre-check cannot rule the key out, so it cannot be placed in the callee.
   ttl="$(zensu_pending_review_ttl_hours 2>/dev/null </dev/null)" || ttl=0
   case "$ttl" in ''|*[!0-9]*) ttl=0 ;; esac
   # stdin is redirected below alongside the output channels, and that is not
@@ -1815,12 +1815,12 @@ zensu_impl_stop_nudge() {
   # An `if`, not `[ … ] && …`: this file states twice that the short-circuit form leaves a
   # non-zero status on the false branch, and new code should not be the exception.
   if [ "${DECISION_EMITTED:-false}" = "true" ]; then return 0; fi
-  # The FREE check comes first. `zensu_impl_stop_nudge_after` spawns node, and on a
-  # host with no git this function can never fire, so learning a threshold that will
-  # never be compared cost a process spawn at every turn end of every
-  # armed-but-incomplete chain — on a branch whose contract is to release
-  # immediately. Ordering only: no branch changes its verdict, because neither test
-  # reads anything the other writes.
+  # The FREE check comes first. `zensu_impl_stop_nudge_after` spawns node whenever its
+  # shell pre-check cannot rule the key out, and on a host with no git this function can
+  # never fire, so learning a threshold that will never be compared cost a process spawn
+  # at every turn end of every armed-but-incomplete chain — on a branch whose contract is
+  # to release immediately. Ordering only: no branch changes its verdict, because neither
+  # test reads anything the other writes.
   command -v git >/dev/null 2>&1 || return 0
   threshold="$(zensu_impl_stop_nudge_after 2>/dev/null)" || return 0
   case "$threshold" in ''|*[!0-9]*) return 0 ;; esac

@@ -22,9 +22,10 @@ it, which is why the branch-drift detector below exists as the safety net.
 
 ## What the plugin does
 
-Every hook anchors on the bound session record's project root. The SessionStart and SessionEnd
-halves fall back to the session's `cwd` while the record is not readable yet, which is the
-ordinary state of a fresh start; the UserPromptSubmit half does NOT — an unbound session gets no
+Every hook anchors on the bound session record's project root. The SessionStart half falls back
+to the session's `cwd` while the record is not readable yet, which is the ordinary state of a
+fresh start, and the SessionEnd half always does, because the session binder accepts no
+`SessionEnd` event; the UserPromptSubmit half does NOT — an unbound session gets no
 drift disclosure at all, which is listed under Limits below. A payload that names no
 `.claude/worktrees` component is declined before any helper runs.
 
@@ -245,6 +246,19 @@ plugin version is live there.
 
 - The marker name is an undocumented desktop-app constant. If a later build stops honouring it,
   the marker protects nothing; the drift notice and the doctor row still report a takeover.
+- Each hook starts at most four `node` processes per run while the
+  [shell pre-check](configuration.md#config-resolution-order) answers `worktreeKeep` and
+  `worktreeKeepIdleHours`, plus two `git` processes on a prompt and three or four on a
+  SessionStart. A config file the
+  pre-check cannot clear adds one `node` process for each of those keys it cannot rule out, and
+  a SessionStart whose session record exists but whose root fails verification adds one more for
+  the payload read. On a
+  machine running many sessions at once a `node` start can take seconds, so the three hooks are
+  registered with a 20 s timeout; a run the host cuts off at that limit gives no notice.
+- The SessionEnd half anchors on the payload `cwd`, not the session record, because the session
+  binder accepts no `SessionEnd` event. A `cwd` inside the worktree reaches the same anchor; one
+  outside it ages nothing, and the anchor keeps the worktree out of the pool until its idle window
+  elapses.
 - Whether the desktop app delivers `SessionEnd` when it stops a session's process is unverified.
   A session that ends without it keeps its worktree out of the pool until the idle window
   elapses; the sibling sweep at every later SessionStart in the same repository clears it. Two

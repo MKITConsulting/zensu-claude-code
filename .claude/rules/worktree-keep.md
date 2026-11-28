@@ -128,7 +128,8 @@ accumulation when SessionEnd never arrives.
 
 **Three hooks, all ADVISORY, all main-principal, all behind the permissive `hooks.worktreeKeep`.**
 The SessionStart and SessionEnd halves anchor on ONE root in ONE order — the bound record's native project root first, the
-payload `cwd` only when the bind fails (a fresh start whose record is still being minted) — and
+payload `cwd` only when the bind fails (a fresh start whose record is still being minted, and
+every SessionEnd, whose bind always fails: see the gap list) — and
 hand node the host-native spelling the bind exports, never the MSYS one `zensu_resolve_project_dir`
 renders on Git Bash; each also declines, before any helper is sourced, a payload that names no
 `.claude/worktrees` component, so a session in a plain checkout pays no bind on this path — a
@@ -372,6 +373,85 @@ tree with it. The moved tree is a nested worktree of the same repository, so the
 the unit case `a whole-tree worktree move into the taker keeps the taker's marker at SessionEnd
 until the moved tree leaves` performs exactly that move.
 
+**Process budget, measured 2026-11-28.** Under a fan-out burst a `node` start costs 1.6 to 2.9 s
+and a `git` start 0.25 to 0.4 s (a load average of 90 to 120 on 16 cores,
+`.claude/rules/session-delivery-route.md` §"The reminder's time budget"), and the host cancelled
+these hooks at their 10 s registrations: in the attachments of the 1,942 transcripts last written
+on 2026-11-20, records from 2026-09-28 on, the prompt half 119 times, recording 10.1 to 17.4 s,
+and the SessionStart half 43 times against 452 recorded successes, whose p50 was 0.8 to 1.4 s and
+p99 6.2 to 9.6 s per source. The SessionEnd half leaves no transcript record. Counted with a
+classifying `node` shim on macOS bash 3.2, `ZENSU_CONFIG` unset and no config file naming a key
+the hooks read, before the cut:
+
+| Run | `node` children | Root verifications | `git` children |
+|---|---|---|---|
+| prompt, steady or drift | 5: principal check, bind, verification, idle-hours getter, module | 1 | 2 (`rev-parse --verify HEAD`, `symbolic-ref`) |
+| SessionStart, bound | 6: the same plus a separate `source` read | 1 | 3, or 4 on the first start (`rev-parse --git-common-dir`, `check-ignore`) |
+| SessionStart, record not minted yet | 8: principal check, bind, three field reads, `session-key`, getter, module | 0 | 3 to 4 |
+| SessionEnd | 7: principal check, bind, two field reads, `session-key`, getter, module | 0 | 0 |
+
+`zensu_hook_enabled worktreeKeep` started no `node` already, through its shell pre-check. Three
+cuts bring every run whose root verifies, or whose session record does not exist yet, to at most
+four `node` children and change no answer: `_zensu_config_bounded_int`
+takes the same pre-check, so the idle-hours getter answers 72 in shell while no file names
+`worktreeKeepIdleHours` (`.claude/rules/hook-process-budget.md` §"Config pre-check"); the
+SessionStart half reads `source` as the optional field of its own principal check,
+`zensu_hook_principal "$INPUT" SessionStart source`, where an absent or empty `source` arrives as
+the bare principal, because the command substitution strips the trailing newline, and still runs
+as the fresh start the module makes of it (`K27c`); and the payload arm of
+`zensu_worktree_keep_anchor` runs `zensu_worktree_keep_payload_anchor`, one child that reads the
+payload `cwd` and derives the session key through the core's own `sessionKey`, where two field
+reads and a `session-key` child ran, and keeps the old ladder's rule that a key derived beside a
+bound one must equal it (`K27f`, which stubs the bind and the verification, because the binder
+derives its key from the same `session_id`). It refuses a `cwd` that carries a line break or a
+NUL, and every `session_id` the binder's own `validateSessionId` refuses, a derived `scv1_` or
+`sha256:` identifier among them, so a payload cannot name another session's anchor (`K27d`,
+`K27e`). A refused key leaves the answer without its line break, because the command
+substitution strips the trailing one, and the ladder refuses such an answer, so the `cwd` never
+stands in for the key. A bound run whose root fails verification takes this payload arm too,
+five children. The prompt half verifies the root once, so
+`zensu_memoize_project_dir` would save nothing, and it already takes the bound key and reads no
+payload field. `K26`, `K26b`, `K27`, `K27b`, `K27c`, `K28` and `K28b` in
+`tests/structure/test-worktree-keep.sh` hold each run to at most four `node` children by class:
+one verification on a bound run, one module child, and no config read, separate field read or
+`session-key` child. The new file run against the tree before the cut fails all seven, `K2`,
+`K29` and `K30`. `K27d` and `K27e` hold each refusal to three children, the payload reader among
+them, and no module child. The suite's shim classifies by literals the code holds, and rewording
+one of the five whose children run turns those checks red: `classifyPreToolPayload` of the
+principal check, `sessionKey(j.session_id)` of the payload reader, the binder's file name, the
+verification's `core.readContext({ recordsDir, sessionId: key })` and the module's file name. The
+payload reader's arm comes before the binder's, because the reader requires the binder's module
+for `validateSessionId`. Four more arms name children that must not run: the core's
+`session-key` argv, `j[process.env.FIELD]` of the reader the cut replaced, `Number.isInteger(n)`
+of the bounded getter and the `j.hooks&&j.hooks[process.argv[1]]===false` read of
+`zensu_hook_enabled`. Rewording one of those four leaves every check green while no such child
+runs, and a child that runs anyway still fails them as `other`, which they hold at zero. The
+`git` children are counted here and not pinned,
+because a native `node` on Windows starts `git.exe` past any shim.
+
+**No deadline supervisor; the registrations moved from 10 s to 20 s.** At the measured burst
+rates four `node` children cost 6.4 to 11.6 s; the prompt half's two `git` children bring a
+prompt to 6.9 to 12.4 s and the SessionStart half's three or four bring a start to 7.2 to 13.2 s,
+so 10 s falls inside both ranges, and the three registrations moved to `"timeout": 20` (`K2`). A
+config file the pre-check cannot clear for either key sends both reads to `node`, six children:
+up to 18.2 s on a prompt, 19.0 s on a start and 17.4 s on a session end. A bound start whose root
+also fails verification adds the payload reader, up to 21.9 s, past the registration. Supervision by
+`hooks/lib/zensu-prompt-deadline.sh` was weighed and not taken: these hooks emit a rare notice and
+have nothing to fall back to, so a deadline kill would print what a host cancel prints, nothing,
+while the supervisor adds a bash worker plus `mktemp`, `sleep`, `cat` and `rm` to every run. 20 s
+is the reminder's own deadline and stays below the reminder's 30 s and the review hand-back
+hook's 180 s on `UserPromptSubmit`. On `SessionStart` six registrations carry no `timeout` and run
+under the host's default, 600 s outside `UserPromptSubmit` as measured on Claude Code 2.1.308
+(`.claude/rules/background-review-completion.md` §"Measured"). On `SessionEnd` this hook is the
+only registration, so a session end can now wait up to 20 s for it. The figures per start are the
+reminder's measurement on the same machine, not a timing of these hooks under load. The same
+measurement records the cancel: TERM to the hook's process group and every descendant, KILL
+1.5 s later, and the hook's stdout discarded. `zensu_run_bounded` keeps the module child a
+descendant, so by that measurement the cancel reaches it; it was not observed on these hooks.
+A cancel that lands after the module wrote a drift into
+the anchor loses that drift's notice: the anchor records it as disclosed and no prompt received
+it.
+
 **Coupled sites that move together:** `KEEP_FILENAME` / `KEEP_SOURCE_BUILD` / `ANCHOR_PREFIX` /
 `ANCHOR_NAME_RE` / `DEFAULT_IDLE_HOURS` / `MAX_IDLE_HOURS` / `MAX_SWEEP_DIRS` /
 `REFRESH_INTERVAL_MS` / `MAX_ANCHOR_FILES` / `UNRENDERABLE_BRANCH` / `branchValueOk` /
@@ -391,12 +471,21 @@ or a commit id, measured on git 2.51.0), `branchState` over `judgeBranch` and `b
 shared with `ensureExclude`), `LINK_UNSUPPORTED_CODES`, and the `release` member
 of `VERBS`, which both lifecycle hooks select when the flag is off;
 `hooks/lib/zensu-worktree-keep.sh`, the ONE payload reader and root/session-key ladder both
-lifecycle hooks call (pinned by `K21`/`K21a`); the three hooks and
+lifecycle hooks call (pinned by `K21`/`K21a`), whose `zensu_worktree_keep_payload_anchor` derives
+the key through `sessionKey` in `session-control-core-v1.js`; the optional payload field of
+`zensu_hook_principal` in `hooks/lib/zensu-agent-context.sh`, through which the SessionStart half
+reads `source`; the three hooks and
 their three registrations in `hooks/hooks.json` (SessionStart, UserPromptSubmit, and a NEW
-`SessionEnd` array, the first event of that kind this plugin registers);
+`SessionEnd` array, the first event of that kind this plugin registers), each with `"timeout": 20`
+(`K2`, the process-budget paragraph above); the count of `"timeout": 10` entries those moves
+changed, which `Z80` and `Z87` in `tests/structure/test-zen-mode.sh` derive from the manifest and
+require as `<count> sibling entries` in `hooks/user-prompt-zen-mode.sh` and the zen-mode row of
+`docs/configuration.md`; the worktree-keep row of the table in `.claude/rules/prompt-origin.md`
+§"Process budget";
 `zensu_worktree_keep_idle_hours` in `hooks/lib/zensu-config.sh`, a one-line
 `_zensu_config_bounded_int` call whose four operands must stay positional literals because `C58`
-in `tests/structure/test-impl-stop-counter.sh` reads every getter's operands;
+in `tests/structure/test-impl-stop-counter.sh` reads every getter's operands, and `K30` here reads
+the default operand of every such getter;
 `STATE_SEGMENTS` in the module, a twin of the owner-exported `WORKFLOW_STATE_SEGMENTS` in
 `session-control-core-v1.js` (pinned equal by the unit suite), and `SESSION_KEY_RE` /
 `ANCHOR_NAME_RE`, two further members of the grep-governed `scv1_` family §"Foreign-Chain Row"
@@ -466,7 +555,13 @@ exported, no anchor field added (`endedAt` was already optional), and no hook ad
 So does the nested-repository hold: one function and two constants exported, no anchor or marker
 field, no config key, no hook added or re-matched, and still no `permissionDecision`; it keeps a
 marker longer, which no runtime reads as a contract, and the older build that drops it is a named
-gap below rather than a lineage break.
+gap below rather than a lineage break. The process-budget cut is `patch` on the same walk: the
+three registrations gain a longer `timeout`, which is not a hook added, removed or renamed and
+not a matcher change; the bounded getters answer what they answered, only without `node` while the
+shell pre-check rules their key out; no schema field, strict key set, config key or attestation
+moves; and the hooks still emit only `additionalContext`. The payload reader's refusal of every
+`session_id` the binder refuses narrows what an in-tree shell function accepts, and moves no
+record, key set or hook, so it is `patch` on the same walk.
 
 **Known gaps, accepted and named:**
 
@@ -526,10 +621,19 @@ gap below rather than a lineage break.
   in the origin checkout and creates its worktree by hand — this repository's own mandated flow —
   is never anchored, marked or drift-checked; whether the pool would touch such a hand-created
   worktree at all is unverified.
-- **The per-prompt cost is bounded by a payload pre-filter, not measured.** Past the pre-filter the
-  prompt hook pays the principal check, the config read, the session bind, the project-root
-  resolve, the idle-hours getter and the module child before it can answer — six `node` spawns
-  and two `bash` spawns — on every prompt of a managed-worktree session; no wall clock was taken.
+- **The per-prompt cost is counted, not timed under load.** Past the payload pre-filter every
+  prompt of a managed-worktree session pays four `node` children and two `git` children (the
+  process-budget paragraph above). Its burst cost is derived from the reminder's per-start
+  figures, not from a timing of this hook in a burst, and a config file that names
+  `worktreeKeepIdleHours` adds the getter's `node` child back.
+- **SessionEnd never binds.** `ALLOWED_EVENTS` in `hooks/lib/claude-hook-session-v1.js` names no
+  `SessionEnd`, so `zensu_bind_hook_session` fails on every SessionEnd payload (measured: the bind
+  child runs and no verification follows it) and the end half always anchors on the payload `cwd`
+  and the key derived from its `session_id`. A `cwd` inside the worktree reaches the same anchor,
+  because `managedWorktree` walks up to the worktree root; a `cwd` outside it ages nothing, and
+  the session's live anchor then holds the marker until its idle window. Letting the binder
+  accept the event is the fix and a change of its own, because it touches the Session Control
+  binder every gate shares.
 - **A branch switch the session made itself fires the disclosure once per context.** The text is
   conditional and names the re-baseline path; the detector cannot tell a takeover from a
   `git switch` run in the same directory. That path, `/clear`, relies on the host delivering a
