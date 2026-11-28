@@ -92,7 +92,9 @@ const verdict = stepNamed(jobs.result, 'Check the GitLab live verdict');
 const liveRun = stepNamed(jobs.live, 'Run the live GitLab suite');
 const compare = steps(jobs.drift).find((step) => step.id === 'compare');
 const issue = stepNamed(jobs['drift-issue'], 'Open, update or close the drift issue');
-const extracted = { 'scope.sh': decide, 'result.sh': verdict, 'live-run.sh': liveRun, 'compare.sh': compare, 'drift-issue.sh': issue };
+const tracking = stepNamed(jobs.notify, 'Open, update or close the tracking issue');
+const extracted = { 'scope.sh': decide, 'result.sh': verdict, 'live-run.sh': liveRun, 'compare.sh': compare, 'drift-issue.sh': issue,
+  'notify.sh': tracking };
 for (const [file, step] of Object.entries(extracted)) fs.writeFileSync(`${work}/${file}`, runOf(step));
 const driftRuns = steps(jobs.drift).filter((step) => has(step, 'run'));
 const driftUses = steps(jobs.drift).filter((step) => has(step, 'uses')).map((step) => String(step.uses).split('@')[0]);
@@ -104,8 +106,8 @@ const PUBLISH_IF = "${{ !cancelled() && needs.publish-plan.result == 'success'"
   + " && needs.publish-gitlab-live.result == 'success')"
   + " || (needs.publish-plan.outputs.gate == 'skipped' && needs.publish-suite.result == 'skipped'"
   + " && needs.publish-gitlab-live.result == 'skipped')) }}";
-const NOTIFY_IF = "always() && github.event_name == 'schedule' && (needs.result.result != 'success'"
-  + " || needs.drift.result != 'success' || needs.drift-issue.result != 'success')";
+const NOTIFY_IF = "always() && github.event_name == 'schedule'";
+const RUN_URL = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}';
 const prepareEvidence = stepNamed(rjobs.prepare, 'Record deterministic exact-commit runtime evidence');
 const publishEvidence = stepNamed(rjobs.publish, 'Deterministic exact-main-SHA gate');
 process.stdout.write(JSON.stringify({
@@ -123,10 +125,15 @@ process.stdout.write(JSON.stringify({
   resultWired: ifOf(jobs.result) === 'always()' && same(needsOf(jobs.result), ['scope', 'live']),
   notify: ifOf(jobs.notify) === NOTIFY_IF
     && same(needsOf(jobs.notify), ['result', 'drift', 'drift-issue'])
-    && steps(jobs.notify).some((step) => runOf(step).includes('gh label create "$label"')
-      && runOf(step).includes('--state open --label "$label"')
-      && runOf(step).includes('gh issue create --repo "$REPO" --title "$title" --label "$label"')
-      && !runOf(step).includes('in:title')),
+    && steps(jobs.notify).length === 1
+    && envOf(tracking, 'RUN_URL') === RUN_URL
+    && envOf(tracking, 'RESULT_JOB') === '${{ needs.result.result }}'
+    && envOf(tracking, 'DRIFT_JOB') === '${{ needs.drift.result }}'
+    && envOf(tracking, 'DRIFT_ISSUE_JOB') === '${{ needs.drift-issue.result }}'
+    && runOf(tracking).includes('gh label create "$label"')
+    && runOf(tracking).includes('--state open --label "$label"')
+    && runOf(tracking).includes('gh issue create --repo "$REPO" --title "$title" --label "$label"')
+    && !runOf(tracking).includes('in:title'),
   drift: ifOf(jobs.drift) === "github.event_name == 'schedule'" && needsOf(jobs.drift).length === 0
     && norm(jobs.drift && jobs.drift.outputs && jobs.drift.outputs.report) === '${{ steps.compare.outputs.report }}'
     && same(driftUses, ['actions/checkout', 'actions/setup-node'])
@@ -231,7 +238,7 @@ expect "W9h a scope job without a lanes output fails" "$(verdict success '' skip
 expect "W9i a failed scope job fails" "$(verdict failure '' skipped)" 1
 expect "W9j a cancelled scope job fails" "$(verdict cancelled '' skipped)" 1
 
-fact "W10 a red scheduled live run or drift check opens or updates the tracking issue its label names" notify
+fact "W10 every scheduled run hands the result, drift and drift issue outcomes to one step that finds the tracking issue by its label" notify
 fact "W11 the release gate runs the pinned matrix against the bundled release commit" preparePinned
 fact "W12 the release branch and its evidence wait for the GitLab gate or an explicit skip of every gate" prepareWaits
 fact "W13 the publish stage runs the pinned matrix when its gate runs" publishPinned
@@ -304,7 +311,7 @@ fi
 
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    check "W24-W54 the lane, gitlab-up, installer and drift checks (skipped: the live tier and its drift job run on Linux and macOS only)" PASS
+    check "W24-W62 the lane, gitlab-up, installer, drift, tracking issue and fetch checks (skipped: the live tier and its drift job run on Linux and macOS only)" PASS
     finish
     ;;
 esac
@@ -548,7 +555,13 @@ skip=''
 for arg in "$@"; do
   if [ -n "$skip" ]; then
     if [ "$skip" != --repo ]; then
-      if [ "$arg" = "${REPORT:-}" ]; then line="$line $skip=REPORT"; else line="$line $skip=TEXT"; fi
+      if [ "$arg" = "${REPORT:-}" ]; then
+        line="$line $skip=REPORT"
+      elif [ -n "${RUN_URL:-}" ] && [ "${arg#*"$RUN_URL"}" != "$arg" ]; then
+        line="$line $skip=RUN"
+      else
+        line="$line $skip=TEXT"
+      fi
     fi
     skip=''
     continue
@@ -592,5 +605,51 @@ expect "W53 a report without its marker line fails and writes nothing" \
   "$(issue_run 'Upstream published releases.' '' '')" 'rc=1 writes='
 expect "W54 a report whose marker line is not first fails and writes nothing" \
   "$(issue_run "$(printf 'preface\n%s' "$BOTH_REPORT")" 7 "$GLAB_REPORT")" 'rc=1 writes='
+
+notify_run() {
+  local rc
+  : > "$WORK/gh.log"
+  RESULT_JOB="$1" DRIFT_JOB="$2" DRIFT_ISSUE_JOB="$3" GH_OPEN="$4" GH_LOG="$WORK/gh.log" GH_TOKEN=fixture REPO=fixture/repo \
+    RUN_URL=https://github.invalid/fixture/actions/runs/1 PATH="$WORK/fakegh:$PATH" bash "$WORK/notify.sh" >/dev/null 2>&1
+  rc=$?
+  printf 'rc=%s writes=%s' "$rc" "$(grep -E '^issue (create|edit|comment|close)' "$WORK/gh.log" | tr '\n' ';')"
+}
+w55="$(notify_run failure success success '')"
+if [ "$w55" = 'rc=0 writes=issue create --title=TEXT --label gitlab-live --body=RUN;' ] \
+  && grep -Fxq 'label create gitlab-live --color=TEXT --description=TEXT --force' "$WORK/gh.log"; then
+  check "W55 a red live run without an open tracking issue opens one under its label that links the run" PASS
+else
+  check "W55 a red live run without an open tracking issue opens one under its label that links the run (got '$w55')" FAIL
+fi
+expect "W56 a failed drift check comments the run on the open tracking issue" \
+  "$(notify_run success failure skipped 5)" 'rc=0 writes=issue comment 5 --body=RUN;'
+expect "W57 a failed drift issue job comments the run on the open tracking issue" \
+  "$(notify_run success success failure 5)" 'rc=0 writes=issue comment 5 --body=RUN;'
+expect "W58 a cancelled live result comments the run on the open tracking issue" \
+  "$(notify_run cancelled success success 5)" 'rc=0 writes=issue comment 5 --body=RUN;'
+expect "W59 a green scheduled run closes the open tracking issue with a comment that links the run" \
+  "$(notify_run success success success 5)" 'rc=0 writes=issue close 5 --comment=RUN;'
+expect "W60 a green scheduled run without an open tracking issue writes nothing" \
+  "$(notify_run success success success '')" 'rc=0 writes='
+
+REAL_CURL="$(command -v curl)"
+mkdir -p "$WORK/fakecurl"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$CURL_LOG"\nexec "$REAL_CURL" "$@"\n' > "$WORK/fakecurl/curl"
+chmod 755 "$WORK/fakecurl/curl"
+fetch_run() {
+  local script="$1"
+  shift
+  : > "$WORK/curl.log"
+  CURL_LOG="$WORK/curl.log" REAL_CURL="$REAL_CURL" PATH="$WORK/fakecurl:$PATH" "$@" >/dev/null 2>&1
+  printf 'rc=%s direct=%s calls=%s' "$?" "$(grep -v 'command -v curl >/dev/null' "$script" | grep -cw curl)" \
+    "$(sed -E 's| -o [^ ]+ [^ ]+$| -o FILE URL|' "$WORK/curl.log" | tr '\n' ';')"
+}
+FETCH='-fL --no-progress-meter --retry 3 --retry-all-errors --retry-delay 5 --retry-max-time 120 --proto-redir =https'
+expect "W61 glab-install downloads only through gitlab_it_fetch and hands curl -f, three retries of any error within two minutes, HTTPS-only redirects and 600 s per attempt" \
+  "$(fetch_run "$LIVE/glab-install.sh" install_glab 9.9.9 "$WORK/retried")" "rc=0 direct=0 calls=$FETCH --max-time 600 -o FILE URL;"
+drift_upstream v1.128.0 "$TAGS_CURRENT"
+expect "W62 drift.sh reads every metadata file only through gitlab_it_fetch and hands curl the same flags with 60 s per attempt" \
+  "$(fetch_run "$LIVE/drift.sh" drift_env bash "$LIVE/drift.sh")" \
+  "rc=0 direct=0 calls=$FETCH --max-time 60 -o FILE URL;$FETCH --max-time 60 -o FILE URL;$FETCH --max-time 60 -o FILE URL;"
 
 finish

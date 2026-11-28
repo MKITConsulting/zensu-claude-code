@@ -36,7 +36,8 @@ This library's function takes the base environment instead, so it is named `scru
 the two contracts carry distinct names, and the overlay leaf can land without renaming a file the
 companion vendors. `hooks/lib/worktree-keep-v1.js` takes `GIT_ENV_SCRUB` and
 `scrubGitEnvironment` from `git-environment-v1.js` and re-exports them as `GIT_ENV_SCRUB` and
-`gitEnvironment`, so its own git children and its exported API are unchanged. `gitChildEnvironment` fails with the
+`gitEnvironment`, so its own git children use the shared scrub and its exported API keeps the name
+`gitEnvironment`. `gitChildEnvironment` fails with the
 plugin-tree-incomplete diagnostic, naming the library, when it cannot be loaded, so every sandbox
 that stages `trail.mjs` (`mutant_path`, `cont_mutant` and the `OM` sandbox in
 `test-session-trail-verdict.sh`) copies it beside `claude-path-v1.js`, and `$SBOX/plug` in
@@ -55,8 +56,8 @@ past time and a `core.fsmonitor` hook that logs each run:
 - `diff`, `diff --cached` and `ls-files --others` run the hook on every index read.
 - A porcelain `git diff` rewrites the index through its own refresh EVEN UNDER
   `--no-optional-locks`. Only `diff.autoRefreshIndex=false` stops it, and a stat-only change
-  still prints nothing. The pair `release` used to spell at its own call sites therefore left
-  `takeover` rewriting the index. Do not drop the third flag.
+  still prints nothing. The first two flags alone therefore leave `takeover` rewriting the
+  index. Do not drop the third flag.
 - `rev-parse`, `rev-list`, `log`, `symbolic-ref`, `worktree list` and a `base...HEAD` diff
   touch neither the index nor the hook.
 
@@ -65,8 +66,8 @@ past time and a `core.fsmonitor` hook that logs each run:
 ran, and when the output does not list the edited file; the last condition stops a broken
 helper from passing by running no git at all. `RO1-control` proves that a plain `git status` in
 the same fixture rewrites the index and runs the hook. Both run git with `GIT_OPTIONAL_LOCKS`
-unset, so an exported `0` cannot mask the defect. Removing any one of the three flags, or
-restoring the old helper, turns `RO1` red.
+unset, so an exported `0` cannot mask the defect. Removing any one of the three flags turns
+`RO1` red.
 
 `RO2` runs `takeover --json` against a repository whose one file has a textconv driver and
 whose config sets a `diff.external` driver, both logging each run, with a committed, a staged
@@ -95,8 +96,8 @@ exported driver cannot stand in for the fixture's. Measured, removing either dif
   `filter.<driver>.process` filter for a changed one. Under the helper's three flags, `status`
   runs the clean filter when the stat data cannot settle the comparison: a same-size edit or a
   stat-dirty file. `references/disclosure.md` names that hazard in general terms.
-- `release` now relies on the helper instead of its own two flags, so the sentence in
-  `references/commands.md` that its `git status` runs with `--no-optional-locks` stays true.
+- `release` runs its `git status` through the helper, so the sentence in
+  `references/commands.md` that it runs with `--no-optional-locks` holds.
 - Native Windows is unmeasured. The verdict suite runs there only in the weekly Windows Safety
   run.
 

@@ -17,6 +17,7 @@
 # different strings, so this is exactly the seam where a plausible-looking
 # implementation silently never gates.
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
@@ -544,6 +545,8 @@ plant_receipt '{"schema":"edit-landing-v2","clean":false}'
 VR_ERR="$(bash "$LOG" --tdd-complete --session "$SID_V" 2>&1 >/dev/null)"
 printf '%s' "$VR_ERR" | grep -qF 'LAND the claimed edit'
 check "D10b the claims remedy survives on the one state it is true of" "$(verdict $?)"
+printf '%s' "$VR_ERR" | grep -qF 'whose supersededBy names that step'
+check "D10c the claims remedy names the supersede proof field for a claim a later claimed step replaced" "$(verdict $?)"
 
 echo "== An unresolved run log is disclosed on the ARMED path too =="
 # The whole UNRESOLVED block used to be nested inside `_tc_armed -eq 0`, and both

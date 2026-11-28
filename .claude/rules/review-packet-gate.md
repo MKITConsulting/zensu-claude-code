@@ -10,11 +10,10 @@ paths:
 
 # Review Packet Gate (`review-packet-v1.js create` + `review-gate-v1.js` + the post-review hook)
 
-Before this gate, "every reviewer of a round reads the same `REVIEW PACKET v1`" and "the consume
-review needs the primary judge" were prose. The model built each packet by hand, the incremental
-rounds narrowed the aspects' `changed_files` while the judge kept the full list, and the consume
-completion claimed its ticket whether or not a judge had run. The Copilot 0.2.1 audit (WF-008,
-WF-009) found both gaps in this host's source.
+The gate holds two invariants that prose alone does not: every reviewer of a round reads the same
+`REVIEW PACKET v1`, and the consume review needs the primary judge. Without it the model builds
+each packet by hand, the incremental rounds narrow the aspects' `changed_files` while the judge
+keeps the full list, and the consume completion claims its ticket whether or not a judge has run.
 
 **Why the gate sits at PostToolUse, not PreToolUse.** A PreToolUse deny, or an `updatedInput`
 that injects the packet, would be a hook that can return a `permissionDecision`, which
@@ -25,7 +24,7 @@ invariant with `additionalContext` alone. The cost is one consume-reviewer run p
 
 **One canonical block per round.** `create` renders the block deterministically, so its sha256
 identifies it, and every model-written field is an indented block scalar, so no field line can
-equal a boundary line or a top-level key. Narrowing moved out of the packet: a fix round's delta
+equal a boundary line or a top-level key. Narrowing lives outside the packet: a fix round's delta
 and a judge gap travel on a `review_scope:` line after the block, which `agents/review-aspect.md`
 reads. The packet, and with it the judge, keeps the full cumulative change set, which is the
 compensating control `.claude/rules/incremental-review-rounds.md` requires. Extraction compares
@@ -34,7 +33,7 @@ the block after removing trailing whitespace and CRLF; anything else is an exact
 **What `create` binds besides the fields.** With a receipt, the baseline is the one the
 edit-landing audit persisted in `auditScope.baseline`; a differing `--baseline` is refused, an
 omitted one takes it, and the `change_set:` line names the source (`baseline_source=receipt`,
-`argument` or `none`), because a model that forgot the baseline after a mid-run commit reviewed a
+`argument` or `none`), because a model that forgets the baseline after a mid-run commit reviews a
 change set without the committed files. A tree whose fingerprint `computeTree` declines for a size
 limit (`limited: true`) is stored as `tree: null` with `treeReason` and rendered as
 `tree=unverified (<reason>)`; `scopeDifference` then compares the reason, and a git failure still
@@ -86,13 +85,13 @@ panel is refused rather than passed on an empty record set.
 as `--ticket`, and `chainState` returns `reviewTicket`, `reviewTicketConsumed` and
 `codeReviewDone`. A ticket that is not the live unconsumed one, or a chain whose code review is
 already done, answers `pass not-current-ticket`, so the claim that follows refuses a duplicate or
-late completion silently, as it did before the gate, instead of the gate refusing it loudly while
-the current round may be healthy.
+late completion silently instead of the gate refusing it loudly while the current round may be
+healthy.
 
 **Every remedy is a command.** `remedyCommands` renders `node <this lib>/review-packet-v1.js
 show|create --root <root> --session <key>`, shell-quoted, and the create form names the seven
 input fields and the `.zensu/reviews/` directory, because a remedy that names the helper without
-its path or its arguments sent the model searching for it. The hook's own fallback message, for a
+its path or its arguments sends the model searching for it. The hook's own fallback message, for a
 gate that could not check, renders the show command the same way.
 
 **The primary judge requirement** mirrors step 4b: `hooks.reviewJudge` on, and the first review
@@ -115,8 +114,9 @@ the `<result>` element of its completion notification, measured on Claude Code 2
 **Background reviewers are judged by their hand-back or their notification.** The Claude desktop
 app runs every subagent in the background (`.claude/rules/background-review-completion.md`), so a
 reviewer's PostToolUse carries `status: "async_launched"`, an `agentId` and no report. Counting
-that as a run failed every primary judge on that host, and ignoring it refused every consume review
-there, because no reviewer had ever reported. So `recordObservation` stores a launch record (role,
+that as a run would fail every primary judge on that host, and ignoring it would refuse every
+consume review there, because no reviewer would have reported.
+So `recordObservation` stores a launch record (role,
 type, packet digest and agent id, `identity: null`, `valid: null`) that `checkConsume` never counts
 as a run, and `recordHandback`, which the delegate's arrival branch runs as `record --event
 UserPromptSubmit` right after `match`, and which the prompt hook starts for a fan-out reviewer's
@@ -128,7 +128,7 @@ the latest launch of that agent in the round. Its report is the one `handbackRep
 or `notification-prompt`. A reviewer spawned with the Agent `name` parameter hands back under that
 name, so the hand-back in the host's frame position names its launch through the background
 store's name bindings, which the delegate hands the gate as `--plugin-data` on `record` and
-`check` for a prompt event (`aliasesFor`, which asks `promptNameAliases` only when the gate reads a report); without the flag a name frame names no launch, as before
+`check` for a prompt event (`aliasesFor`, which asks `promptNameAliases` only when the gate reads a report); without the flag a name frame names no launch
 (`.claude/rules/background-review-completion.md`). A notification counts only with status `completed` and a result that
 `deliveredReport` accepts: not empty, and neither the host's delivery pointer (`DELIVERY_STUB_RE`)
 nor its no-report text (`UNDELIVERED_STUB_RE`), which is what an auto-mode notification carries, so
@@ -158,7 +158,7 @@ count toward the two-failure stop; the refusal's next step already names the re-
 
 **An unreadable workflow document holds the claim silently.** `check` exits 3 when
 `chainState` cannot read or validate the document, and the hook then exits without a claim and
-without output. A loud refusal broke the byte-stable no-op contract that `S11a` and `S12` in
+without output. A loud refusal would break the byte-stable no-op contract that `S11a` and `S12` in
 `tests/structure/test-post-review-tdd-scope.sh` hold for a malformed or foreign document. Passing
 through was rejected too: the claim's own check does not read `schema` or `stopBlockCount`, so a
 document the shared `workflowChainSnapshot` rejects could still be claimed without the packet

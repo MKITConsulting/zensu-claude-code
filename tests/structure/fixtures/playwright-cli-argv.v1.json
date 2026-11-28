@@ -2,17 +2,18 @@
   "schema": 1,
   "source": {
     "package": "@playwright/cli",
-    "version": "0.1.24",
+    "version": "0.1.25",
     "bin": [
       "playwright-cli"
     ],
-    "playwrightCore": "1.66.0-alpha-1794252756000"
+    "playwrightCore": "1.66.0-alpha-2026-11-18"
   },
   "booleanOptions": [
     "all",
     "annotate",
     "boxes",
     "clear",
+    "close-tabs",
     "cursor",
     "dry-run",
     "force",
@@ -29,6 +30,7 @@
     "list",
     "mobile",
     "no-shell",
+    "no-tab-group",
     "only-shell",
     "persistent",
     "raw",

@@ -26,7 +26,7 @@ authorize the browser:
 The browser is driven by `playwright-cli`, which you install once:
 
 ```bash
-npm install -g @playwright/cli@0.1.24
+npm install -g @playwright/cli@0.1.25
 ```
 
 That is the version the browser consent gate was measured against, and the run-config helper
@@ -73,7 +73,8 @@ active criterion has a `pass` on the tree that ships
 that is missing, stale or partial, and never re-drives one that fails on this tree: that one needs
 a code change first. A criterion this environment cannot observe (it needs
 credentials, an account, a non-loopback host or a signed build, or its driver cannot run here,
-or a driver fence rules the state out, as "How the browser is fenced" below describes)
+or a driver fence rules the state out: a state the driver can never show, whoever drives it,
+which no driver has today)
 is `partial`, never a fix step:
 the skill asks the user once whether to provide access now, accept it as partial or leave the
 chain open, and for a driver fence only the last two, because no access lifts it
@@ -133,25 +134,34 @@ the navigation policy, local mode with its runtime recipe, and remote mode.
 
 Every run writes a **run config** into its own run directory with
 `scripts/verify-browser-config.js` and opens the browser with it, under a session named
-`zensu-verify-<run>`. The run config makes the browser isolated, restricts every HTTP(S) request
-to the run's origins (`network.allowedOrigins`) except a server redirect the browser follows — a
-WebSocket connection and a shared worker's fetch are not fenced by it, which are open gaps —
-blocks service workers, and keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
+`zensu-verify-<run>`. The run config makes the browser isolated, lets it connect only to the
+hosts and ports of the run's origins, WebRTC over UDP excepted, and
+keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
 
-The shared worker case was measured with playwright-cli 0.1.24 driving Google Chrome 157 on
-loopback `http` origins: a dedicated worker's fetch is fenced, a shared worker's fetch is not. An
-`https` target, a remote host, Windows and Linux were not measured.
+The network fence has two layers. The first is three Chromium launch arguments: they send every
+connection to a proxy that does not exist, except those to the hosts and ports of the run's
+origins, and they answer every name the run does not list as not found. A request, a WebSocket,
+a worker's request or a server redirect to any other target therefore fails, with
+`net::ERR_PROXY_CONNECTION_FAILED`. This layer fences by host and port, so any scheme on an
+approved host and port passes it. The second layer is request interception
+(`network.allowedOrigins`), as before: it holds the HTTP(S) requests of pages, dedicated workers
+and service workers to the run's exact origins and fails every other one with
+`net::ERR_BLOCKED_BY_CLIENT`. It does not see a WebSocket or a shared worker's request, which
+the first layer alone refuses. So a run
+declares every host and port its pages connect to, not only the origins they request over
+HTTP(S): a WebSocket endpoint on another host or port, and the target of a redirect. WebRTC
+over UDP is outside both layers.
+The first layer was measured with Google Chrome on macOS and with Chrome for Testing on macOS
+and on Linux aarch64. On Windows, on Linux x86-64 and with the Edge and prerelease Chrome
+channels nobody has measured it, so there only the second layer is known to hold.
 
-Blocking service workers has a cost to plan for. A state that depends on a service worker never
-appears in this browser, so the `browser` driver cannot verify a PWA's update prompt, its offline
-cache, push or background sync. That is a **driver fence**: a state the driver can never show,
-whoever drives it. In a review chain such a criterion is `partial`, planning names the gap before
-any code is written, and because no login, account or service lifts the fence, the skill asks
-only whether to accept the criterion as partial or leave the chain open
-(`skills/verify-feature/rules/acceptance-consent.md`). Cover that behaviour with a test of your
-own that runs a real browser, and name that test as the check in the plan's
-`## Manual Acceptance` row.
+Service workers run in this browser, as they do in a user's. Every run starts with an empty
+profile, so the first load of a page comes from the network; after that a worker can answer the
+page from its cache, and a new worker can take the page over. An update prompt, a filled cache
+and a page under a worker's control can be verified. Offline behaviour and background sync
+cannot be driven, because the gate admits no command that takes the browser offline, and a push
+subscription fails in this browser with a permission error.
 
 The **browser consent gate** — two hooks on the `Bash|PowerShell` matcher — reads Bash only, so
 it refuses a PowerShell call that names the CLI together with a `zensu-verify` session, a
@@ -225,12 +235,11 @@ Code, the gate runs in consent mode (`/zensu:doctor` reports this as
   reaches only HTTPS origins whose host is named exactly, never a wildcard, and whose DNS
   answers are all public; the run-config helper pins each hostname to the address it resolved
   before the browser starts. No credentials, no query or fragment in a navigation to a
-  non-loopback origin, and the browser sends no HTTP(S) request to an origin outside the run
-  config, except by following a server redirect (below). A WebSocket connection is not fenced by
-  the run config, which is an open gap, and neither is a shared worker's fetch (measured, see
-  [How the browser is fenced](#how-the-browser-is-fenced)). A loopback URL may carry a query or a
-  fragment, such as a fixture switch (`http://localhost:4200/?scenario=empty`): it is judged like
-  the same URL without them, and the consent record names the path only.
+  non-loopback origin, and the browser connects to no host and port outside the run config: a
+  request, a WebSocket and a server redirect to another target fail alike. WebRTC over UDP is the
+  one exception. A loopback URL may carry a query or a fragment, such as a
+  fixture switch (`http://localhost:4200/?scenario=empty`): it is judged like the same URL without
+  them, and the consent record names the path only.
 - An API or identity origin of a deployed app that its pages call is passed to the run as one
   more origin: it is asked in the same prompt as the app and never navigated to.
 - Under bypass permissions or `dontAsk`, or when the host reports no permission mode, the gate
@@ -254,9 +263,10 @@ names every origin it needs. The consent memory is a file the session can write,
 control, not a proof: a forged record skips the prompt for a loopback origin, and the floor
 bounds what it could reach to other loopback services; for a remote origin it skips only the
 prompt of a `goto` or `tab-new`, and the browser admits only the origins of the run config it was
-launched with. And the browser follows a server redirect to another origin even though
-it refuses an HTTP(S) request from a page or a dedicated worker there, so the skill checks the page URL after every navigation and
-stops a scenario that left the approved set. With a policy present its targets pass without a
+launched with. A server redirect to a target outside the run config fails like any other
+connection there. The browser still follows one between two origins of the run config, a
+network-only origin included, so the skill checks the page URL after every navigation and
+stops a scenario that landed on a network-only origin. With a policy present its targets pass without a
 prompt, and every other origin is asked or, where the session cannot show the prompt, denied, as the sections
 below describe.
 
@@ -297,7 +307,7 @@ value.
 | `version` | the integer `1` |
 | `mode` | `local` or `remote`; a `local` policy names loopback targets, a `remote` one public HTTPS targets, and an origin of the other kind is not a target |
 | `targets` | 1 to 8 entries; each carries exactly `origin` and `evidenceMode` |
-| `origin` | scheme, host, and port only: no path, credentials, query, or fragment; unique across targets; the host is an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only, so a wildcard such as `https://*.example.com` is refused |
+| `origin` | scheme, host, and port only: no path, credentials, query, or fragment; unique across targets; the host is an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only that does not start with `.`, so a wildcard such as `https://*.example.com` and a host such as `https://.example.com` are refused |
 | `evidenceMode` | the literal `declared-safe`; contract v1 supports no other mode |
 | `networkOnlyOrigins` | optional; 1 to 8 origins the application's pages may request and no navigation command may open. Each follows the `origin` rule above, is unique, and is never also a target. A `remote` policy accepts non-loopback `https://` only; a `local` policy accepts a loopback origin or a non-loopback `https://` one with a public address, resolved and pinned like a remote target's |
 | `routes` | not part of the contract; a list a policy written for the earlier contract still carries is checked for its shape — 1 to 64 page paths, each starting with `/`, carrying no `?`, `#`, or `*`, already normalized and unique — and then ignored, so it narrows nothing |
@@ -311,10 +321,14 @@ config.
 
 ### Network-only origins
 
-A page that calls a REST API, an OIDC discovery document or a token endpoint on another origin
-needs the browser to reach that origin, but declaring it as a target would make it navigable and
-evidence-eligible. List it in `networkOnlyOrigins` instead, and in the recipe under
-`validate.networkOnly`:
+A page that calls a REST API, an OIDC discovery document or a token endpoint on another origin,
+opens a WebSocket to another host or port, or sends a request that is redirected to another
+origin, needs the browser to reach that origin, but declaring it as a target would make it
+navigable and evidence-eligible. List it in `networkOnlyOrigins` instead, and in the recipe under
+`validate.networkOnly`. A WebSocket endpoint is listed by the `http` or `https` origin of its
+host and port: `https://rt.example.com` for `wss://rt.example.com`, `http://127.0.0.1:9090` for
+`ws://127.0.0.1:9090`. A plain `ws://` endpoint outside loopback has no such origin, because no
+plain-HTTP origin outside loopback is admitted, so the browser does not reach it:
 
 ```bash
 ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"origin":"https://app.example.com","evidenceMode":"declared-safe"},{"origin":"https://login.example.net","evidenceMode":"declared-safe"}],"networkOnlyOrigins":["https://api.example.com","https://issuer.example.net"]}' claude
@@ -339,9 +353,9 @@ written for it. These limits are stated rather than hidden:
   types into a form. The list is yours, declared in the launch environment, bounded at 8 exact
   origins, and in remote mode public `https://` only, pinned to an approved address, so no entry
   reaches a private, metadata or loopback address.
-- The fence covers HTTP(S) requests from pages and dedicated workers only: page code can open a
-  WebSocket connection to any origin, listed or not, and a shared worker's fetch is not fenced
-  either.
+- Page code can open a WebSocket connection to a listed host and port only, under any scheme:
+  the network fence admits a host and port, and the scheme-exact check covers HTTP(S) requests.
+  WebRTC over UDP is not fenced.
 
 Consent mode has no network-only class: the helper refuses `--network-only-origin` without a
 policy. A loopback API origin of a local run, or a public HTTPS one of a remote run, is then
@@ -386,7 +400,7 @@ The messages you will meet:
 | `<origin>: origin is not a network-only origin of the navigation policy` | the origin checked with `network-only` is not in `networkOnlyOrigins` |
 | `a network-only origin needs the parent-environment navigation policy; …` | a network-only check or `--network-only-origin` without a policy; consent mode has no network-only class |
 | `a network-only origin outside loopback requires HTTPS` | a local policy or check names a non-loopback network-only origin over `http://` |
-| `an origin must name its host exactly: …` | an origin in either policy list, the checked origin or a run-config origin uses a wildcard or another pattern character in its host |
+| `an origin must name its host exactly: …` | an origin in either policy list, the checked origin or a run-config origin uses a wildcard or another pattern character in its host, or its host starts with a dot |
 | `usage: verify-browser-config.js --check-policy <local\|remote> <origin> <declared-safe\|network-only>` | the call carries an operand the preflight does not take, such as the route the earlier contract checked; drop it |
 | `the navigation policy in the launch environment is invalid: <rule>` | the policy breaks its contract; the rule names which part, for example `policy contains unknown or missing keys` |
 | `the browser consent gate is not ready (…)`, or a reason that says `so no run config is written` | the readiness check failed before the target was judged; section 5 names each cause and its fix |
@@ -410,10 +424,11 @@ already names; the port rules below are for that case.
   rejected — `app.localhost`, `localhost.` and `/etc/hosts` aliases included — because the gate
   refuses to trust DNS for a boundary decision.
 - **An API on another origin goes into the recipe under `validate.networkOnly`.** The browser
-  requests nothing over HTTP(S) from an origin outside `allowedOrigins`, a followed server
-  redirect, a WebSocket connection and a shared worker's fetch aside, so a frontend on
+  connects to no host and port outside the run config, so a frontend on
   `http://localhost:4200` that calls an API on `http://localhost:9090` needs both origins in the
-  run config. List the API origin in the recipe's `validate.networkOnly.origins`. In consent mode
+  run config. A WebSocket endpoint on another port and the target of a redirect are declared the
+  same way, the WebSocket endpoint by the `http` or `https` origin of its host and port.
+  List the API origin in the recipe's `validate.networkOnly.origins`. In consent mode
   the skill passes it as an ordinary origin, and one prompt covers both; under a policy that
   lists it in `networkOnlyOrigins`, the pages may request it and no navigation command may open
   it. `auth.baseUrl` stays the navigable authentication origin, for a login page you sign in on.
@@ -563,7 +578,7 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
   rejects any answer that is not globally routable (RFC 1918, CGNAT, link-local, ULA, and the
   rest), rejects a mix of public and non-public answers, and pins the browser to the approved
   address so a later DNS change cannot redirect it. The gate refuses to open a run config whose
-  remote hostname carries no pin or names a pattern instead of a host.
+  remote hostname carries no pin, names a pattern instead of a host or starts with a dot.
 - The base URL is validated in memory before anything else happens: absolute, `https://`, no
   userinfo, no query, no fragment. A signed or token-bearing preview link is rejected and
   never echoed; use a credential-free entry URL plus a visible login in the headed browser.
@@ -572,7 +587,8 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
   every page of the approved origin is then in scope, protected pages included, at any path.
   Without a login, authenticated scenarios are skipped and the run is PARTIAL. A configured
   `auth.appOrigin` must equal the validated base URL's origin exactly.
-- An API, OIDC issuer or token endpoint on another origin is a network-only origin: list it in
+- An API, OIDC issuer, token endpoint or WebSocket endpoint on another origin, and the target of
+  a redirected request, is a network-only origin: list it in
   the recipe's `validate.networkOnly.origins`, whose `appOrigin` must equal the validated base
   URL's origin exactly, as `auth.appOrigin` must, and under a policy also in its
   `networkOnlyOrigins`. Without a policy the skill passes it as one more origin, asked in the
@@ -594,16 +610,20 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | PARTIAL; `consent mode ready, no runtime recipe` in `/zensu:doctor` | nothing tells the skill how to start the app | run `/zensu:verify-feature --setup`, or pass `--attach=<loopback-origin>` |
 | PARTIAL; reason names `loopback origins only` | local origin spelled with a hostname other than `localhost` | use `localhost`, `127.0.0.1` or `[::1]` consistently in the policy, the recipe, and the `baseUrlCommand` output |
 | the page loads, but its API calls fail with `net::ERR_BLOCKED_BY_CLIENT` | the API runs on an origin the run config does not name | declare that origin in the recipe's `validate.networkOnly.origins` (and, under a policy, in its `networkOnlyOrigins`), or as the recipe's `auth.baseUrl` when it is a login origin you navigate, so the run config allows it next to the page's origin |
+| the page loads, but a WebSocket, a shared worker's request or a redirected request fails with `net::ERR_PROXY_CONNECTION_FAILED` | the endpoint, or the target of the redirect, is on a host and port the run config does not name, and the network fence refused the connection | declare it the same way: a WebSocket endpoint by the `http` or `https` origin of its host and port, a redirect target by its own origin |
+| `open` is denied with a reason that ends `write the run config again with the run-config helper of this installation` | the run config has another shape than this installation's gate accepts: another installation of the plugin wrote it, for example before an update, or it was written by hand | start `/zensu:verify-feature` again in a session started, or reloaded with `/reload-plugins`, after the update, so the helper and the gate come from one installation |
+| `open` is denied with `the launch environment sets PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK, …` | that variable takes a service worker's requests out of the request interception the run config relies on, and it is set in the environment Claude Code started with | unset it and relaunch Claude Code |
+| the run-config helper stops with `the launch environment sets <variable>, …, so no run config is written` | the shell the helper runs in sets `PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK` or a `PLAYWRIGHT_MCP_*` variable, from the environment Claude Code started with or from a shell profile | unset it where it is set and start the run again |
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
-| PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.24` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |
+| PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.25` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |
 | PARTIAL before any browser call; reason starts `the browser consent gate is not ready (consent hook: …; consent recorder: …)` | the run-config helper checks readiness in the `--check-policy` preflight and again before it writes a run config: the hook's file is missing or `hooks/hooks.json` does not register it on a matcher that covers both `Bash` and `PowerShell` (`unregistered`), or the helper could not determine its registration (`unknown`) | run `/zensu:doctor`, whose `verify-feature` row names the cause, and reinstall the plugin; do not start `/zensu:verify-feature` until that row clears |
 | PARTIAL before any browser call; reason says `so no run config is written; install the measured version with …` | the `@playwright/cli` package manifest of the `playwright-cli` on `PATH` does not declare the measured version: it names another version or another package, the helper could not judge it, or there is no manifest at all. The manifest in the `node_modules/@playwright/cli` directory beside the `playwright-cli` found on `PATH` is read first, so a wrapper script in a directory that holds one naming the measured version is accepted. Any other wrapper script outside the package reads as no manifest, whose reason says the binary resolves to no such manifest — unless a `package.json` sits in the directory of its resolved path or one of the three above it, which then answers as another package or as one the helper cannot judge. A version the binary prints about itself is never accepted | run the install command the reason names; for a wrapper script, also put the directory npm installs `playwright-cli` into first on `PATH`, ahead of the wrapper — the reason says so only when the wrapper resolves to no manifest, and the `PATH` order has to change either way |
 | PARTIAL before any browser call; reason names `an empty PATH entry` or `the relative PATH entry` | an empty `PATH` entry (a leading or trailing `:`, or `::`) or a relative one such as `node_modules/.bin` comes before, or holds, the `playwright-cli` found on `PATH`; the shell reads it against each call's working directory, so a gated call could run another binary than the one measured | remove that entry from `PATH`, or move it behind the directory that holds `playwright-cli` |
 | the browser does not start because Chrome is missing | the run config uses the system Chrome channel | approve `playwright-cli install-browser` when the skill asks, or install Chrome yourself |
 | a `playwright-cli` call is denied with `Zensu browser consent gate denied the playwright-cli call: …` | the call used a command, flag, session or shape the gate does not admit | the reason names the rule; a shape denial — one that objects only to how the call is spelled — is re-issued once as one plain call with single-quoted literal arguments, and any other denial leaves the affected scenario PARTIAL rather than worked around |
 | a Bash call is denied with `Zensu browser consent gate denied the playwright-cli call:` and the reason `prefilter library unavailable`, `node unavailable`, `decision module absent or symlinked` or `decision module failed` | the consent hook cannot judge the call, because a part of the plugin is missing or broken or `node` is not on `PATH`. Without its prefilter library the hook denies every Bash call whose payload names `playwright` or `zensu-verify`, not only browser calls; in a project whose path names either word that is every Bash call except the recognized `/zensu:doctor` and adoption commands on a POSIX host with `node` | run `/zensu:doctor` and reinstall the plugin even when its `verify-feature` row reads ready: that row names a missing prefilter library and a missing, symlinked or unloadable decision module, but it tests the library for existence only, cannot see a module that loads and then fails, and looks for `node` on the `PATH` of its own shell, stopping before that row when it finds none; for `node unavailable`, put `node` on the `PATH` of the environment that launches Claude Code |
-| PARTIAL; the scenario left the approved origins | the application redirected the browser to an origin outside the run config | fix the redirect, or add that origin to the run when it is part of the feature (in a session that cannot show the prompt, to the policy too) |
+| PARTIAL; a navigation failed with `net::ERR_PROXY_CONNECTION_FAILED` | the application redirected the browser to a host and port outside the run config, and the browser refused the connection | fix the redirect, or add that origin to the run when it is part of the feature (in a session that cannot show the prompt, to the policy too) |
 | after updating the plugin, a `permissions` rule for the browser no longer applies | the plugin no longer ships a Playwright MCP server, so rules for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing | delete an `allow` rule written for them, which grants nothing now; re-spell a `deny` or `ask` rule for the Bash command, for example `Bash(playwright-cli:*)`, because until then it restricts nothing; the Browser Consent Gate section of [gates.md](gates.md) explains the change |
 | PARTIAL; a scenario names a missing tool such as `xcrun`, `adb`, `maestro` or `tmux` | the driver's toolchain is not on `PATH`, and no lower rung of its ladder can observe the criterion | install the tool yourself and re-run, or accept the lower rung the report names; the skill asks before it downloads anything |
 | PARTIAL; reason `remote mode supports the browser driver only` | `--mode=remote` was combined with a driver other than `browser` | verify the worktree's build in local mode |
@@ -708,8 +728,8 @@ second `open` of the same run config is denied, so a fresh browser means a fresh
   the local app knows, seeded or derived by the run itself, never the password of a shared or
   remote account; a recipe that names another origin or an `environment` is refused in local mode.
 - The restored cookies are scoped by host, not by port, and a cookie set on a parent domain
-  (`.example.com`) stays valid for its sibling hosts: every approved port of the same host, and a
-  sibling host a redirect reaches, receive the session cookie.
+  (`.example.com`) stays valid for its sibling hosts: every approved port of the same host, and
+  an approved sibling host a redirect reaches, receive the session cookie.
 - What the app renders reaches the model by design. Use a dedicated test account with synthetic
   data, never your own account, and keep pages that show credentials, API keys or session lists
   out of the scenarios.
@@ -745,6 +765,23 @@ the run sends it nowhere ([the evidence report spec](verify-feature-evidence-rep
   As a backstop a text that matches a secret pattern is refused and local paths are replaced
   before anything is stored, but nothing scans a screenshot or finds personal data in free text,
   so a signed-in run uses the dedicated test account with synthetic data of section 6.
+- **How a screenshot is stored.** As captured, or as a lossless WebP when libwebp's `cwebp` and
+  `dwebp` are installed and the report found that the WebP decodes to the captured pixels. A
+  screenshot it could not verify stays a PNG, and the line the add prints names the reason.
+  `evidence.report.webp` set to `off` keeps every PNG, and on Windows every screenshot stays a
+  PNG ([Evidence Reports](configuration.md#evidence-reports)).
+- **When a report stays PNG although libwebp is installed** and no line names a reason, one of
+  four things holds: `evidence.report.webp` is `off`, the run is on Windows, no absolute `PATH`
+  entry of the shell that runs the verb holds `cwebp`, or the pair found there was not accepted.
+  The first `PATH` entry that holds `cwebp` decides: `dwebp` has to sit beside it, and both have
+  to lie outside the project, in a place that not everyone may write or replace through a
+  directory above it.
+- **What the page can do.** `index.html` carries no script and, when this release or a later one
+  rendered it, a Content-Security-Policy that allows only images and the page's own style sheet.
+  Opened from disk in Chrome, Safari or Firefox it sent no request to a network when it was
+  measured. The policy still lets an image from another local file load and does not keep a link
+  from being followed, and Firefox does not apply it to files on your disk
+  ([the evidence report spec](verify-feature-evidence-report-spec.md), section 6.6).
 - **Its verdict is the run's verdict.** The report refuses a verdict its own records contradict,
   and the run then renders the verdict the refusal names, unless it only lacked the row of a
   criterion it passed, which it writes first; the report and the chat state the same verdict. A

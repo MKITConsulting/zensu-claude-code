@@ -1,5 +1,6 @@
 #!/bin/bash
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 PRE_HOOK="$PLUGIN_DIR/hooks/pre-browser-navigation-consent.sh"
@@ -46,7 +47,8 @@ command -v node >/dev/null 2>&1 || { echo "SKIP: node unavailable"; exit 0; }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 unset CLAUDE_AGENT_TYPE ZENSU_VERIFY_NAVIGATION_POLICY_V1 ZENSU_VERIFY_CONSENT_MEMORY \
-  ZENSU_VERIFY_PROJECT_ROOT ZENSU_VERIFY_RECIPE_FILE PLAYWRIGHT_CLI_SESSION 2>/dev/null || true
+  ZENSU_VERIFY_PROJECT_ROOT ZENSU_VERIFY_RECIPE_FILE PLAYWRIGHT_CLI_SESSION \
+  PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK 2>/dev/null || true
 for _vc_name in $(env | sed -n 's/^\(PLAYWRIGHT_MCP_[A-Za-z0-9_]*\)=.*/\1/p;s/^\(PWTEST_[A-Za-z0-9_]*\)=.*/\1/p'); do
   unset "$_vc_name"
 done
@@ -780,6 +782,14 @@ case "$(PLAYWRIGHT_MCP_CONFIG=/nonexistent/config.json pre_reason "$OPEN_CMD" "$
     check "H11c open under an ambient PLAYWRIGHT_MCP_ override is denied" PASS ;;
   *) check "H11c open under an ambient PLAYWRIGHT_MCP_ override is denied" FAIL ;;
 esac
+case "$(PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK=1 pre_reason "$OPEN_CMD" "$SID" "$PROJ")" in
+  *'the launch environment sets PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK, which takes the requests of a service worker out of the request interception the run config relies on'*)
+    check "H11c2 open under a launch environment that detaches service workers from request interception is denied with a text of its own" PASS ;;
+  *) check "H11c2 open under a launch environment that detaches service workers from request interception is denied with a text of its own" FAIL ;;
+esac
+[ "$(PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK= pre_verdict "$OPEN_CMD" "$SID" "$PROJ")" = "ASK" ] \
+  && check "H11c3-control an empty value of that variable leaves the prompt" PASS \
+  || check "H11c3-control an empty value of that variable leaves the prompt" FAIL
 mkdir -p "$GLOBAL_HOME/.playwright"
 printf '%s\n' '{"browser":{"browserName":"firefox"}}' > "$GLOBAL_HOME/.playwright/cli.config.json"
 case "$(pre_reason "$OPEN_CMD" "$SID" "$PROJ")" in
@@ -1221,7 +1231,9 @@ fi
 DRIFT_MISSING=""
 for needle in 'The driver is user-supplied: the plugin ships no pin and no integrity check for `playwright-cli`.' \
   'a version the package declares, not a verified binary' \
-  '`network.allowedOrigins`, `browser.isolated`, the `--host-resolver-rules` pins, `browser.contextOptions.serviceWorkers`' \
+  '`network.allowedOrigins`, `browser.isolated`, the three launch arguments (`--proxy-server`, `--proxy-bypass-list` with `<-loopback>`, `--host-resolver-rules` with `^NOTFOUND`)' \
+  'A later Chrome can do the same to the three switches the network fence is made of' \
+  'the `PLAYWRIGHT_MCP_*` launch variables, `PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK`, `PLAYWRIGHT_MCP_` and `PWTEST_` text in a command, and the global `cli.config.json`' \
   'so a new environment or config channel of a later CLI is unjudged.'; do
   printf '%s' "$GATES_FLAT" | grep -qF -- "$needle" || DRIFT_MISSING="$DRIFT_MISSING [$needle]"
 done
@@ -1230,14 +1242,17 @@ if [ -z "$DRIFT_MISSING" ]; then
 else
   check "V49 docs/gates.md names the version-drift gap: user-supplied driver, manifest-only guard, run-config fences and channels (missing:$DRIFT_MISSING)" FAIL
 fi
-if printf '%s' "$GATES_FLAT" | grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not" \
-  && printf '%s' "$GATES_FLAT" | grep -qF 'playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins' \
-  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not" \
-  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins' \
+if printf '%s' "$GATES_FLAT" | grep -qF "a shared worker's request and a server redirect to any other target fail with \`net::ERR_PROXY_CONNECTION_FAILED\`" \
+  && printf '%s' "$GATES_FLAT" | grep -qF "it sees neither a WebSocket nor a shared worker's request" \
+  && printf '%s' "$GATES_FLAT" | grep -qF "and so did a shared worker's fetch with playwright-cli 0.1.24 driving Google Chrome 157 on loopback \`http\` origins, where a dedicated worker's fetch was blocked" \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF "It does not see a WebSocket or a shared worker's request, which the first layer alone refuses." \
+  && ! printf '%s' "$GATES_FLAT" | grep -qF "a shared worker's fetch is not" \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF "a shared worker's fetch is not" \
+  && ! printf '%s' "$GATES_FLAT" | grep -qF 'Three kinds of request leave the run-config fence' \
   && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'it refuses every other HTTP(S) request there'; then
-  check "V73 docs/gates.md and docs/verify-feature.md name a shared worker's fetch as an exception to the HTTP(S) fence, with the measured versions" PASS
+  check "V73 docs/gates.md and docs/verify-feature.md say which layer refuses a shared worker's request and which does not see it, with the routes-alone measurement, and keep no earlier exception wording" PASS
 else
-  check "V73 docs/gates.md and docs/verify-feature.md name a shared worker's fetch as an exception to the HTTP(S) fence, with the measured versions" FAIL
+  check "V73 docs/gates.md and docs/verify-feature.md say which layer refuses a shared worker's request and which does not see it, with the routes-alone measurement, and keep no earlier exception wording" FAIL
 fi
 if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'a shape denial — one that objects only to how the call is spelled — is re-issued once as one plain call with single-quoted literal arguments, and any other denial leaves the affected scenario PARTIAL' \
   && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'the skill reports the affected scenario PARTIAL rather than working around it'; then

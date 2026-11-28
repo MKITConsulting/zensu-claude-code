@@ -1,5 +1,6 @@
 #!/bin/bash
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 # zensu-doctor-home-exempt: this suite never RUNS the doctor. It greps
 # skills/doctor/SKILL.md for the wrapper invocation line, so no renderer
@@ -432,15 +433,17 @@ else
   check "P4r rejected remote reports disclose no URL component" FAIL
 fi
 if grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$SKILL_MD" \
-  && grep -qF 'Redirects are not filtered by the browser.' <<<"$SKILL_FLAT" \
+  && grep -qF '**The browser reaches only the hosts and ports of the run config.** A request, a WebSocket or a server redirect to any other target fails; WebRTC over UDP is the one exception.' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'Redirects are not filtered by the browser.' <<<"$SKILL_FLAT" \
+  && grep -qF 'A page can still navigate itself onto a network-only origin: the browser knows one class of allowed origin.' <<<"$SKILL_FLAT" \
   && grep -qF 'read the `Page URL` line `playwright-cli` prints' <<<"$SKILL_FLAT" \
   && grep -qF 'stop driving that page: take no snapshot or screenshot and read no console or network output from it, run `close`, and report the scenario PARTIAL with the redirect as the observation.' <<<"$SKILL_FLAT" \
   && grep -qF 'pins each hostname to an approved public address in Chromium to prevent DNS rebinding.' <<<"$SKILL_FLAT" \
   && grep -qF '2. Read the `Page URL` line of every navigating call.' "$BROWSER_MD" \
   && grep -qF 'Every navigating call prints a `Page URL` line.' <<<"$BROWSER_FLAT"; then
-  check "P4s a redirect off the run config is caught on the Page URL line before any evidence is read" PASS
+  check "P4s the browser reaches only the hosts and ports of the run config, and the Page URL line is read before any evidence" PASS
 else
-  check "P4s a redirect off the run config is caught on the Page URL line before any evidence is read" FAIL
+  check "P4s the browser reaches only the hosts and ports of the run config, and the Page URL line is read before any evidence" FAIL
 fi
 if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" declared-safe' "$SKILL_MD" \
   && grep -qF 'as a standalone preflight once for every origin the run navigates.' <<<"$SKILL_FLAT" \
@@ -695,7 +698,10 @@ else
   check "P4x a navigated origin stays a target, each origin takes one preflight form, and tabs, frames and no-URL commands fall to the Page URL rule" FAIL
 fi
 if grep -qF 'and so must every network-only origin except a pinned public HTTPS one' <<<"$AUTOPILOT_CONFIG_FLAT" \
-  && grep -qF 'stays valid byte for byte unless a target host carries a pattern character, which the exact-hostname rule above refuses' <<<"$AUTOPILOT_CONFIG_FLAT"; then
+  && grep -qF 'stays valid byte for byte unless a target host carries a pattern character or starts with a dot, which the exact-hostname rule above refuses' <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && grep -qF 'only that does not start with `.`, because the browser turns each allowed origin into a URL glob and would read `*`, `{` or `,` as a pattern, and its proxy bypass list would read a leading dot as every subdomain.' <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && grep -qF 'The browser refuses every connection to a host and port outside the run config, a WebSocket and a server redirect included; WebRTC over UDP is the one exception.' <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && ! grep -qF 'is NOT filtered by the browser' <<<"$AUTOPILOT_CONFIG_FLAT"; then
   check "P4y the recipe contract admits a pinned public HTTPS network-only origin in local mode and names the hostname rule as the one compatibility break" PASS
 else
   check "P4y the recipe contract admits a pinned public HTTPS network-only origin in local mode and names the hostname rule as the one compatibility break" FAIL
@@ -1243,44 +1249,51 @@ fi
 if grep -qF 'read `rules/browser-verification.md` section 1 before that call.' <<<"$SKILL_FLAT" \
   && grep -qF 'is read for the report and never written, edited or deleted' <<<"$SKILL_FLAT" \
   && grep -qF 'never answer it on their behalf and never work around a refusal' <<<"$BROWSER_FLAT" \
-  && grep -qF 'a WebSocket connection is not fenced by the run config, which is an open gap' <<<"$BROWSER_FLAT" \
+  && grep -qF 'the browser refuses every connection to a host and port outside the run config; WebRTC over UDP is the one exception.' <<<"$BROWSER_FLAT" \
+  && ! grep -qF 'is not fenced by the run config' <<<"$BROWSER_FLAT" \
   && grep -qF 'Only the PostToolUse hook writes it.' <<<"$BROWSER_FLAT"; then
   check "P10n consent reads the browser rule before the first browser call and never writes the consent memory" PASS
 else
   check "P10n consent reads the browser rule before the first browser call and never writes the consent memory" FAIL
 fi
-if grep -qF "serviceWorkers: 'block'" "$BROWSER_CONFIG" \
-  && grep -qF "**A driver fence is never worked around.** The \`browser\` driver's run config blocks service workers, so a criterion that depends on one (an update prompt, an offline cache, push, background sync) cannot be observed by it." <<<"$DRIVERS_FLAT" \
+if grep -qF "serviceWorkers: 'allow'" "$BROWSER_CONFIG" \
+  && ! grep -qF "serviceWorkers: 'block'" "$BROWSER_CONFIG" \
+  && grep -qF '**A driver fence is never worked around.** It is a state the driver can never show, whoever drives it, and no driver has one today (`rules/acceptance-consent.md` names them).' <<<"$DRIVERS_FLAT" \
   && grep -qF 'Report that row PARTIAL with the cause `driver fence`, and in chain mode record the criterion `partial` with that cause.' <<<"$DRIVERS_FLAT" \
   && grep -qF 'Never observe it through another browser session or another program.' <<<"$DRIVERS_FLAT" \
   && grep -qF "name it in the report as the check for the criterion's \`## Manual Acceptance\` row (\`rules/acceptance-consent.md\`)." <<<"$DRIVERS_FLAT" \
-  && grep -qF 'The run config blocks service workers: a registration resolves without registering one, so a state that depends on a service worker (an update prompt, an offline cache, push, background sync) never appears in this browser.' <<<"$BROWSER_FLAT" \
-  && grep -qF 'Do not wait for it and do not look for another way to produce it.' <<<"$BROWSER_FLAT" \
-  && grep -qF 'Report the scenario PARTIAL with the cause `driver fence` (`rules/drivers.md` section 3).' <<<"$BROWSER_FLAT"; then
-  check "P10o a browser run reads that a service-worker criterion is a driver fence: PARTIAL with that cause, never worked around, and the helper still writes the block that text describes" PASS
+  && grep -qF "The run config allows service workers, so a page under a worker's control can be answered from the worker's cache." <<<"$BROWSER_FLAT" \
+  && grep -qF 'When a scenario asserts fresh server content, say in the report whether the response came from the network and what showed it; when the run cannot tell, say that.' <<<"$BROWSER_FLAT" \
+  && ! grep -qF 'blocks service workers' <<<"$BROWSER_FLAT" \
+  && ! grep -qF 'blocks service workers' <<<"$DRIVERS_FLAT"; then
+  check "P10o a browser run reads that service workers run and names a cached answer, the driver fence stays a category no driver fills today, and the helper writes the value that text describes" PASS
 else
-  check "P10o a browser run reads that a service-worker criterion is a driver fence: PARTIAL with that cause, never worked around, and the helper still writes the block that text describes" FAIL
+  check "P10o a browser run reads that service workers run and names a cached answer, the driver fence stays a category no driver fills today, and the helper writes the value that text describes" FAIL
 fi
-if grep -qF "so the \`browser\` driver cannot verify a PWA's update prompt, its offline cache, push or background sync." <<<"$DOC_FLAT" \
-  && grep -qF 'That is a **driver fence**: a state the driver can never show, whoever drives it.' <<<"$DOC_FLAT" \
-  && grep -qF 'because no login, account or service lifts the fence, the skill asks only whether to accept the criterion as partial or leave the chain open' <<<"$DOC_FLAT" \
-  && grep -qF "name that test as the check in the plan's \`## Manual Acceptance\` row." <<<"$DOC_FLAT" \
-  && grep -qF 'or a driver fence rules the state out, as "How the browser is fenced" below describes)' <<<"$DOC_FLAT" \
-  && grep -qF 'and for a driver fence only the last two, because no access lifts it' <<<"$DOC_FLAT"; then
-  check "P10p the operator doc states the cost of blocking service workers beside the fence, and the question without the access option there and in the chain paragraph" PASS
+if grep -qF "Service workers run in this browser, as they do in a user's." <<<"$DOC_FLAT" \
+  && grep -qF "An update prompt, a filled cache and a page under a worker's control can be verified." <<<"$DOC_FLAT" \
+  && grep -qF 'Offline behaviour and background sync cannot be driven, because the gate admits no command that takes the browser offline, and a push subscription fails in this browser with a permission error.' <<<"$DOC_FLAT" \
+  && grep -qF 'or a driver fence rules the state out: a state the driver can never show, whoever drives it, which no driver has today)' <<<"$DOC_FLAT" \
+  && grep -qF 'and for a driver fence only the last two, because no access lifts it' <<<"$DOC_FLAT" \
+  && grep -qF 'A request, a WebSocket, a worker'"'"'s request or a server redirect to any other target therefore fails, with `net::ERR_PROXY_CONNECTION_FAILED`.' <<<"$DOC_FLAT" \
+  && grep -qF 'WebRTC over UDP is outside both layers.' <<<"$DOC_FLAT" \
+  && ! grep -qF 'Blocking service workers' <<<"$DOC_FLAT" \
+  && ! grep -qF 'blocks service workers' <<<"$DOC_FLAT" \
+  && ! grep -qF 'is not fenced by it, which is an open gap' <<<"$DOC_FLAT"; then
+  check "P10p the operator doc states the two fence layers, says service workers run and what still cannot be driven, and keeps the driver fence as a category with its two-option question in the chain paragraph" PASS
 else
-  check "P10p the operator doc states the cost of blocking service workers beside the fence, and the question without the access option there and in the chain paragraph" FAIL
+  check "P10p the operator doc states the two fence layers, says service workers run and what still cannot be driven, and keeps the driver fence as a category with its two-option question in the chain paragraph" FAIL
 fi
-if grep -qF "except a followed server redirect, a WebSocket and a shared worker's fetch." <<<"$SKILL_FLAT" \
+if grep -qF 'A request, a WebSocket or a server redirect to any other target fails; WebRTC over UDP is the one exception.' <<<"$SKILL_FLAT" \
+  && ! grep -qF "a shared worker's fetch" <<<"$SKILL_FLAT" \
   && ! grep -qF 'every HTTP(S) subresource request' <<<"$SKILL_FLAT" \
-  && grep -qF "except a followed server redirect and a shared worker's fetch; a WebSocket connection is not fenced by the run config, which is an open gap." <<<"$BROWSER_FLAT" \
-  && grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not." <<<"$BROWSER_FLAT" \
-  && grep -qF 'measured with playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins' <<<"$BROWSER_FLAT" \
-  && grep -qF "a WebSocket connection and a shared worker's fetch are not fenced by it, which are open gaps" <<<"$AUTOPILOT_CONFIG_FLAT" \
-  && grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not." <<<"$AUTOPILOT_CONFIG_FLAT"; then
-  check "P10q the skill text names a followed redirect, a WebSocket and a shared worker's fetch as the fence's exceptions, and the rule files carry the measurement" PASS
+  && grep -qF "A request, a WebSocket, a worker's request and a server redirect are refused alike" <<<"$BROWSER_FLAT" \
+  && ! grep -qF "a shared worker's fetch is not" <<<"$BROWSER_FLAT" \
+  && grep -qF 'a WebSocket and a server redirect included; WebRTC over UDP is the one exception' <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && ! grep -qF 'which are open gaps' <<<"$AUTOPILOT_CONFIG_FLAT"; then
+  check "P10q the skill text and the rule files name WebRTC over UDP as the fence's one exception and a worker's request among the refused ones, and keep no earlier exception wording" PASS
 else
-  check "P10q the skill text names a followed redirect, a WebSocket and a shared worker's fetch as the fence's exceptions, and the rule files carry the measurement" FAIL
+  check "P10q the skill text and the rule files name WebRTC over UDP as the fence's one exception and a worker's request among the refused ones, and keep no earlier exception wording" FAIL
 fi
 ACCEPTANCE_RULE="$SKILL_DIR/rules/acceptance-evidence.md"
 ACCEPTANCE_FLAT="$(tr '\n' ' ' < "$ACCEPTANCE_RULE" 2>/dev/null | tr -s ' ')"

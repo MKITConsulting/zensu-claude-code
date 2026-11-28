@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.42.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.43.1-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -80,7 +80,7 @@ already rely on:
   and the banner), about 9,100 characters on the first prompt of a session and
   on the first prompt after `/compact` or `/clear` (about 11,200 when the prompt
   carries a planning keyword), and about 1,800 to 5,300 characters on every
-  later prompt. Automatic work capture, added after 0.29.0, adds about 760
+  later prompt. Automatic work capture, added after 0.29.0, adds about 4,100
   characters to every session start. The skill listing carries Zensu's skill
   descriptions on top.
   [Architecture](docs/architecture.md#context-added-to-every-session) says how
@@ -525,7 +525,7 @@ starts Claude Code or in the `env` block of `~/.claude/settings.json`.
 [Platform Support](docs/operations.md#platform-support) has the details and the
 known gaps on native Windows. `/zensu:verify-feature` and the autopilot browser
 driver additionally need `playwright-cli` on `PATH`
-(`npm install -g @playwright/cli@0.1.24`, the version the browser consent gate
+(`npm install -g @playwright/cli@0.1.25`, the version the browser consent gate
 was measured against; `brew install playwright-cli` is unpinned).
 
 Feature tracking needs zensu-cli 0.22.0 or later: older releases cannot read

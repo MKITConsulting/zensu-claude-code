@@ -16,16 +16,16 @@ paths:
 **A session's directory is the cwd of its first own record**: the first record that carries the
 session's own id (the transcript's file stem, `transcriptSessionId`) and a `cwd`. For a session
 that is not a fork this is the transcript's first record, the rule `references/gotchas.md` has
-always stated for a session that `cd`-ed into a subdirectory, and `sessionAnchor` keeps that path
-byte for byte: `firstMatch` over the read text.
+always stated for a session that `cd`-ed into a subdirectory, and `sessionAnchor` resolves it
+with `firstMatch` over the read text.
 
 **A fork opens its transcript with its parent's records.** Claude Desktop's fork and
 `--fork-session` copy the parent's records into the new transcript, and the copies keep the
 parent's `sessionId`, `cwd` and `gitBranch`. Observed with session 2b1e0da2 on 2026-10-13: its
 first 5,696 records carried the parent's id, its own `custom-title` record followed, and its
-first own record with a `cwd` named its own worktree. The first-record rule therefore resolved
-the fork to its parent's worktree and branch in `show`, both briefs, `release` and the lineage
-edge.
+first own record with a `cwd` named its own worktree. The first-record rule alone therefore
+resolves a fork to its parent's worktree and branch in `show`, both briefs, `release` and the
+lineage edge.
 
 **Detection is one predicate, `inheritedRecord`, on the line that holds the first `"cwd":"`**:
 the line parses, has a non-empty top-level `cwd`, a string `sessionId` that is not the
@@ -42,7 +42,7 @@ of their own and keep the first-record rule), and 2 had no cwd in the first 256 
   `gitBranch` from the line of the first own-id occurrence on; `cwdLast` is read from the same
   range.
 - **The live registry's `cwd`, only when the fork has no own record with a `cwd`.** That is the
-  existing `buildIndexRow` fallback, unchanged: `summarize` returns a null `cwd` for such a fork.
+  `buildIndexRow` fallback: `summarize` returns a null `cwd` for such a fork.
   The registry never outranks the transcript, because it names the directory the CURRENT process
   started in: for 5 of 8 live forks it named another directory than the first own record.
 - **The desktop record, never.** Its `cwd` is the directory the app launches the session in: the
@@ -76,8 +76,8 @@ byte, and an unreadable file throws into the callers' existing `SKIPPED` account
 **Coupled sites.**
 
 - `sessionAnchor` feeds `summarize`'s `cwd`, `cwdLast` and `branch`, so `buildIndexRow`,
-  `hydrate`, every selector verb and `endpointFromRow` see the fork's own tree with no change of
-  their own.
+  `hydrate`, every selector verb and `endpointFromRow` see the fork's own tree without fork
+  handling of their own.
 - `firstCwdOf`, the sibling probe, classifies the same line with `inheritedRecord` and answers a
   fork with `forkOwnCwd`, so the probe and the row agree.
   `.claude/rules/session-trail-targeted-lookup.md` records the probe.
@@ -92,8 +92,7 @@ live registry entry and a desktop fork record that names the parent's worktree. 
 directory, the SIBLINGS line in both directions, and the first-record rule for a session that is
 not a fork and for a subagent transcript. `FK9` drives the bisection: a transcript past the 8 MiB
 limit whose fork point lies between the head and the tail, whose first own record is longer than
-one read chunk, and whose tail shows only a nested worktree. Against the code before this change
-eight of the ten fail; `FK0` and `FK7` are the controls.
+one read chunk, and whose tail shows only a nested worktree. `FK0` and `FK7` are the controls.
 
 **Bounds, accepted and named.**
 

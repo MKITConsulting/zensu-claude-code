@@ -14,9 +14,11 @@ paths:
 
 # Evidence Report Core (`hooks/lib/evidence-report-v1.js` + `zensu-log.sh --report-*`)
 
-Build steps 1 and 2 of `docs/verify-feature-evidence-report-spec.md` §9: the host-agnostic core,
-its six verbs and the conformance corpus, and the wiring that has `/zensu:verify-feature` call the
-verbs on every run that creates its run directory (§"The skill wiring" below).
+Build steps 1 to 3 of `docs/verify-feature-evidence-report-spec.md` §9: the host-agnostic core,
+its six verbs and the conformance corpus, the wiring that has `/zensu:verify-feature` call the
+verbs on every run that creates its run directory (§"The skill wiring" below), and the verified
+lossless WebP transcode with the viewer's Content-Security-Policy (§"The WebP transcode" and
+§"The viewer's policy" below).
 
 **One owner, host-agnostic (AC-018).** The module owns the manifest schema (`MANIFEST_KEYS` and one
 exact key set per object), the binding sidecar (`BINDING_SCHEMA`), the ids (`vr1_…`), the store
@@ -24,14 +26,16 @@ layout (`STORE_VERSION`), every fault code (`FAULT_CODES`), the renderer and ret
 code reads the environment only through the `env` parameter of `main`, and only `ZENSU_ERP_*`
 names there; it requires Node built-ins and five siblings, the acceptance reader, the evidence-run
 reader (git scrub, tree fingerprint, run records), the Session Control core (its external process
-lock), the secret patterns and the path redaction, and starts no program itself: git runs through
-the evidence runner's exported `git`, its outside-a-work-tree split is that module's
-`outsideWorkTree` and `workTreeTop`, and chain mode starts bash through the acceptance module's
-`readCriteria` at begin and at render. The manifest's
+lock), the secret patterns and the path redaction. It starts two programs itself and no other,
+libwebp's `cwebp` and `dwebp`, both through the one `runTool` (§"The WebP transcode"), and it
+requires no network module. Git runs through the evidence runner's exported `git`, its
+outside-a-work-tree split is that module's `outsideWorkTree` and `workTreeTop`, and chain mode
+starts bash through the acceptance module's `readCriteria` at begin and at render. The manifest's
 driver enum is the module's own frozen `DRIVERS`, and the unit file pins it equal to the acceptance
 module's list, so a new acceptance driver fails a test instead of widening schema v1. Every host
-fact (host name, home, plugin data, project root, session key, plugin manifest) arrives as an
-argument. The unit file pins all of it by reading the source.
+fact (host name, home, plugin data, project root, session key, plugin manifest, and the caller's
+tool path that decides whether a tool is started) arrives as an argument. The unit file pins all
+of it by reading the source.
 
 **What a port carries.** The five direct siblings are not the whole set: their require closure,
 lazy requires included, holds 14 sibling modules (measured on 2026-11-12 by walking every
@@ -45,7 +49,10 @@ validators and the renderer, and one for the store and chain mode. It is a follo
 into a temporary directory, beside stdin (at most 65537 bytes, one past the module's cap) and the
 two `evidence.report` layers that `zensu_evidence_report_config_json` reads, `{user, project}`, unjudged. Paths go through
 `zensu-host-path.sh`, a file as its directory plus its name, and travel in `ZENSU_ERP_*` variables
-kept out of MSYS conversion. The shell refuses every flag outside its list, so no free-text flag
+kept out of MSYS conversion. One variable is left to that conversion on purpose:
+`ZENSU_ERP_TOOL_PATH` carries the caller's `PATH` for the tool lookup, and Git Bash has to turn it
+into the native list the core splits at `path.delimiter`. Nothing reads that list on win32 yet,
+because the lookup answers no pair there (§"The WebP transcode"). The shell refuses every flag outside its list, so no free-text flag
 exists; the module refuses a flag that does not belong to the verb. Chain mode (`--log` at begin
 and render) reuses `_zensu_avr_prepare` and `_zensu_avr_work_tree`, the acceptance verbs'
 transport, and a work-tree fault reaches the module as the `work-tree-fault` file.
@@ -59,7 +66,8 @@ well-formed call, as `docs/configuration.md` §Evidence Reports promises.
 **Store and bundle.** `<store>/<repository key>/<id>/` holds `files/<sha256>.<ext>`, then
 `manifest.json` and `index.html` at render and `export.html` on export. `<id>.binding.json`
 (session key, project root, the physical run directory, the draft) and the report lock sit beside the
-bundle and are never published. The default store is `<plugin data>/evidence-report/v1`, and a
+bundle and are never published. `<store>/scratch/webp-<random>/` is the private directory of one
+transcode. The default store is `<plugin data>/evidence-report/v1`, and a
 configured `evidence.report.dir` holds the same `v1` directory, so both stores share one layout and
 a later schema version can sit beside it. The repository key is the clone's directory name plus 10
 hex digits of the SHA-256 of the real `--git-common-dir`, so every worktree of one clone shares it.
@@ -153,6 +161,86 @@ flags. The stored bytes are the cleaned ones, and the file entry keeps the captu
 as `source_sha256`. A stored image that still carries a droppable chunk is refused at render
 (`file.metadata`). Dropping instead of refusing keeps an ordinary capture usable while no metadata
 reaches a report.
+
+**The WebP transcode (build step 3).** After the cleaning, `addFileEvidence` hands an `image/png`
+to `transcodePng` while `evidence.report.webp` is `auto`. It answers one of three things: nothing,
+when no usable tool pair exists, so the add and its line are the step-2 ones; a reason, so the PNG
+is stored and the line ends with ` | PNG kept: <reason>`; or the WebP bytes, which are stored in
+place of the PNG as `image/webp` with the captured file's digest as `source_sha256`, and the line
+ends with ` | transcoded losslessly from a PNG of <n> bytes`. A transcode is verified, never
+trusted, because the encoder does not refuse what it cannot keep: measured with libwebp 1.6.0, a
+`gAMA` of 1.0 changed the decoded pixels, a 16-bit PNG was reduced to 8 bits without a message, and
+without `-exact` the colour under alpha 0 was lost (spec Appendix A).
+
+- **Lookup (`findWebpTools`).** On win32 it answers no pair before it reads the tool path: neither
+  the lookup nor the start of a tool with an empty environment was ever run there, so the
+  transcode stays off on that platform until it is measured. The platform is the function's third
+  parameter, so a unit case drives that answer on every host. Elsewhere only absolute entries of
+  the tool path count, in order. An entry without an executable regular `cwebp` is skipped
+  (`toolFile`), the first entry with one decides, and `dwebp` must sit beside it.
+  First-entry-decides is deliberate: a decoder from another directory may be another build, and
+  the check would then verify one library with another. `trustedPair` judges the pair in two
+  steps. First the places: the pair is refused when everyone may write the entry's real
+  directory, a real tool file or the directory a tool really lies in (`othersMayWrite`, the
+  `0o002` bit), and when a directory above one of those three directories, or above the entry as
+  the tool path spells it, is writable by everyone and not sticky (`othersMayReplace`, which
+  walks to the file-system root), because another account could then replace the program or a
+  directory that leads to it. The spelled entry joins the walk because a symlinked entry is a
+  name in its parent directory: whoever may rename entries there can point it at another tool
+  directory, whose own real place then passes. A sticky directory
+  above the pair passes, since only an entry's owner may rename or remove it there, and so does a
+  group-writable place. Ownership is not judged on purpose: a Homebrew prefix belongs to an
+  ordinary account, and a shared install to a service account, so an owner rule would switch the
+  transcode off without a line for people who did nothing wrong. Then the roots: `projectRoots`
+  is asked only once a pair passed the first step, because it runs git: the project root, the top
+  of its work tree, and the same two for the chain's work tree. The spelled entry, its real
+  directory and both real files must lie outside every root, so a link inside the project that
+  points outside is refused too, and a root that cannot be determined refuses the pair. A
+  repository therefore never supplies the program. The real paths come from `physicalPath`, which
+  is `fs.realpathSync.native` on every platform, the reader this module uses for containment.
+- **Runner (`runTool`).** `spawnSync` with the tool's real path, no shell, an empty environment,
+  `stdio: 'ignore'`, `LIMITS.toolMs` (30 s) and `SIGKILL`, inside the private directory. It is the
+  module's only use of `node:child_process`; the unit file pins the option block, the two call
+  sites and their order by reading the source. The environment is built by `toolEnvironment`,
+  not written as `{}`: Node copies `NODE_V8_COVERAGE` from its own process into a child's
+  environment unless the given object has that name as an own key (measured with Node 26.13.1 on
+  macOS, with the variable present at start and set at run time, and with Node 22.23.5 on Linux),
+  so each name in
+  `NODE_COPIED_VARIABLES` is an own key without a value. A plain `{}` would hand the tools that
+  variable whenever the calling process runs under a coverage tool, and the unit case that reads
+  the tools' environment would then fail under `c8`; that case sets the variable itself.
+- **What is tried (`pngFacts`).** 8-bit truecolor with or without alpha, not interlaced, no side
+  over `WEBP_MAX_SIDE`, at most `LIMITS.maxTranscodePixels`, only the chunks of
+  `PNG_TRANSCODE_CHUNKS`, none of `PNG_SINGLE_CHUNKS` twice, a `pHYs` with equal axes, and `gAMA`
+  or `cHRM` only beside `sRGB` or `iCCP`, which override them. Every other PNG answers its reason
+  before a tool starts.
+- **Verification.** The core decodes the PNG itself (`decodePng`: one inflate bounded by the
+  expected size, the five filter types, a stream of any other length refused). `cwebp` runs with
+  `WEBP_ENCODER_ARGUMENTS`. `encodedProblem` judges its output in a fixed order and names the
+  first failure: it must sniff as a still, lossless WebP with nothing to drop, have the PNG's
+  size, carry the PNG's ICC profile byte for byte, or none when the PNG has none
+  (`webpProfiles`), and be smaller than the cleaned PNG. `dwebp -pam` then writes RGBA, and
+  `pamMatches` compares it with the core's decode: it opens the file through `openForReading`,
+  the no-follow, non-blocking open that `readBounded` uses too, requires a regular file of exactly the header's and the pixels' size on that descriptor, and
+  reads it in blocks through `readExactly`, so a short read is no match, while `rowMatches`
+  compares each row, an RGB source against alpha 255. Only a file-system error answers no match
+  there; any other error reaches `transcodePng`, which keeps the PNG with `the transcode could
+  not be completed`. Any difference, a tool that fails, writes no file or runs past its limit,
+  and a scratch directory that cannot be made (`scratchDirectory`) each keep the PNG with a
+  reason of their own.
+- **Scratch.** `<store>/scratch/webp-<random>` holds `source.png`, `target.webp` and
+  `decoded.pam` for one call and is removed in `finally`. `sweepScratch` removes a `webp-`
+  directory older than `LIMITS.scratchStaleMs` (10 minutes) before a new one is made, which clears
+  what a killed call left.
+- **Config.** `combineConfigLayers` turns `webp` on only when every layer that sets it says
+  `auto`. `off`, or any other value, in the user or the project layer switches it off, and
+  `normalizeConfig` discloses a user-level `off` beside a project `auto` and a value that is
+  neither word. The key governs a capability the plugin grants itself, starting programs, so a
+  project file can withdraw it and never grant it. A configuration file that cannot be read or
+  parsed sets nothing, as for every ordinary key: the shell's `rd()` hands the core an empty
+  layer, so an `off` in such a file is lost and nothing is disclosed. That is the rule
+  `evidence.report.enabled` follows too, and the two strict hooks keys are the only ones a
+  malformed file withdraws.
 
 **Text screen (AC-007).** Every text field arrives on stdin and goes through one helper,
 `screenSecrets`: it is refused when it carries the allow marker or holds a secret before or after
@@ -255,6 +343,24 @@ bytes: fixed English strings, inline CSS, no script, no `url(`, and images only 
 `files/<sha>.<ext>`, which export inlines as data URIs without links. The corpus pins every
 rendering by SHA-256, and a unit case renders under another time zone and locale.
 
+**The viewer's policy (build step 3).** `renderHtml` writes one Content-Security-Policy meta
+element directly after the charset element, from `contentPolicy`: `default-src 'none'`, `img-src`
+from `IMAGE_SOURCES` (`'self' file:` for the bundle page, `data:` for the export), `style-src` with
+`STYLE_SOURCE`, then `base-uri 'none'` and `form-action 'none'`. `STYLE_SOURCE` is the SHA-256 of
+`STYLE`, computed when the module loads, so a style change needs no second edit; a unit case
+recomputes it from the rendered page's one `style` element. The renderer writes no `style`
+attribute, because the hash covers the element alone. Measured on 2026-11-25 on `file://` in
+Chrome 158, Safari 27.2 and Firefox 161.0 (spec Appendix A): the page loads its relative images
+and applies its style sheet under the policy, and a probe page ran no inline script and sent
+none of the requests the spec counts as stopped. What it does not stop: a navigation, a `preconnect` connection, an image
+from another local file, and in Firefox anything loaded from a local file, a script included,
+because Firefox applied none of the fetch directives to a `file:` URL. `file:` in `img-src` is
+redundant in the three measured browsers, which load the relative images under `'self'` alone. It
+is kept because Firefox's source gives `'self'` no match for a document without a host, so a
+version that begins to apply the policy to local files would otherwise hide a report's images.
+Measure Firefox through WebDriver BiDi and never through its headless `--screenshot` mode, which
+captured pages before their images were painted; that looked like a policy block and was none.
+
 **Retention (AC-011)** runs at begin. In the calling repository alone it deletes the reports beyond
 the newest `keep`, so one repository's `keep` never trims another's; then, store-wide and oldest
 first, it deletes until the store fits `maxBytes`. It spares the new report, a report whose lock
@@ -274,7 +380,8 @@ module the user and the project layer as they stand; `normalizeConfig` combines 
 (`combineConfigLayers`) and discloses a project value it ignores, because the
 size sweep deletes other repositories' reports and `dir` decides where every contributor's evidence
 is written. `enabled` keeps a user-level `false`: a project value can switch reports off but never
-on, and a project `true` the user's `false` overrides is disclosed. `keep` is merged. The layer rule
+on, and a project `true` the user's `false` overrides is disclosed. `keep` is merged. `webp` is
+fail-closed across the layers (§"The WebP transcode"). The layer rule
 lives in the core, so a port hands its own layers and inherits it; the shell reads the user layer
 through `ucfg()` and the project layer through `pcfg()` of `_ZENSU_CFG_JS`, which `cfg()` merges.
 
@@ -340,6 +447,30 @@ deny or ask; the `criterion.no-image` and `verdict.contradiction` answers of `ru
 restates the retention defaults (`keep` 30, `maxBytes` 2 GiB, the 14-day spare of an unrendered
 report), the PASS refusals with the scope of `verdict.tree-changed`, and the one-lane rule.
 
+**Coupled sites of step 3.** `WEBP_ENCODER_ARGUMENTS` with the command line in spec §6.5 and the
+unit file's `ENCODER_FLAGS`; the `PNG kept:` reasons of `pngFacts` and `transcodePng` with the unit
+file's tables; `PNG_TRANSCODE_CHUNKS`, `WEBP_MAX_SIDE` and `LIMITS.maxTranscodePixels` with the
+"which PNGs are tried" bullet of spec §6.5; `contentPolicy`, `IMAGE_SOURCES` and `STYLE_SOURCE`
+with the policy line of spec §6.6, the bullets of `docs/verify-feature.md` section 7 and every
+rendering digest of the corpus; `ZENSU_ERP_TOOL_PATH` in the report arm of `zensu-log.sh` and in
+`transportOptions`, and the line citations of `zensu-log.sh` in `docs/multi-repo-chains-spec.md`
+and `docs/multi-repo-chains-overview.html`, which a line added to that file shifts
+(`test-multi-repo-doc-citations.sh`), and with the tool-path row of the port table in spec §7.1;
+the lookup's refusals (`findWebpTools`, `trustedPair`, `othersMayWrite`, `othersMayReplace`) with
+the "where the tools come from" and "Windows keeps the PNG" bullets of spec §6.5, the encoder,
+tool-pair and unmeasured bullets of spec §11, the `--report-add` and `evidence.report.webp` rows
+of `docs/configuration.md` and the two screenshot bullets of `docs/verify-feature.md` section 7,
+and with the fixed modes the unit helper `standInTools` and the driver's stub directories set, so
+a permissive umask cannot make a stand-in look writable by everyone; the `webp` rule of
+`combineConfigLayers` with the `evidence.report.webp` rows of spec §6.11 and
+`docs/configuration.md`, its deviation paragraph there, which counts the deviating keys, and
+`config.example.json`; and in `tests/structure/test-evidence-report.sh` the `ENCODER_ONLY`
+directory that leads `PATH` for the whole suite, which keeps every check independent of a libwebp
+the machine may have, with `R24`, the one check that puts a tool pair first. `R24` expects the
+plain add line on Git Bash, where the lookup answers no pair, and that host branch is the suite's
+only native-Windows marker, which its `excluded` entry in
+`tests/profiles/windows-native-structure.v1.json` records.
+
 **Version: `patch`.** A new module, new verbs, a new private store and sidecar, and a new config
 subtree read permissively. No context-record or workflow-state field moves, no strict key set an
 earlier reader knows changes (the manifest, the binding and the store ship for the first time, so
@@ -347,21 +478,62 @@ earlier reader knows changes (the manifest, the binding and the store ship for t
 draft's `zensu` reach no released reader), and no hook, matcher or attestation moves. The store was deliberately not added to the
 protected-root lists of `reviewer-capability-v1.js`: a gate that denies more is a `minor`. The
 wiring of step 2 is `patch` on the same walk: skill text, docs and structure checks, with no
-hook, matcher, schema field, key set, config key or attestation moved.
+hook, matcher, schema field, key set, config key or attestation moved. Step 3 is `patch` as well:
+a stored WebP uses the `image/webp` type and the `source_sha256` field the manifest and the binding
+already had, so no key set moves and an installation of the same lineage that predates the
+transcode reads and renders such a report; `evidence.report.webp` is read permissively; the policy
+element changes a rendered page, which no reader validates; and no hook, matcher or attestation
+moves. That the module now starts two programs is not on the breaking list.
 
 **Known gaps.**
 
 - The store is no protected root of the reviewer capability gate, so a reviewer can read a
   report. The plugin-data guard denies Edit and Write into the default store; a configured store
   outside plugin data has no such guard.
-- A PNG is stored as PNG once its metadata chunks are dropped: lossless WebP transcoding and the
-  CSP measurement are step 3.
+- The transcode runs the first `cwebp` and `dwebp` pair the caller's `PATH` names outside the
+  project, as every tool the plugin starts by name is whatever `PATH` names. The pair is resolved
+  and then started, so a file swapped in between is followed. The writability check reads three
+  directories, every directory above them or above the entry as spelled, and two files, and
+  judges no owner. A link that a symlink chain passes through on its way, stored in a directory
+  on neither of those paths, is not judged. The verification
+  bounds what a wrong encoder can store, not what a hostile program on `PATH` can do.
+- A `cwebp` that was found and not accepted prints nothing: the add line is then the step-2 line,
+  which the unit file and `R24` pin. Naming the rule that refused the pair, on the add line, at
+  `--report-begin` or in a `/zensu:doctor` row, is an open decision. Until it is taken, section 7
+  of `docs/verify-feature.md` tells a reader what the lookup requires.
+- `dwebp` decodes `target.webp` by its path after the core read that file's bytes for storing, so
+  the verified file and the stored bytes are two reads of one file in the call's private scratch
+  directory.
+- A user-level `evidence.report.webp` of `off` is lost while that configuration file cannot be
+  parsed, like every setting in it. Reading an unreadable layer as `off` would need the shell to
+  tell a missing file from a broken one; it is not built.
+- The transcode keeps pixels and an ICC profile, nothing else: `sBIT`, a `pHYs` with equal axes,
+  and `gAMA` or `cHRM` beside `sRGB` or `iCCP` are not in the WebP. The captured file's digest is.
+- Two captures that become the same WebP share one file, and its entry keeps only the first
+  capture's digest as `source_sha256`.
+- A call that is killed leaves its scratch directory, with the capture in it, until the next
+  transcode finds it older than 10 minutes. The largest image measured took 1.6 s for 7.3 million
+  pixels; the 30 s limit was not measured against an image near the pixel cap.
+- The viewer's policy is a second line with holes: a navigation, a `preconnect` connection and an
+  image from another local file pass it in every measured browser, and Firefox applies it to
+  nothing loaded from a local file, so a page that carried foreign markup could run a script that
+  lies on the reader's disk there. `form-action` was exercised in Chrome and Firefox only, and a
+  manifest link, an icon link and `prefetch` fired in too few browsers to count as measured.
+- `file:` in `img-src` rests on a source reading, not on a measurement, and is redundant today.
+  Dropping it is a one-token change that moves every rendering digest.
+- Windows keeps every PNG: `findWebpTools` answers no pair there, because nothing of the
+  transcode was measured on that platform: a lookup of `.exe` names, Git Bash's conversion of
+  `ZENSU_ERP_TOOL_PATH`, which variables a tool started with an empty environment still receives,
+  and a writability rule for its access lists. Switching the transcode on there needs those
+  measurements first. The policy and a `file:` URL with a host are unmeasured on Windows too. Six
+  unit cases that drive stand-in tools skip there, because a stand-in is a script with an
+  interpreter line.
 - Chain mode needs an edit-landing receipt, like the acceptance verbs.
 - The sidecar and the store are session-writable files, like every plugin store: the integrity
   checks catch an altered evidence file, not a rewritten binding.
-- Windows is unmeasured: four unit cases skip there (symlinks, hard links and FIFOs), while their
-  portable halves run on every host, and the driver runs only on the weekly Windows Safety
-  structure shard. The short-name tolerance of `linkFree` rests on how `fs.realpathSync` walks a
+- Windows is unmeasured: ten unit cases skip there, four for symlinks, hard links and FIFOs,
+  whose portable halves run on every host, and six for stand-in tools, and the driver runs only
+  on the weekly Windows Safety structure shard. The short-name tolerance of `linkFree` rests on how `fs.realpathSync` walks a
   path; the unit case drives its win32 branch on every host, but no Windows run has measured an
   8.3 spelling.
 - A manifest validated without its binding, as a port's corpus validates it, cannot tell a local

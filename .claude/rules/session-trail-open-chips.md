@@ -22,8 +22,8 @@ paths:
 session proposed as a card its user starts. Claude Desktop keeps it in that session's own record,
 `claude-code-sessions/<account>/<org>/local_<id>.json`, as an entry of
 `backgroundTaskSuggestions`, keyed by the desktop session id. Nothing in the desktop app, the
-Zensu Session Hub or this script copies a record into another session, so a move left every
-chip behind. Measured on 2026-10-11 over the takeover ledger: 48 distinct handovers whose
+Zensu Session Hub or this script copies a record into another session, so without this step a
+move leaves every chip behind. Measured on 2026-10-11 over the takeover ledger: 48 distinct handovers whose
 source had open chips (80 chips), no chip id on both sides, and only 6 handovers in which the
 receiving model re-created any chips (14) on its own, from a stale `Currently pending`
 snapshot it grepped out of the old transcript.
@@ -115,9 +115,9 @@ sessions (`.claude/rules/session-trail-linked-sessions.md`) share:
   `handoff` run their git calls regardless, and a speed flag must not decide where work starts.
   `takeover --json` carries the receiving verdict as `openChips.sameRepository`.
 
-Path nesting, the rule before this one, counted every folder below a session rooted in a broad
-folder such as the home directory as that session's checkout, and every folder of a nested
-repository as the outer one's.
+A nested-path rule would count every folder below a session rooted in a broad folder, such as
+the home directory, as that session's checkout, and every folder of a nested repository as the
+outer one's.
 
 **The chip text never changes a call.** Both briefs tell the model to propose chips only while
 it works in a checkout of the old session's repository, to never start a chip, and to propose a

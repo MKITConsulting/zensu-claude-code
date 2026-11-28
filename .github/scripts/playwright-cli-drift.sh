@@ -17,7 +17,8 @@ command -v node >/dev/null 2>&1 || die 2 'node is not installed'
 work="$(mktemp -d "${TMPDIR:-/tmp}/playwright-cli-drift.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-curl -fsSL --max-time 60 -H 'Accept: application/vnd.npm.install-v1+json' -o "$work/metadata.json" "$REGISTRY" \
+curl -fL --no-progress-meter --retry 3 --retry-all-errors --retry-delay 5 --retry-max-time 120 --proto-redir =https \
+  --max-time 60 -H 'Accept: application/vnd.npm.install-v1+json' -o "$work/metadata.json" "$REGISTRY" \
   || die 1 'cannot read the @playwright/cli registry metadata'
 
 node - "$ROOT" "$work/metadata.json" <<'NODE'
@@ -72,6 +73,7 @@ process.stdout.write(`${[
   '',
   `1. Install it into a scratch directory outside the repository: \`npm install --prefix <dir> --ignore-scripts @playwright/cli@${newest}\``,
   '2. Re-record the golden fixture with that release\'s own parser: `node tests/structure/fixtures/record-playwright-cli-argv.js <dir>/node_modules/@playwright/cli tests/structure/fixtures/playwright-cli-argv.v1.json`',
-  '3. Port every difference the new recording shows into `parseCliArgs` and its option sets in `hooks/lib/verify-consent-v1.js`, check the release for a new configuration channel or a renamed run-config fence, bump `PLAYWRIGHT_CLI_SOURCE_VERSION` with every copy `.claude/rules/browser-consent-gate.md` lists, and run `tests/structure/test-verify-consent.sh`, all in one pull request.',
+  '3. Measure the network fence with that release first on `PATH`, because no suite drives a real browser and Chrome, not the gate, judges the three launch arguments: run `node tests/integration/verify-fence/probe.mjs matrix` and `node tests/integration/verify-fence/probe.mjs remote` under `PATH="<dir>/node_modules/.bin:$PATH"`. Each run must end with `fence-probe: PASS`; a `SKIP` proves nothing.',
+  '4. Port every difference the new recording shows into `parseCliArgs` and its option sets in `hooks/lib/verify-consent-v1.js`, check the release for a new configuration channel or a renamed run-config fence, bump `PLAYWRIGHT_CLI_SOURCE_VERSION` with every copy `.claude/rules/browser-consent-gate.md` lists, run `node tests/integration/verify-fence/probe.mjs gated` with the release still first on `PATH` (the run-config helper refuses any version but the measured one, so this run waits for the bump), and run `tests/structure/test-verify-consent.sh`, all in one pull request.',
 ].join('\n')}\n`);
 NODE

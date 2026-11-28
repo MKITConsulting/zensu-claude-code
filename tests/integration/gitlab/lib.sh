@@ -28,3 +28,7 @@ gitlab_it_pin() {
     }
   '
 }
+
+gitlab_it_fetch() {
+  curl -fL --no-progress-meter --retry 3 --retry-all-errors --retry-delay 5 --retry-max-time 120 --proto-redir =https --max-time "$1" -o "$2" "$3"
+}

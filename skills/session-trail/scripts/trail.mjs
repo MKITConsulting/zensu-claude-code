@@ -12,7 +12,7 @@ import {
   removeEdgeFiles, otherSchemaLedgers, schemaLedgerCensus, MAX_EDGE_RECORDS, byRecordedAtAsc,
   isSafeHostSessionId, EDGE_REFUSALS, boundText,
 } from './session-lineage-v1.mjs';
-import { recordText, runIdOf, familyWalk, decideLinked, continuationsStartedBy, presetMap, storeFolderRemedy, storeFolderNote, unreadReportsOf, isoOf, chipProposal, linkedStartNames, CHIP_WHY, LINKED_START_CAP, LINKED_KIND_LABELS, LINKED_WHY, LINKED_CWD_WHY, REPORT_TEXT_MAX } from './linked-sessions-v1.mjs';
+import { recordText, runIdOf, familyWalk, decideLinked, continuationsStartedBy, presetMap, presetsAcrossStores, linkedEnvironments, presetsFileNote, presetsProfilesNote, storeFolderRemedy, storeFolderNote, unreadReportsOf, isoOf, chipProposal, linkedStartNames, CHIP_WHY, LINKED_START_CAP, LINKED_KIND_LABELS, LINKED_WHY, LINKED_CWD_WHY, REPORT_TEXT_MAX } from './linked-sessions-v1.mjs';
 import { readAutopilotRuns, autopilotRunLines, autopilotShowLine, autopilotReleaseBlockers } from './autopilot-runs-v1.mjs';
 
 // Shared, never re-spelled. CLAUDE.md records `msysDrivePrefix` in
@@ -3870,13 +3870,13 @@ const MOVE_ALTERNATIVE = (pid) => [
 ];
 
 const RELEASE_AFTER = [
-  'LAST, whichever route you took: once your own worktree holds everything you still need from',
-  'the old one, run session-trail\'s release command for the old session from your own worktree.',
-  'It names every reason it refuses, such as a live session still working in the old worktree or',
-  'a nested repository inside it; a busy or unmeasured old session only needs --force on the re-run.',
-  'Otherwise it ends any keep anchor this plugin still holds there, so an archive no longer leaves',
-  'that worktree on disk, and says that the old session can now be archived or removed. It reports',
-  'uncommitted, unpushed and ignored files there without refusing over them; an archive deletes them with the worktree.',
+  'BEFORE THE REMAINING WORK, whichever route you took: once your own worktree holds everything you still need from the old one,',
+  'which is right after the carry-over or the move where one applies, run session-trail\'s release command for the old session from it. That is the takeover\'s last step, not the',
+  'work\'s: nothing it checks waits for the work you continue. It names every reason it refuses, such as a live session still working in the old worktree or a nested repository inside',
+  'it; a busy or unmeasured old session only needs --force on the re-run. Otherwise it ends any keep anchor this plugin still holds there, so an archive no longer leaves that worktree',
+  'on disk, and says that the old session can now be archived or removed: tell the user at once. While linked sessions of the old session are still to be continued, say instead that',
+  'its archive waits until each has carried its work over, which its own release reports, or the user leaves it behind. Hold this release back while one of them shared this worktree, or while its dry run',
+  'says that it would also end the keep anchor of another session, until the work of that session is carried over or the user leaves it behind. The release reports uncommitted, unpushed and ignored files there without refusing over them; an archive deletes them with the worktree.',
 ];
 
 // One table, four arms, two legs — and the ARM is chosen once, above the split.
@@ -5369,7 +5369,7 @@ const CCD_STORE_OVERRIDE = 'ZENSU_CCD_STORE (authoritative)';
 const STORE_FOLDERS = new Map();
 function storeFolderVerdict(storeDir) {
   if (STORE_FOLDERS.has(storeDir)) return STORE_FOLDERS.get(storeDir);
-  const store = ccdStores().find((candidate) => candidate.dir === storeDir);
+  const store = ccdStoreProbe().probes.find((candidate) => candidate.dir === storeDir && candidate.exists && !candidate.sameAs);
   if (!store) return null;
   const dir = path.dirname(store.dir);
   const { realDirectory, writableOnlyByCaller, ownedDirectoryRefusal } = storeRead();
@@ -5415,15 +5415,36 @@ function storeFolderStates(judged) {
   return { storeFolderRefused: refused.length > 0, storeFolder: refused[0] || entries[0], storeFolders: entries };
 }
 
-function savedPresets(file) {
+function presetsBeside(storeDir, accountUuid) {
+  const folder = storeFolderVerdict(storeDir);
+  if (!folder) return null;
+  const file = path.join(folder.dir, 'ccd-session-presets.json');
+  const read = storeRecordObject(file);
+  if (read.state === 'missing') return { presets: null, complete: folder.owned, folder, file, state: 'missing' };
+  if (read.state !== 'read') return { presets: null, complete: false, folder, file, state: read.state };
+  try { return { presets: presetMap(read.record, accountUuid), complete: folder.owned, folder, file, state: 'read' }; } catch { return { presets: null, complete: false, folder, file, state: 'unreadable' }; }
+}
+
+const SAVED_NONE = Object.freeze({ presets: null, complete: true, settled: new Set(), folders: [], unread: [], profilesUnread: null });
+
+function savedPresets(file, wanted) {
   const hit = recordFileOf(file);
-  const folder = hit && hit.accountUuid ? storeFolderVerdict(hit.store) : null;
-  if (!folder) return { presets: null, complete: true, folder: null };
-  const accountUuid = hit.accountUuid;
-  const read = storeRecordObject(path.join(folder.dir, 'ccd-session-presets.json'));
-  if (read.state === 'missing') return { presets: null, complete: folder.owned, folder };
-  if (read.state !== 'read') return { presets: null, complete: false, folder };
-  try { return { presets: presetMap(read.record, accountUuid), complete: folder.owned, folder }; } catch { return { presets: null, complete: false, folder }; }
+  const own = hit && hit.accountUuid ? presetsBeside(hit.store, hit.accountUuid) : null;
+  if (!own) return SAVED_NONE;
+  const across = !own.complete || !wanted.every((id) => own.presets && own.presets.has(id));
+  const probe = ccdStoreProbe();
+  const others = across ? probe.probes.filter((store) => store.exists && !store.sameAs && store.dir !== hit.store).map((store) => presetsBeside(store.dir, hit.accountUuid)).filter(Boolean) : [];
+  const reads = [own, ...others];
+  const merged = presetsAcrossStores(own, others);
+  const profilesUnread = across ? probe.profilesUnread : null;
+  return {
+    presets: merged.presets,
+    complete: reads.every((read) => read.complete) && !profilesUnread,
+    settled: merged.settled,
+    folders: reads.map((read) => read.folder),
+    unread: reads.filter((read) => read.state === 'refused' || read.state === 'unreadable').map((read) => ({ file: read.file, state: read.state })),
+    profilesUnread,
+  };
 }
 
 function hostNamedRecord() {
@@ -5453,7 +5474,7 @@ function startedContinuations() {
   return { names: continuationsStartedBy(run, family.records), complete: owned && family.listed && family.unreadable === 0, folders };
 }
 
-const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, ledgerRefused: null, newerSchemaLedgers: null, storeFolderRefused: null, storeFolder: null, storeFolders: null, sessions: [] });
+const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, ledgerRefused: null, newerSchemaLedgers: null, presetsUnread: null, presetsProfilesUnread: null,storeFolderRefused: null, storeFolder: null, storeFolders: null, sessions: [] });
 
 function linkedSessions(r, verdicts, planned = null) {
   const { sameRepository, oldRepositoryMeasured } = verdicts;
@@ -5468,7 +5489,8 @@ function linkedSessions(r, verdicts, planned = null) {
   const census = led && !led.directoryError ? schemaLedgerCensus(CONFIG_ROOT) : null;
   const newerSchemaLedgers = census ? [...census.ledgers, ...census.unread].filter((ledger) => ledger.relation !== 'older') : null;
   const started = walk.open.length ? startedContinuations() : { names: new Set(), complete: true, folders: [] };
-  const saved = walk.open.some((node) => typeof node.record.startedFromEnvironmentId === 'string') ? savedPresets(own.file) : { presets: null, complete: true, folder: null };
+  const environments = linkedEnvironments(walk);
+  const saved = environments.length ? savedPresets(own.file, environments) : SAVED_NONE;
   const decided = decideLinked(walk, {
     edges: led ? led.edges : [],
     ledgerComplete: !led || (!led.directoryError && !led.truncated && led.refused === 0 && newerSchemaLedgers.length === 0),
@@ -5477,6 +5499,7 @@ function linkedSessions(r, verdicts, planned = null) {
     self: selfSessionId(),
     presets: saved.presets,
     presetsComplete: saved.complete,
+    presetsSettled: saved.settled,
     checkout: verdicts.checkout,
     sameRepository,
     planned,
@@ -5489,7 +5512,9 @@ function linkedSessions(r, verdicts, planned = null) {
     oldRepositoryMeasured,
     unreadable: family.unreadable,
     ledgerTruncated: led ? led.truncated : null, ledgerError: led ? led.directoryError : null, schemaNewer: led ? led.schemaNewer : null, ledgerRefused: led ? led.refused : null, newerSchemaLedgers,
-    ...storeFolderStates([...(saved.folder ? [{ folder: saved.folder, read: 'presets' }] : []), ...started.folders.map((folder) => ({ folder, read: 'started' }))]),
+    presetsUnread: saved.unread,
+    presetsProfilesUnread: saved.profilesUnread,
+    ...storeFolderStates([...saved.folders.map((folder) => ({ folder, read: 'presets' })), ...started.folders.map((folder) => ({ folder, read: 'started' }))]),
   };
 }
 
@@ -5576,6 +5601,8 @@ function linkedSessionLines(state, when, planPass = false) {
     L.push(`_The lineage ledger could not be read completely${detail.length ? ` (${detail.join('; ')})` : ''}, so whether a linked session already continues elsewhere is unknown: each such one starts only when the user names it._`);
   }
   for (const folder of state.storeFolders || []) if (folder.refused) L.push(storeFolderNote(folder, briefPath));
+  for (const unread of state.presetsUnread || []) L.push(presetsFileNote(unread, briefPath));
+  if (state.presetsProfilesUnread) L.push(presetsProfilesNote(state.presetsProfilesUnread, briefPath));
   if (unlisted) L.push(`_The plan answer named ${state.plan.unlisted.length} linked session(s) that this brief does not list, so none of them starts: ${unlisted}. Each was archived, detached or removed after the plan, or never was an open linked session of the old session; name each one to the user in one line._`);
   if (!state.sessions.length) {
     L.push('_the session had no open linked sessions_');
@@ -5608,7 +5635,8 @@ function linkedSessionLines(state, when, planPass = false) {
     if (entry.sharedCheckout) L.push('- it shared its parent\'s checkout there, and here it gets a worktree of its own');
     if (entry.throughArchived) L.push('- reached through an archived linked session, so it attaches to this session');
     if (entry.openBelow) L.push(`- open linked sessions below it: ${entry.openBelow}, which follow only through it`);
-    if (entry.preset) {
+    if (entry.preset && entry.decision === 'stays') L.push(`- saved environment: ${entry.preset.name ? `\`${briefPath(entry.preset.name)}\`` : 'it could not be named here'}`);
+    else if (entry.preset) {
       L.push(entry.preset.name
         ? `- saved environment: \`${briefPath(entry.preset.name)}\`; pass it as \`preset\` only when \`list_start_targets\` lists a local preset of exactly this name, otherwise start it without and say so in the plan`
         : '- saved environment: it could not be named here, so it starts without it; say so in the plan');
@@ -6565,6 +6593,13 @@ function releaseArchiveLines(r, subject, v, state, others) {
   return lines;
 }
 
+function releasableHint(pad, alsoEnd, force) {
+  const apply = force ? '--apply --force' : '--apply';
+  return alsoEnd.length > 0
+    ? `${pad}Hold the release until the work of each session whose keep anchor it would also end is carried over or the user leaves it behind, and only then run release again with ${apply}. It then tells you that the old session can be archived or removed.`
+    : `${pad}Run release again with ${apply}. It then tells you that the old session can be archived or removed.`;
+}
+
 function cmdRelease(opts) {
   const r = hydrate(resolve(opts, opts._[1], 'a session never releases itself'));
   const selfId = selfSessionId();
@@ -6590,9 +6625,9 @@ function cmdRelease(opts) {
     blockers.push({ code: 'registry-incomplete', text: `The session registry in ${flatPath(SESSIONS)} could not be read completely (${why}), so a session that is still running could be taken for one that ended. Nothing is released until it reads cleanly.` });
   }
   if (v.level === 'BUSY') {
-    blockers.push({ code: 'source-busy', text: `The old session is busy: ${flatPath(v.reason)} Say so to the user in one line and run release again with --force: their request to release, or the takeover they confirmed, is the go.` });
+    blockers.push({ code: 'source-busy', text: `The old session is busy: ${flatPath(v.reason)} Say so to the user in one line and run release again with --force, first without --apply: their request to release, or the takeover they confirmed, is the go.` });
   } else if (isUnmeasuredProbablyFree(v) && !v.authorized) {
-    blockers.push({ code: 'source-unmeasured', text: `The old session is still registered and its queue was not measured: ${flatPath(v.reason)} Say so to the user in one line and run release again with --force: their request to release, or the takeover they confirmed, is the go.` });
+    blockers.push({ code: 'source-unmeasured', text: `The old session is still registered and its queue was not measured: ${flatPath(v.reason)} Say so to the user in one line and run release again with --force, first without --apply: their request to release, or the takeover they confirmed, is the go.` });
   }
   for (const blocker of autopilotReleaseBlockers(autopilotRunsOf(r), flatPath)) blockers.push(blocker);
   const hoursLeft = (record) => {
@@ -6726,11 +6761,12 @@ function cmdRelease(opts) {
     lines = [head('READY'), `${pad}${why}`, ...archiveText];
   } else if (!opts.apply) {
     verdict = 'releasable';
+    const alsoEnd = otherNotes('would also end', null);
     lines = [
       `${head('RELEASABLE')}   ${where}`,
       `${pad}would end ${endedNoun(toEnd.length)} and remove the ${keep.KEEP_FILENAME} marker; nothing was changed`,
-      ...otherNotes('would also end', null),
-      `${pad}Run release again with --apply${opts.force ? ' --force' : ''}. It then tells you that the old session can be archived or removed.`,
+      ...alsoEnd,
+      releasableHint(pad, alsoEnd, opts.force),
     ];
   } else {
     const result = keep.retireAnchors(subject.root, toEnd, now, idleMs);

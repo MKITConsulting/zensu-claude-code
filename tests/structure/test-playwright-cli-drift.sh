@@ -78,13 +78,13 @@ const triggers = doc.on || doc[true] || {};
 const schedule = Array.isArray(triggers.schedule) ? triggers.schedule : [];
 const compare = steps('drift').find((step) => step.id === 'compare');
 const issue = stepNamed('drift-issue', 'Open, update or close the drift issue');
-const notify = stepNamed('notify', 'Open or update the tracking issue');
+const notify = stepNamed('notify', 'Open, update or close the tracking issue');
 const extracted = { 'compare.sh': compare, 'drift-issue.sh': issue, 'notify.sh': notify };
 for (const [file, step] of Object.entries(extracted)) fs.writeFileSync(`${work}/${file}`, runOf(step));
 const driftRuns = steps('drift').filter((step) => has(step, 'run'));
 const driftUses = steps('drift').filter((step) => has(step, 'uses'));
-const NOTIFY_IF = "always() && github.event_name == 'schedule'"
-  + " && (needs.drift.result != 'success' || needs.drift-issue.result != 'success')";
+const NOTIFY_IF = "always() && github.event_name == 'schedule'";
+const RUN_URL = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}';
 process.stdout.write(JSON.stringify({
   extracted: Object.values(extracted).every((step) => runOf(step) !== ''),
   triggers: same(Object.keys(triggers).sort(), ['schedule', 'workflow_dispatch'])
@@ -106,6 +106,9 @@ process.stdout.write(JSON.stringify({
     && steps('drift-issue').length === 1,
   notify: ifOf('notify') === NOTIFY_IF && same(needsOf('notify'), ['drift', 'drift-issue'])
     && steps('notify').length === 1
+    && envOf(notify, 'RUN_URL') === RUN_URL
+    && envOf(notify, 'DRIFT_JOB') === '${{ needs.drift.result }}'
+    && envOf(notify, 'DRIFT_ISSUE_JOB') === '${{ needs.drift-issue.result }}'
     && runOf(notify).includes('--state open --label "$label"')
     && runOf(notify).includes('gh issue create --repo "$REPO" --title "$title" --label "$label"')
     && !runOf(notify).includes('in:title'),
@@ -124,7 +127,7 @@ fact "PD3 only the drift issue and notify jobs widen the read-only token, and on
 fact "PD4 one concurrency group serializes every run and never cancels one in progress" serialized
 fact "PD5 the drift job checks out without credentials, sets up node and runs only the drift script" drift
 fact "PD6 the drift issue job runs only after a successful drift job and reads the report it handed on" driftIssue
-fact "PD7 a red scheduled run opens or updates the tracking issue its label names" notify
+fact "PD7 every scheduled run hands the drift and drift issue outcomes to one step that finds the tracking issue by its label" notify
 
 pd8=PASS
 grep -Fqx 'REGISTRY="${ZENSU_PLAYWRIGHT_CLI_REGISTRY:-https://registry.npmjs.org/@playwright%2fcli}"' "$DRIFT" || pd8=FAIL
@@ -215,7 +218,8 @@ registry "$PACKAGE" "$MEASURED" "$NEXT"
 expect "PD13 a newer stable release reports the release under the marker that names it" "$(drift_run "$DRIFT")" "$(reported "$NEXT")"
 NEXT_REPORT="$(cat "$WORK/out"; printf x)"
 NEXT_REPORT="${NEXT_REPORT%x}"
-pd14="$(node -e '
+pd14_faults() {
+  node -e '
   const fs = require("fs");
   const path = require("path");
   const [file, root, version] = process.argv.slice(1);
@@ -224,14 +228,22 @@ pd14="$(node -e '
   const install = "`npm install --prefix <dir> --ignore-scripts @playwright/cli@" + version + "`";
   if (!text.includes(install)) faults.push("install");
   const words = [...text.matchAll(/`([^`]+)`/g)].flatMap((match) => match[1].split(/\s+/));
-  const files = words.filter((word) => word.includes("/") && /^[a-z][a-z0-9._/-]*\.(js|json|sh)$/.test(word));
+  const files = words.filter((word) => word.includes("/") && /^[a-z][a-z0-9._/-]*\.(m?js|json|sh)$/.test(word));
   if (files.length < 4) faults.push(`paths:${files.length}`);
   for (const name of files) if (!fs.existsSync(path.join(root, name))) faults.push(`missing:${name}`);
   const prose = text.replace(/<!--[\s\S]*?-->/g, "").replace(/`[^`]*`/g, "");
   if (prose.includes("@")) faults.push("bare-at");
   process.stdout.write(faults.join(",") || "ok");
-' "$WORK/out" "$ROOT" "$NEXT" 2>/dev/null)"
+' "$1" "$ROOT" "$NEXT" 2>/dev/null
+}
+pd14="$(pd14_faults "$WORK/out")"
 expect "PD14 the report installs that release, names only repository paths that exist and no bare @name" "$pd14" ok
+sed 's#tests/integration/verify-fence/probe\.mjs#tests/integration/verify-fence/probe-moved.mjs#g' "$WORK/out" > "$WORK/moved-probe"
+pd14b="$(pd14_faults "$WORK/moved-probe")"
+case "$pd14b" in
+  (*missing:tests/integration/verify-fence/probe-moved.mjs*) check "PD14b a report that names a moved fence probe fails the path check" PASS ;;
+  (*) check "PD14b a report that names a moved fence probe fails the path check (got '$pd14b')" FAIL ;;
+esac
 registry "$PACKAGE" "$WIDE" "$MEASURED" "$NARROW"
 expect "PD15 the newest release is the highest version by number, not the last one listed nor the highest by text" \
   "$(drift_run "$DRIFT")" "$(reported "$WIDE")"
@@ -261,8 +273,23 @@ printf 'not json\n' > "$METADATA"
 refuses "PD21 metadata that do not parse fail the check" 'the registry metadata do not parse as JSON'
 printf '{"name":"%s","versions":["%s"]}\n' "$PACKAGE" "$MEASURED" > "$METADATA"
 refuses "PD22 metadata without a version map fail the check" 'the registry metadata list no versions'
-rm -f "$METADATA"
-refuses "PD23 an unreadable registry fails the check" 'cannot read the @playwright/cli registry metadata'
+mkdir -p "$WORK/reset"
+cat > "$WORK/reset/curl" <<'SPY'
+#!/bin/sh
+printf 'curl %s\n' "$*" >> "$SPY_LOG"
+exit 56
+SPY
+chmod 755 "$WORK/reset/curl"
+: > "$WORK/reset.log"
+registry "$PACKAGE" "$MEASURED"
+got="$(export SPY_LOG="$WORK/reset.log" PATH="$WORK/reset:$PATH"; drift_run "$DRIFT")"
+calls="$(wc -l < "$WORK/reset.log" | tr -d ' ')"
+if [ "$got" = 'rc=1 none' ] && [ "$calls" = 1 ] \
+  && grep -Fq 'cannot read the @playwright/cli registry metadata' "$WORK/err"; then
+  check "PD23 a curl that gives up on the registry (exit 56, a connection reset) fails the check after one call" PASS
+else
+  check "PD23 a curl that gives up on the registry (exit 56, a connection reset) fails the check after one call (got '$got', calls $calls, stderr '$(head -n 1 "$WORK/err")')" FAIL
+fi
 
 REAL_CURL="$(command -v curl)"
 mkdir -p "$WORK/spy"
@@ -293,6 +320,10 @@ case "$spied" in
   *) pd24=FAIL ;;
 esac
 check "PD24 a drift run fetches the registry metadata with one curl and starts no package manager, archiver or CLI" "$pd24"
+FETCH='-fL --no-progress-meter --retry 3 --retry-all-errors --retry-delay 5 --retry-max-time 120 --proto-redir =https --max-time 60'
+expect "PD24b that curl hands curl -f, three retries of any error within two minutes, HTTPS-only redirects, 60 s per attempt and the Accept header" \
+  "$(sed -E 's| -o [^ ]+ ([^ ]+)$| -o FILE \1|' "$WORK/spy.log")" \
+  "curl $FETCH -H Accept: application/vnd.npm.install-v1+json -o FILE file://$METADATA"
 
 compare_run() {
   local rc
@@ -383,19 +414,26 @@ expect "PD34 a report whose marker line is not first fails and writes nothing" \
 notify_run() {
   local rc
   : > "$WORK/gh.log"
-  GH_OPEN="$1" GH_LOG="$WORK/gh.log" GH_TOKEN=fixture REPO=fixture/repo RUN_URL=https://github.invalid/fixture/actions/runs/1 \
-    PATH="$WORK/fakegh:$PATH" bash "$WORK/notify.sh" >/dev/null 2>&1
+  DRIFT_JOB="$1" DRIFT_ISSUE_JOB="$2" GH_OPEN="$3" GH_LOG="$WORK/gh.log" GH_TOKEN=fixture REPO=fixture/repo \
+    RUN_URL=https://github.invalid/fixture/actions/runs/1 PATH="$WORK/fakegh:$PATH" bash "$WORK/notify.sh" >/dev/null 2>&1
   rc=$?
   printf 'rc=%s writes=%s' "$rc" "$(writes)"
 }
-pd35="$(notify_run '')"
+pd35="$(notify_run failure skipped '')"
 if [ "$pd35" = 'rc=0 writes=issue create --title=TEXT --label playwright-cli-drift-check --body=RUN;' ] \
   && grep -Fxq 'label create playwright-cli-drift-check --color=TEXT --description=TEXT --force' "$WORK/gh.log"; then
   check "PD35 a red scheduled run without an open tracking issue opens one under its label that names the run" PASS
 else
   check "PD35 a red scheduled run without an open tracking issue opens one under its label that names the run (got '$pd35')" FAIL
 fi
-expect "PD36 a red scheduled run comments the run on the open tracking issue" "$(notify_run 9)" 'rc=0 writes=issue comment 9 --body=RUN;'
+expect "PD36 a red scheduled run comments the run on the open tracking issue" \
+  "$(notify_run success failure 9)" 'rc=0 writes=issue comment 9 --body=RUN;'
+expect "PD36b a cancelled drift job counts as a red run" \
+  "$(notify_run cancelled skipped 9)" 'rc=0 writes=issue comment 9 --body=RUN;'
+expect "PD36c a green scheduled run closes the open tracking issue with a comment that names the run" \
+  "$(notify_run success success 9)" 'rc=0 writes=issue close 9 --comment=RUN;'
+expect "PD36d a green scheduled run without an open tracking issue writes nothing" \
+  "$(notify_run success success '')" 'rc=0 writes='
 
 mutate() {
   node -e '

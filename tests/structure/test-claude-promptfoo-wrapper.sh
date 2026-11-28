@@ -122,6 +122,20 @@ else
   check "P7-S8b unrestricted eval requires explicit disposable-environment acknowledgement" FAIL
 fi
 
+OUT_P13S12C=$(DRY_RUN=1 "$WRAPPER" 'p' '{"config":{"init_git":true,"allow_unsandboxed_chrome":true}}' 2>&1)
+RC_P13S12C=$?
+OUT_P13S12C_ALLOW=$(ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 DRY_RUN=1 "$WRAPPER" 'p' '{"config":{"init_git":true,"require_disposable_environment":true,"allow_unsandboxed_chrome":true}}' 2>&1)
+RC_P13S12C_ALLOW=$?
+if [ "$RC_P13S12C" = "64" ] \
+  && printf '%s\n' "$OUT_P13S12C" | grep -qF 'requires require_disposable_environment: true' \
+  && ! printf '%s\n' "$OUT_P13S12C" | grep -qF 'DRY_RUN: would isolate' \
+  && [ "$RC_P13S12C_ALLOW" = "0" ] \
+  && printf '%s\n' "$OUT_P13S12C_ALLOW" | grep -qF 'DRY_RUN: would isolate'; then
+  check "P13-S12c allow_unsandboxed_chrome without require_disposable_environment is refused before any fixture is cloned" PASS
+else
+  check "P13-S12c allow_unsandboxed_chrome without require_disposable_environment is refused (rc=$RC_P13S12C, allowed rc=$RC_P13S12C_ALLOW, out=${OUT_P13S12C:0:300})" FAIL
+fi
+
 STUB_CLAUDE_DIR="$(mktemp -d)"
 cat >"$STUB_CLAUDE_DIR/claude" <<'STUB'
 #!/bin/bash
@@ -799,6 +813,85 @@ STUB
     check "P13-S8 live init_git path enforces OS-level read-only fixture (rc=$RC_P13S8, out=${OUT_P13S8:0:400})" FAIL
   fi
   rm -rf "$STUB_P13S8_DIR" "$SRC_P13S8_DIR"
+
+  if [ "$(uname -s)" = Darwin ] && command -v sandbox-exec >/dev/null 2>&1; then
+    STUB_P13S12_DIR="$(mktemp -d)"
+    cat >"$STUB_P13S12_DIR/claude" <<'STUB'
+#!/bin/bash
+sleep 30 &
+child=$!
+if kill -0 "$child" 2>/dev/null; then own=ok; else own=denied; fi
+kill "$child" 2>/dev/null
+wait "$child" 2>/dev/null
+( sleep 30 & echo "$!" >"$TMPDIR/p13s12-orphan" )
+orphan_pid="$(cat "$TMPDIR/p13s12-orphan" 2>/dev/null)"
+if [ -n "$orphan_pid" ] && kill "$orphan_pid" 2>/dev/null; then orphan=ok; else orphan=denied; fi
+if kill -0 "$P13S12_OUTSIDE_PID" 2>/dev/null; then outside=ok; else outside=denied; fi
+if ps -p "$$" -o command= >/dev/null 2>&1; then ps=ok; else ps=denied; fi
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"own=%s orphan=%s outside=%s ps=%s"}]}}\n' "$own" "$orphan" "$outside" "$ps"
+printf '{"type":"result","result":"ok"}\n'
+exit 0
+STUB
+    chmod +x "$STUB_P13S12_DIR/claude"
+    SRC_P13S12_DIR="$(mktemp -d -t p13s12-src-XXXXXX)"
+    printf 'seeded\n' >"$SRC_P13S12_DIR/marker.txt"
+    OPT_P13S12="$(printf '{"config":{"working_dir":"%s","init_git":true}}' "$SRC_P13S12_DIR")"
+    sleep 60 &
+    P13S12_OUTSIDE_PID=$!
+    OUT_P13S12=$(env PATH="$STUB_P13S12_DIR:$PATH" P13S12_OUTSIDE_PID="$P13S12_OUTSIDE_PID" bash "$WRAPPER" 'p' "$OPT_P13S12" 2>&1)
+    RC_P13S12=$?
+    kill "$P13S12_OUTSIDE_PID" 2>/dev/null || true
+    wait "$P13S12_OUTSIDE_PID" 2>/dev/null || true
+    if [ "$RC_P13S12" = 0 ] && printf '%s\n' "$OUT_P13S12" | grep -qF 'own=ok orphan=ok outside=denied ps=ok' \
+      && printf '%s\n' "$OUT_P13S12" | grep -qF '"tracked_clean":true'; then
+      check "P13-S12 the macOS fixture sandbox lets a process signal its own child and an orphaned sandboxed process and run /bin/ps, and still refuses a signal to a process it did not start outside it" PASS
+    else
+      check "P13-S12 the macOS fixture sandbox signals inside it and runs /bin/ps (rc=$RC_P13S12, out=${OUT_P13S12:0:400})" FAIL
+    fi
+
+    P13S12_CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    if [ -x "$P13S12_CHROME" ]; then
+      cat >"$STUB_P13S12_DIR/claude" <<'STUB'
+#!/bin/bash
+chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+dom="$(perl -e 'alarm shift @ARGV; exec @ARGV' 60 "$chrome" --headless --no-first-run --disable-background-networking --disable-component-update --disable-extensions --user-data-dir="$TMPDIR/p13s12-chrome" --dump-dom about:blank 2>/dev/null)"
+case "$dom" in
+  (*'<body></body>'*) state=ok ;;
+  (*) state=failed ;;
+esac
+perl -e 'alarm shift @ARGV; exec @ARGV' 20 "$chrome" --headless --no-first-run --disable-background-networking --disable-component-update --disable-extensions --user-data-dir="$TMPDIR/p13s12-kill" about:blank >/dev/null 2>&1 &
+browser=$!
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  case "$(ps -p "$browser" -o comm= 2>/dev/null)" in
+    (*'Google Chrome'*) break ;;
+  esac
+  sleep 0.2
+done
+case "$(ps -p "$browser" -o comm= 2>/dev/null)" in
+  (*'Google Chrome'*) if kill "$browser" 2>/dev/null; then signal=ok; else signal=denied; fi ;;
+  (*) signal=not-started ;;
+esac
+wait "$browser" 2>/dev/null
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"chrome=%s signal=%s"}]}}\n' "$state" "$signal"
+printf '{"type":"result","result":"ok"}\n'
+exit 0
+STUB
+      chmod +x "$STUB_P13S12_DIR/claude"
+      OPT_P13S12_CHROME="$(printf '{"config":{"working_dir":"%s","init_git":true,"require_disposable_environment":true,"allow_unsandboxed_chrome":true}}' "$SRC_P13S12_DIR")"
+      OUT_P13S12_SANDBOXED=$(env PATH="$STUB_P13S12_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P13S12" 2>&1)
+      OUT_P13S12_CHROME=$(env PATH="$STUB_P13S12_DIR:$PATH" ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 bash "$WRAPPER" 'p' "$OPT_P13S12_CHROME" 2>&1)
+      if printf '%s\n' "$OUT_P13S12_SANDBOXED" | grep -qF 'chrome=failed' \
+        && printf '%s\n' "$OUT_P13S12_CHROME" | grep -qF 'chrome=ok signal=ok' \
+        && printf '%s\n' "$OUT_P13S12_CHROME" | grep -qF '"tracked_clean":true'; then
+        check "P13-S12b Google Chrome starts in the macOS fixture sandbox only with allow_unsandboxed_chrome, which runs its main executable outside it, and the sandboxed parent can still signal that browser" PASS
+      else
+        check "P13-S12b Google Chrome starts only with allow_unsandboxed_chrome and stays signalable (sandboxed=${OUT_P13S12_SANDBOXED:0:300}, allowed=${OUT_P13S12_CHROME:0:300})" FAIL
+      fi
+    else
+      check "P13-S12b Chrome exemption skipped because Google Chrome is not installed at $P13S12_CHROME" PASS
+    fi
+    rm -rf "$STUB_P13S12_DIR" "$SRC_P13S12_DIR"
+  fi
 
   STUB_OVERLAP_DIR="$(mktemp -d)"
   cat >"$STUB_OVERLAP_DIR/claude" <<'STUB'

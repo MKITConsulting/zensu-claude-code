@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "files": [
     {
-      "path": "tests/structure/ai-work-capture.test.js", "registered": 37,
+      "path": "tests/structure/ai-work-capture.test.js", "registered": 50,
       "runs": [{ "driver": "tests/structure/test-ai-work-capture.sh" }],
-      "summary": "AI work capture: durable retries, account and host binding, explicit goals, commit submission and refusal of automatic decisions."
+      "summary": "AI work capture: durable retries, account and host binding, explicit goals, the local feature search and its ranking before the scope question, commit submission and refusal of automatic decisions."
     },
     {
       "path": "tests/session-control/session-control-core-v1.test.js", "registered": 237, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
@@ -47,24 +47,29 @@
       "summary": "The shifted-clock preload and runner that the scheduled clock-shift pass uses."
     },
     {
+      "path": "tests/structure/context-nudge-assertions.test.js", "registered": 3,
+      "runs": [{ "driver": "tests/structure/test-context-nudge-hook.sh" }],
+      "summary": "The context-nudge eval graders: every assertion body compiled and a pinned pass and fail vector over the wrapper envelope."
+    },
+    {
       "path": "tests/structure/deferred-review-claim-cases.test.js", "registered": 11,
       "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
       "summary": "The deferred-review claim case table."
     },
     {
-      "path": "tests/structure/edit-landing-claims-v1.test.js", "registered": 27,
+      "path": "tests/structure/edit-landing-claims-v1.test.js", "registered": 28,
       "runs": [{ "driver": "tests/structure/test-edit-landing-audit.sh" }],
       "summary": "The edit-landing claim grammar: the files split, brace and glob expansion, prose candidates, audited corrections and the append pre-check."
     },
     {
-      "path": "tests/structure/edit-landing-scope-v1.test.js", "registered": 37, "skips": {"win32": 1},
+      "path": "tests/structure/edit-landing-scope-v1.test.js", "registered": 49, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-edit-landing-audit.sh" }],
-      "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal."
+      "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, supersede proofs and their landing evidence, git-fault preservation, receipt freshness and the missing-session refusal."
     },
     {
-      "path": "tests/structure/evidence-report-v1.test.js", "registered": 84, "skips": {"win32": 4},
+      "path": "tests/structure/evidence-report-v1.test.js", "registered": 97, "skips": {"win32": 10},
       "runs": [{ "driver": "tests/structure/test-evidence-report.sh" }],
-      "summary": "Verify-feature evidence reports: ids, the strict manifest schema, the conformance corpus, deterministic rendering, containment, the secret screen and redaction, retention, the store placement, chain and matrix coverage, and the transport."
+      "summary": "Verify-feature evidence reports: ids, the strict manifest schema, the conformance corpus, deterministic rendering and its content security policy, containment, the secret screen and redaction, the PNG decoder, the tool lookup and the verified WebP transcode, retention, the store placement, chain and matrix coverage, and the transport."
     },
     {
       "path": "tests/structure/evidence-run-v1.test.js", "registered": 96, "skips": {"win32": 3},
@@ -108,13 +113,13 @@
       "summary": "The tool-call dispatcher: which checks run for each tool, the wrapper and body each check names, the failure policy, the exec-form registration, the host's aggregation order and the fast-path pre-checks."
     },
     {
-      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 35,
+      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 41,
       "guards": [
         "a detached linked session and everything below it is never listed",
         "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"
       ],
       "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
-      "summary": "The session-trail linked-session reader: the family walk and its open-below counts, the kinds, the start decisions and calls, the plan names a takeover carries into its run after the yes, the saved presets, the unread reports, the task-chip proposals and the store-folder note with the remedy each store's source calls for."
+      "summary": "The session-trail linked-session reader: the family walk and its open-below counts, the kinds, the start decisions and calls, the plan names a takeover carries into its run after the yes, the saved presets, their trust-aware merge across stores and the ids it settles, the saved environments a takeover looks up, the unread reports, the task-chip proposals, the presets-file note, the profiles-folder note and the store-folder note with the remedy each store's source calls for."
     },
     {
       "path": "tests/structure/owned-process.test.js", "registered": 7, "skips": {"win32": 7},
@@ -206,7 +211,7 @@
       "summary": "The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts."
     },
     {
-      "path": "tests/structure/review-packet-v1.test.js", "registered": 33,
+      "path": "tests/structure/review-packet-v1.test.js", "registered": 34,
       "runs": [{ "driver": "tests/structure/test-review-packet.sh" }],
       "summary": "The canonical review change set and the immutable per-round review packet."
     },
@@ -216,7 +221,7 @@
       "summary": "Delta-scoped review rounds: which files and findings a fix round reviews."
     },
     {
-      "path": "tests/structure/round-prepare-v1.test.js", "registered": 43,
+      "path": "tests/structure/round-prepare-v1.test.js", "registered": 44,
       "runs": [{ "driver": "tests/structure/test-round-prepare.sh" }],
       "summary": "Fix-round bookkeeping: the claim-label grammar, the round-start content snapshot, landing attribution, the fixed ledger lines and the packet files."
     },
@@ -306,17 +311,17 @@
       "summary": "The signed-in browser state validator: shape and size caps, origin scope, private-file checks, the run-directory layout, the discard of a run's auth directory and the login artifact contract."
     },
     {
-      "path": "tests/structure/verify-browser-config.test.js", "registered": 32, "skips": {"win32": 1},
+      "path": "tests/structure/verify-browser-config.test.js", "registered": 33, "skips": {"win32": 1},
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
       "summary": "The playwright-cli run-config helper: the isolated origin-restricted config, the address pins of a remote run, the signed-in login step with its signal cleanup, and the discard verb."
     },
     {
-      "path": "tests/structure/verify-consent-v1.test.js", "registered": 142, "skips": {"darwin": 1, "linux": 1, "root": 1, "win32": 3},
+      "path": "tests/structure/verify-consent-v1.test.js", "registered": 147, "skips": {"darwin": 1, "linux": 1, "root": 1, "win32": 3},
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
       "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer with its linear shell-flag scan, every refused indirection and the signed-in session rules."
     },
     {
-      "path": "tests/structure/verify-feature-transcript-check.test.js", "registered": 26,
+      "path": "tests/structure/verify-feature-transcript-check.test.js", "registered": 28,
       "runs": [{ "driver": "tests/structure/test-eval-harness-units.sh" }],
       "summary": "The verify-feature transcript assertion contract for plain playwright-cli calls on the zensu-verify session."
     },
@@ -326,7 +331,7 @@
       "summary": "The free loopback port helper: argument parsing, occupied and excluded ports and the CLI contract."
     },
     {
-      "path": "tests/structure/verify-navigation-floor-v1.test.js", "registered": 22,
+      "path": "tests/structure/verify-navigation-floor-v1.test.js", "registered": 23,
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
       "summary": "The navigation floor the consent gate and the run-config helper share: local hosts, address classes and URL refusals."
     },

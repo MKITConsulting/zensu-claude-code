@@ -3,6 +3,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
+const childProcess = require('node:child_process');
 const { redact, rootSpellings } = require('./zensu-artifact-redact-v1.js');
 const { scan, ALLOW_MARKER, PLACEHOLDER } = require('./secret-patterns.js');
 const evidenceRun = require('./evidence-run-v1.js');
@@ -70,6 +72,20 @@ const PNG_IMAGE_CHUNKS = Object.freeze(['IHDR', 'PLTE', 'IDAT', 'IEND', 'tRNS', 
 const PNG_ANIMATION_CHUNKS = Object.freeze(['acTL', 'fcTL', 'fdAT']);
 const WEBP_IMAGE_CHUNKS = Object.freeze(['VP8X', 'VP8L', 'ICCP', 'VP8 ', 'ALPH', 'ANIM', 'ANMF']);
 const WEBP_METADATA_FLAGS = 0x0c;
+const WEBP_MAX_SIDE = 16383;
+const PNG_TRANSCODE_CHUNKS = Object.freeze(['IHDR', 'IDAT', 'IEND', 'sRGB', 'iCCP', 'gAMA', 'cHRM', 'sBIT', 'pHYs']);
+const PNG_SINGLE_CHUNKS = Object.freeze(['sRGB', 'iCCP', 'gAMA', 'cHRM', 'sBIT', 'pHYs']);
+const PNG_COLOUR_OVERRIDES = Object.freeze(['sRGB', 'iCCP']);
+const PNG_COLOUR_HINTS = Object.freeze(['gAMA', 'cHRM']);
+const WEBP_ENCODER = 'cwebp';
+const WEBP_DECODER = 'dwebp';
+const WEBP_ENCODER_ARGUMENTS = Object.freeze(['-quiet', '-lossless', '-exact', '-z', '6', '-metadata', 'icc']);
+const WEBP_MODES = Object.freeze(['auto', 'off']);
+const SCRATCH_PREFIX = 'webp-';
+const PAM_READ_BYTES = 1024 * 1024;
+const NODE_COPIED_VARIABLES = Object.freeze(['NODE_V8_COVERAGE']);
+const OTHERS_MAY_WRITE = 0o002;
+const STICKY_BIT = 0o1000;
 
 const VERDICTS = Object.freeze(['PASS', 'FAIL', 'PARTIAL']);
 const MODES = Object.freeze(['local', 'remote']);
@@ -127,6 +143,10 @@ const LIMITS = Object.freeze({
   maxManifestBytes: 1024 * 1024,
   maxBindingBytes: 4 * 1024 * 1024,
   maxPixels: 100000000,
+  maxTranscodePixels: 33554432,
+  maxProfileBytes: 4 * 1024 * 1024,
+  toolMs: 30000,
+  scratchStaleMs: 10 * 60 * 1000,
   maxStdinBytes: 64 * 1024,
   maxEvidence: 4000,
   maxSteps: 1000,
@@ -193,6 +213,8 @@ const STYLE = [
   'article{border:1px solid var(--line);border-radius:8px;padding:4px 16px 12px;margin:16px 0}',
   'footer{margin-top:40px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:12px}',
 ].join('');
+const STYLE_SOURCE = `'sha256-${crypto.createHash('sha256').update(STYLE).digest('base64')}'`;
+const IMAGE_SOURCES = Object.freeze({ bundle: "'self' file:", export: 'data:' });
 
 class ReportError extends Error {
   constructor(message, code = 2) {
@@ -398,14 +420,18 @@ function withLock(target, limits, action) {
   }
 }
 
+function openForReading(file) {
+  const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+  return fs.openSync(file, fs.constants.O_RDONLY | noFollow | (fs.constants.O_NONBLOCK || 0));
+}
+
 function readBounded(filePath, maxBytes) {
   let descriptor;
   try {
     const before = fs.lstatSync(filePath);
     if (before.isSymbolicLink()) return { error: 'symlink' };
     if (!before.isFile()) return { error: 'not a regular file' };
-    const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
-    descriptor = fs.openSync(filePath, fs.constants.O_RDONLY | noFollow | (fs.constants.O_NONBLOCK || 0));
+    descriptor = openForReading(filePath);
     const stat = fs.fstatSync(descriptor);
     if (!stat.isFile()) return { error: 'not a regular file' };
     if (stat.dev !== before.dev || stat.ino !== before.ino) return { error: 'replaced while it was opened' };
@@ -674,6 +700,336 @@ function sniff(bytes) {
     return sniffWebp(bytes);
   }
   return sniffText(bytes);
+}
+
+function inflatedProfile(data, limits) {
+  const end = data.indexOf(0);
+  if (end < 1 || end > 79 || end + 2 > data.length || data[end + 1] !== 0) return null;
+  try {
+    return zlib.inflateSync(data.subarray(end + 2), { maxOutputLength: limits.maxProfileBytes });
+  } catch {
+    return null;
+  }
+}
+
+function pngFacts(bytes, limits = LIMITS) {
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  const colour = bytes[25];
+  if (bytes[24] !== 8 || (colour !== 2 && colour !== 6)) return { reason: 'it is not an 8-bit truecolor image' };
+  if (bytes[26] !== 0 || bytes[27] !== 0) return { reason: 'its header names an unknown compression or filter method' };
+  if (bytes[28] !== 0) return { reason: 'it is interlaced' };
+  if (width > WEBP_MAX_SIDE || height > WEBP_MAX_SIDE) return { reason: `a side is longer than ${WEBP_MAX_SIDE} pixels, the limit of a WebP` };
+  if (width * height > limits.maxTranscodePixels) return { reason: `it holds more than ${limits.maxTranscodePixels} pixels` };
+  const seen = new Set();
+  const idat = [];
+  let profile = null;
+  let offset = 8;
+  while (offset + 12 <= bytes.length) {
+    const size = bytes.readUInt32BE(offset);
+    const type = bytes.toString('latin1', offset + 4, offset + 8);
+    const data = bytes.subarray(offset + 8, offset + 8 + size);
+    if (!PNG_TRANSCODE_CHUNKS.includes(type)) return { reason: `it carries a ${type} chunk, which a WebP cannot hold` };
+    if (PNG_SINGLE_CHUNKS.includes(type) && seen.has(type)) return { reason: `it repeats its ${type} chunk` };
+    seen.add(type);
+    if (type === 'IDAT') idat.push(data);
+    if (type === 'iCCP') profile = data;
+    if (type === 'pHYs' && (size !== 9 || data.readUInt32BE(0) !== data.readUInt32BE(4))) return { reason: 'its pHYs chunk does not declare square pixels' };
+    offset += 12 + size;
+  }
+  const hint = PNG_COLOUR_HINTS.find((type) => seen.has(type));
+  if (hint && !PNG_COLOUR_OVERRIDES.some((type) => seen.has(type))) return { reason: `it carries ${hint} without sRGB or iCCP` };
+  let icc = null;
+  if (profile !== null) {
+    icc = inflatedProfile(profile, limits);
+    if (icc === null) return { reason: 'its ICC profile cannot be read' };
+  }
+  return { width, height, channels: colour === 2 ? 3 : 4, idat, icc };
+}
+
+function unfilterRow(filter, row, previous, step) {
+  const length = row.length;
+  if (filter === 0) return true;
+  if (filter === 1) {
+    for (let index = step; index < length; index += 1) row[index] = (row[index] + row[index - step]) & 0xff;
+    return true;
+  }
+  if (filter === 2) {
+    if (previous !== null) {
+      for (let index = 0; index < length; index += 1) row[index] = (row[index] + previous[index]) & 0xff;
+    }
+    return true;
+  }
+  if (filter === 3) {
+    for (let index = 0; index < length; index += 1) {
+      const left = index >= step ? row[index - step] : 0;
+      const up = previous !== null ? previous[index] : 0;
+      row[index] = (row[index] + ((left + up) >> 1)) & 0xff;
+    }
+    return true;
+  }
+  if (filter === 4) {
+    for (let index = 0; index < length; index += 1) {
+      const left = index >= step ? row[index - step] : 0;
+      const up = previous !== null ? previous[index] : 0;
+      const corner = previous !== null && index >= step ? previous[index - step] : 0;
+      const estimate = left + up - corner;
+      const byLeft = Math.abs(estimate - left);
+      const byUp = Math.abs(estimate - up);
+      const byCorner = Math.abs(estimate - corner);
+      row[index] = (row[index] + (byLeft <= byUp && byLeft <= byCorner ? left : byUp <= byCorner ? up : corner)) & 0xff;
+    }
+    return true;
+  }
+  return false;
+}
+
+function decodePng(facts) {
+  const stride = facts.width * facts.channels;
+  const expected = (stride + 1) * facts.height;
+  let raw;
+  try {
+    raw = zlib.inflateSync(Buffer.concat(facts.idat), { maxOutputLength: expected });
+  } catch {
+    return null;
+  }
+  if (raw.length !== expected) return null;
+  const rows = [];
+  let previous = null;
+  for (let line = 0; line < facts.height; line += 1) {
+    const start = line * (stride + 1);
+    const row = raw.subarray(start + 1, start + 1 + stride);
+    if (!unfilterRow(raw[start], row, previous, facts.channels)) return null;
+    rows.push(row);
+    previous = row;
+  }
+  return rows;
+}
+
+function readExactly(descriptor, buffer, length, position) {
+  let filled = 0;
+  while (filled < length) {
+    const read = fs.readSync(descriptor, buffer, filled, length - filled, position + filled);
+    if (read === 0) return false;
+    filled += read;
+  }
+  return true;
+}
+
+function rowMatches(row, decoded, rgbaRow) {
+  if (rgbaRow === null) return row.equals(decoded);
+  for (let source = 0, target = 0; target < rgbaRow.length; source += 3, target += 4) {
+    rgbaRow[target] = row[source];
+    rgbaRow[target + 1] = row[source + 1];
+    rgbaRow[target + 2] = row[source + 2];
+  }
+  return rgbaRow.equals(decoded);
+}
+
+function pamMatches(file, facts, rows) {
+  const header = Buffer.from(`P7\nWIDTH ${facts.width}\nHEIGHT ${facts.height}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n`, 'latin1');
+  const stride = facts.width * 4;
+  let descriptor;
+  try {
+    descriptor = openForReading(file);
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size !== header.length + stride * facts.height) return false;
+    const found = Buffer.alloc(header.length);
+    if (!readExactly(descriptor, found, found.length, 0) || !found.equals(header)) return false;
+    const rowsPerBlock = Math.max(1, Math.floor(PAM_READ_BYTES / stride));
+    const block = Buffer.alloc(rowsPerBlock * stride);
+    const rgbaRow = facts.channels === 4 ? null : Buffer.alloc(stride, 0xff);
+    for (let line = 0; line < facts.height; line += rowsPerBlock) {
+      const count = Math.min(rowsPerBlock, facts.height - line);
+      if (!readExactly(descriptor, block, count * stride, header.length + line * stride)) return false;
+      for (let index = 0; index < count; index += 1) {
+        if (!rowMatches(rows[line + index], block.subarray(index * stride, (index + 1) * stride), rgbaRow)) return false;
+      }
+    }
+    return true;
+  } catch (error) {
+    if (error && isString(error.syscall)) return false;
+    throw error;
+  } finally {
+    if (descriptor !== undefined) {
+      try { fs.closeSync(descriptor); } catch { }
+    }
+  }
+}
+
+function webpProfiles(bytes) {
+  const profiles = [];
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const size = bytes.readUInt32LE(offset + 4);
+    if (bytes.toString('latin1', offset, offset + 4) === 'ICCP') profiles.push(bytes.subarray(offset + 8, offset + 8 + size));
+    offset += 8 + size + (size % 2);
+  }
+  return profiles;
+}
+
+function physicalPath(file) {
+  return fs.realpathSync.native(file);
+}
+
+function toolFile(candidate) {
+  try {
+    const real = physicalPath(candidate);
+    if (!fs.statSync(real).isFile()) return null;
+    fs.accessSync(real, fs.constants.X_OK);
+    return real;
+  } catch {
+    return null;
+  }
+}
+
+function othersMayWrite(target) {
+  return (fs.statSync(target).mode & OTHERS_MAY_WRITE) !== 0;
+}
+
+function othersMayReplace(directory) {
+  let current = directory;
+  let parent = path.dirname(current);
+  while (parent !== current) {
+    const mode = fs.statSync(parent).mode;
+    if ((mode & OTHERS_MAY_WRITE) !== 0 && (mode & STICKY_BIT) === 0) return true;
+    current = parent;
+    parent = path.dirname(current);
+  }
+  return false;
+}
+
+function trustedPair(entry, encoder, decoder, roots) {
+  let directory;
+  try {
+    directory = physicalPath(entry);
+    const holders = [directory, path.dirname(encoder), path.dirname(decoder)];
+    if ([...holders, encoder, decoder].some(othersMayWrite) || [path.resolve(entry), ...holders].some(othersMayReplace)) return false;
+  } catch {
+    return false;
+  }
+  const forbidden = roots();
+  if (forbidden === null) return false;
+  const outside = (target) => forbidden.every((root) => !samePath(target, root) && !isInside(root, target));
+  return [path.resolve(entry), directory, encoder, decoder].every(outside);
+}
+
+function findWebpTools(toolPath, roots, platform = process.platform) {
+  if (platform === 'win32' || !isString(toolPath) || toolPath === '') return null;
+  for (const entry of toolPath.split(path.delimiter)) {
+    if (!path.isAbsolute(entry)) continue;
+    const encoder = toolFile(path.join(entry, WEBP_ENCODER));
+    if (encoder === null) continue;
+    const decoder = toolFile(path.join(entry, WEBP_DECODER));
+    return decoder !== null && trustedPair(entry, encoder, decoder, roots) ? { encoder, decoder } : null;
+  }
+  return null;
+}
+
+function projectRoots(options) {
+  const roots = [];
+  const directories = [options.projectRoot, options.chain ? options.chain.workTree : ''];
+  for (const directory of directories) {
+    if (!isString(directory) || directory === '') continue;
+    if (!path.isAbsolute(directory)) return null;
+    try {
+      roots.push(physicalPath(directory));
+    } catch {
+      return null;
+    }
+    const top = evidenceRun.workTreeTop(directory);
+    if (top.reason) return null;
+    if (top.top) roots.push(top.top);
+  }
+  return roots.length > 0 ? roots : null;
+}
+
+function toolEnvironment() {
+  return Object.fromEntries(NODE_COPIED_VARIABLES.map((name) => [name, undefined]));
+}
+
+function runTool(tool, args, directory, limits) {
+  const result = childProcess.spawnSync(tool, args, {
+    cwd: directory,
+    env: toolEnvironment(),
+    shell: false,
+    stdio: 'ignore',
+    timeout: limits.toolMs,
+    killSignal: 'SIGKILL',
+    windowsHide: true,
+  });
+  if (result.error) return result.error.code === 'ETIMEDOUT' ? `ran past ${limits.toolMs} ms` : 'could not be started';
+  return result.status === 0 ? null : 'failed';
+}
+
+function sweepScratch(scratch, limits) {
+  let names;
+  try {
+    names = fs.readdirSync(scratch);
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  for (const name of names) {
+    if (!name.startsWith(SCRATCH_PREFIX)) continue;
+    const target = path.join(scratch, name);
+    try {
+      const stat = fs.lstatSync(target);
+      if (stat.isDirectory() && now - stat.mtimeMs > limits.scratchStaleMs) fs.rmSync(target, { recursive: true, force: true });
+    } catch { }
+  }
+}
+
+function scratchDirectory(where, limits) {
+  try {
+    const scratch = ensureDirectory(where.root, 'scratch', 'the report scratch directory');
+    sweepScratch(scratch, limits);
+    return fs.mkdtempSync(path.join(scratch, SCRATCH_PREFIX));
+  } catch {
+    return null;
+  }
+}
+
+function encodedProblem(written, facts, pngLength) {
+  if (written.error) return `${WEBP_ENCODER} wrote no file`;
+  const webp = sniff(written.bytes);
+  if (webp.error || webp.type !== 'image/webp') return `${WEBP_ENCODER} wrote no lossless WebP`;
+  if (webp.dropped) return 'the WebP carries metadata';
+  if (webp.width !== facts.width || webp.height !== facts.height) return 'the WebP has another size than the PNG';
+  const profiles = webpProfiles(written.bytes);
+  const kept = facts.icc === null ? profiles.length === 0 : profiles.length === 1 && profiles[0].equals(facts.icc);
+  if (!kept) return 'the ICC profile did not survive';
+  return written.bytes.length >= pngLength ? 'the WebP is not smaller' : null;
+}
+
+function transcodePng(png, options, where, limits) {
+  const tools = findWebpTools(options.toolPath, () => projectRoots(options));
+  if (tools === null) return {};
+  const facts = pngFacts(png, limits);
+  if (facts.reason) return { reason: facts.reason };
+  const rows = decodePng(facts);
+  if (rows === null) return { reason: 'its pixel data cannot be read' };
+  const directory = scratchDirectory(where, limits);
+  if (directory === null) return { reason: 'the scratch directory is unavailable' };
+  try {
+    const source = path.join(directory, 'source.png');
+    const target = path.join(directory, 'target.webp');
+    const decoded = path.join(directory, 'decoded.pam');
+    fs.writeFileSync(source, png, { mode: 0o600, flag: 'wx' });
+    const encoderFailure = runTool(tools.encoder, [...WEBP_ENCODER_ARGUMENTS, '-o', target, source], directory, limits);
+    if (encoderFailure) return { reason: `${WEBP_ENCODER} ${encoderFailure}` };
+    const written = readBounded(target, limits.maxFileBytes);
+    const problem = encodedProblem(written, facts, png.length);
+    if (problem) return { reason: problem };
+    const decoderFailure = runTool(tools.decoder, [target, '-pam', '-o', decoded], directory, limits);
+    if (decoderFailure) return { reason: `${WEBP_DECODER} ${decoderFailure}` };
+    if (!pamMatches(decoded, facts, rows)) return { reason: 'the decoded WebP differs from the PNG' };
+    return { webp: written.bytes };
+  } catch {
+    return { reason: 'the transcode could not be completed' };
+  } finally {
+    try { fs.rmSync(directory, { recursive: true, force: true }); } catch { }
+  }
 }
 
 function parseViewport(value) {
@@ -1347,6 +1703,16 @@ function criterionDetail(criterion) {
   return lines.join('<br>');
 }
 
+function contentPolicy(exportMode) {
+  return [
+    "default-src 'none'",
+    `img-src ${exportMode ? IMAGE_SOURCES.export : IMAGE_SOURCES.bundle}`,
+    `style-src ${STYLE_SOURCE}`,
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join('; ');
+}
+
 function renderHtml(manifest, readFile, options = {}) {
   const exportMode = options.mode === 'export';
   const out = [];
@@ -1355,6 +1721,7 @@ function renderHtml(manifest, readFile, options = {}) {
   out.push('<html lang="en">');
   out.push('<head>');
   out.push('<meta charset="utf-8">');
+  out.push(`<meta http-equiv="Content-Security-Policy" content="${contentPolicy(exportMode)}">`);
   out.push('<meta name="viewport" content="width=device-width, initial-scale=1">');
   out.push('<meta name="referrer" content="no-referrer">');
   out.push(`<title>Evidence report ${escapeHtml(manifest.id)} - ${escapeHtml(manifest.verdict)}</title>`);
@@ -1518,6 +1885,12 @@ function combineConfigLayers(raw) {
   if (has(user, 'maxBytes')) value.maxBytes = user.maxBytes;
   if (fromProject('dir')) value.dirFromProject = true;
   if (fromProject('maxBytes')) value.maxBytesFromProject = true;
+  const webp = [user, project].filter((layer) => has(layer, 'webp')).map((layer) => layer.webp);
+  if (webp.length > 0) {
+    value.webp = webp.every((entry) => entry === 'auto') ? 'auto' : 'off';
+    if (webp.some((entry) => !WEBP_MODES.includes(entry))) value.webpUnknown = true;
+    if (user.webp === 'off' && project.webp === 'auto') value.webpFromProject = true;
+  }
   return value;
 }
 
@@ -1552,7 +1925,14 @@ function normalizeConfig(raw, limits = LIMITS) {
   if (value.enabledFromProject === true) {
     disclosures.push('the user configuration switched evidence reports off, and a project configuration can switch them off but never on');
   }
-  return { enabled, dir, keep, maxBytes, disclosures: disclosures.map((line) => `zensu evidence report: ${line}`) };
+  const webp = value.webp === 'off' ? 'off' : 'auto';
+  if (value.webpUnknown === true) {
+    disclosures.push('evidence.report.webp must be auto or off, so no image is transcoded');
+  }
+  if (value.webpFromProject === true) {
+    disclosures.push('the user configuration switched WebP transcoding off, and a project configuration can switch it off but never on');
+  }
+  return { enabled, dir, keep, maxBytes, webp, disclosures: disclosures.map((line) => `zensu evidence report: ${line}`) };
 }
 
 function storeRoot(options, config, create) {
@@ -2214,11 +2594,23 @@ function addFileEvidence(options, args, binding, where, limits, kind, config) {
   if (sniffed.error) refuse(`the evidence file is refused: ${sniffed.error}`);
   let bytes = raw;
   let entry;
+  let transcode = '';
   if (kind === 'image') {
     if (!IMAGE_TYPES.includes(sniffed.type)) refuse('--kind image needs a PNG or a lossless WebP file');
     if (sniffed.width * sniffed.height > limits.maxPixels) refuse(`the image holds more than ${limits.maxPixels} pixels`);
     if (sniffed.dropped) bytes = sniffed.clean();
-    entry = { name: '', type: sniffed.type, bytes: bytes.length, width: sniffed.width, height: sniffed.height, viewport, source_sha256: sniffed.dropped ? sha256(raw) : null };
+    let type = sniffed.type;
+    if (type === 'image/png' && config.webp === 'auto') {
+      const outcome = transcodePng(bytes, options, where, limits);
+      if (outcome.webp) {
+        transcode = ` | transcoded losslessly from a PNG of ${bytes.length} bytes`;
+        bytes = outcome.webp;
+        type = 'image/webp';
+      } else if (outcome.reason) {
+        transcode = ` | PNG kept: ${outcome.reason}`;
+      }
+    }
+    entry = { name: '', type, bytes: bytes.length, width: sniffed.width, height: sniffed.height, viewport, source_sha256: bytes === raw ? null : sha256(raw) };
   } else {
     if (sniffed.type !== 'text/plain') refuse('--kind text needs a UTF-8 text file');
     if (raw.length > limits.maxTextFileBytes) refuse(`a text file holds at most ${limits.maxTextFileBytes} bytes`);
@@ -2252,7 +2644,7 @@ function addFileEvidence(options, args, binding, where, limits, kind, config) {
   const stripped = sniffed.dropped ? ` | dropped the metadata chunks ${sniffed.dropped.join(', ')}` : '';
   return {
     item: { kind, file: sha, caption: caption.value, plane },
-    detail: `${entry.type}${entry.width ? ` ${entry.width}x${entry.height}` : ''} | ${entry.bytes} bytes | ${entry.name}${stripped}`,
+    detail: `${entry.type}${entry.width ? ` ${entry.width}x${entry.height}` : ''} | ${entry.bytes} bytes | ${entry.name}${stripped}${transcode}`,
     store: () => storeFile(where, bytes, entry.type),
   };
 }
@@ -2792,6 +3184,7 @@ function transportOptions(env) {
     projectRoot: env.ZENSU_ERP_PROJECT_ROOT || '',
     host: env.ZENSU_ERP_HOST || '',
     home: env.ZENSU_ERP_HOME || '',
+    toolPath: env.ZENSU_ERP_TOOL_PATH || '',
     pluginVersion: readPluginVersion(env.ZENSU_ERP_PLUGIN_MANIFEST || ''),
     args: readArguments(directory),
     stdinText: readTransportFile(directory, 'stdin', LIMITS.maxStdinBytes + 1) || '',
@@ -2857,6 +3250,9 @@ module.exports = {
   samePath,
   linkFree,
   sniff,
+  pngFacts,
+  decodePng,
+  findWebpTools,
   parseFields,
   parseViewport,
   screenText,

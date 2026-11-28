@@ -60,10 +60,10 @@ fi
 # one of those resolve guards: without the library `zensu_delivery_route_field` is not
 # defined and a bound session renders `unjudged`, a false could-not-be-read row.
 if { [ -z "${ZDOC_TTL_HOURS:-}" ] || [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ] \
-  || [ -z "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ] \
-  || [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ] \
+  || [ -z "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ] || [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ] \
   || [ -z "${ZDOC_WORKTREE_KEEP_IDLE_HOURS:-}" ] || [ -z "${ZDOC_WORKTREE_KEEP:-}" ] \
-  || [ -z "${ZDOC_DELIVERY_ROUTE:-}" ] || [ -z "${ZDOC_ZEN_MODE:-}" ]; } \
+  || [ -z "${ZDOC_DELIVERY_ROUTE:-}" ] || [ -z "${ZDOC_ZEN_MODE:-}" ] || [ -z "${ZDOC_LINKED_SESSION:-}" ] \
+  || [ -z "${ZDOC_INHERITED_ROUTE:-}" ]; } \
   && [ -f "$DIR/zensu-config.sh" ]; then
   # shellcheck source=/dev/null
   . "$DIR/zensu-config.sh" 2>/dev/null || true
@@ -673,6 +673,40 @@ if [ -z "$ZDOC_DELIVERY_ROUTE" ]; then
     ZDOC_DELIVERY_ROUTE=unjudged
   fi
 fi
+ZDOC_LINKED_SESSION="${ZDOC_LINKED_SESSION:-}"
+if [ -z "$ZDOC_LINKED_SESSION" ]; then
+  if [ -z "${ZDOC_SESSION_KEY:-}" ] || [ -z "${ZDOC_SESSION_PROJECT_ROOT:-}" ]; then
+    ZDOC_LINKED_SESSION=unknown
+  elif command -v zensu_linked_session_state >/dev/null 2>&1; then
+    ZDOC_LINKED_ROOT="$(cd -P -- "$ZDOC_SESSION_PROJECT_ROOT" 2>/dev/null && pwd -P)"
+    if [ -n "$ZDOC_LINKED_ROOT" ]; then
+      ZDOC_LINKED_SESSION="$(zensu_linked_session_state "$ZDOC_LINKED_ROOT" "$ZDOC_SESSION_KEY" 2>/dev/null)"
+    fi
+    case "$ZDOC_LINKED_SESSION" in
+      (linked|none|unresolved|absent) ;;
+      (*) ZDOC_LINKED_SESSION=unjudged ;;
+    esac
+  else
+    ZDOC_LINKED_SESSION=unjudged
+  fi
+fi
+ZDOC_INHERITED_ROUTE="${ZDOC_INHERITED_ROUTE:-}"
+if [ -z "$ZDOC_INHERITED_ROUTE" ]; then
+  if [ -z "${ZDOC_SESSION_KEY:-}" ] || [ -z "${ZDOC_SESSION_PROJECT_ROOT:-}" ]; then
+    ZDOC_INHERITED_ROUTE=unknown
+  elif command -v zensu_inherited_route_state >/dev/null 2>&1; then
+    ZDOC_INHERITED_ROOT="$(cd -P -- "$ZDOC_SESSION_PROJECT_ROOT" 2>/dev/null && pwd -P)"
+    if [ -n "$ZDOC_INHERITED_ROOT" ]; then
+      ZDOC_INHERITED_ROUTE="$(zensu_inherited_route_state "$ZDOC_INHERITED_ROOT" "$ZDOC_SESSION_KEY" 2>/dev/null)"
+    fi
+    case "$ZDOC_INHERITED_ROUTE" in
+      (build|none) ;;
+      (*) ZDOC_INHERITED_ROUTE=unjudged ;;
+    esac
+  else
+    ZDOC_INHERITED_ROUTE=unjudged
+  fi
+fi
 ZDOC_ZEN_MODE="${ZDOC_ZEN_MODE:-}"
 if [ -z "$ZDOC_ZEN_MODE" ]; then
   if [ -z "${ZDOC_SESSION_KEY:-}" ] || [ -z "${ZDOC_SESSION_PROJECT_ROOT:-}" ]; then
@@ -711,7 +745,7 @@ export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_RO
   ZDOC_BINDING_ROOT_UNKNOWN \
   ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON ZDOC_PLAYWRIGHT_VERSION \
   ZDOC_PLAYWRIGHT_SOURCE ZDOC_PLAYWRIGHT_OWNER
-export ZDOC_DELIVERY_ROUTE ZDOC_ZEN_MODE
+export ZDOC_DELIVERY_ROUTE ZDOC_ZEN_MODE ZDOC_LINKED_SESSION ZDOC_INHERITED_ROUTE
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

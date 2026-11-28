@@ -11,7 +11,7 @@ const FLOOR_REASONS = Object.freeze({
   REMOTE_NOT_PUBLIC: 'remote address is not globally routable',
   SCHEME: 'navigation target scheme is not http, https, ws, or wss',
   NETWORK_ONLY_HTTPS: 'a network-only origin outside loopback requires HTTPS',
-  HOSTNAME_PATTERN: 'an origin must name its host exactly: an IP literal, or a hostname of a-z, 0-9, ".", "-" and "_" only, never a wildcard or pattern',
+  HOSTNAME_PATTERN: 'an origin must name its host exactly: an IP literal, or a hostname of a-z, 0-9, ".", "-" and "_" only that does not start with ".", never a wildcard or pattern',
 });
 
 const CONSENT_REMOTE_REASON = 'a remote origin outside a navigation policy is approved at the permission prompt, which this session cannot show because its permission mode is bypassPermissions, dontAsk or not reported; switch the session to Manual or Auto (CLI: --permission-mode default or auto), or relaunch Claude Code with the origin as a target of the parent-environment navigation policy ZENSU_VERIFY_NAVIGATION_POLICY_V1';
@@ -111,7 +111,7 @@ function isLocalHost(hostname) {
 const HOSTNAME_RE = /^[a-z0-9._-]+$/;
 
 function isExactHost(hostname) {
-  return net.isIP(hostname) !== 0 || HOSTNAME_RE.test(hostname);
+  return net.isIP(hostname) !== 0 || (HOSTNAME_RE.test(hostname) && !String(hostname).startsWith('.'));
 }
 
 async function resolveRemoteHost(hostname, resolver) {

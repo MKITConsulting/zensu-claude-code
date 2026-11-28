@@ -24,6 +24,7 @@
 #   - test-plan-approved-delegate.sh's D13 keeps the full (B)/(C)/question-block contract; R12
 #     re-checks only the three invariants the new text could have broken.
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HELPER="$PLUGIN_DIR/hooks/lib/zensu-delivery-route.sh"

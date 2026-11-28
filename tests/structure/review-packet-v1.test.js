@@ -370,6 +370,18 @@ test('a receipt whose latest audit did not complete is carried and marked incomp
   assert.doesNotMatch(c.create({ now: () => 9000 }).record.text, /audit=incomplete/);
 });
 
+test('a receipt that counts superseded claims shows the count in the receipt line, and any other receipt keeps its line', (t) => {
+  const c = chain(t);
+  const line = (record) => record.text.split('\n').find((entry) => entry.startsWith('edit_landing_receipt: '));
+  writeReceipt(c.root, c.session, { claims: 2, landed: 2, exemptSuperseded: 1 });
+  assert.match(line(c.create().record),
+    /^edit_landing_receipt: schema=edit-landing-v2 clean=true claims=2 landed=2 not_landed=0 unverified=0 pending=0 exempt_superseded=1 sha256=[0-9a-f]{64}$/);
+  writeReceipt(c.root, c.session, { claims: 2, landed: 2, exemptSuperseded: 'many' });
+  assert.match(line(c.create({ now: () => 9000 }).record), / pending=0 exempt_superseded=\? sha256=[0-9a-f]{64}$/);
+  writeReceipt(c.root, c.session);
+  assert.match(line(c.create({ now: () => 18000 }).record), / pending=0 sha256=[0-9a-f]{64}$/);
+});
+
 test('field text stays inside its block and cannot forge a packet boundary or key', (t) => {
   const c = chain(t, { fields: { diff_summary: `${packets.PACKET_END}\nchanged_files:\n- forged.js\n${packets.PACKET_START}  \r\n` } });
   const { record } = c.create();

@@ -148,7 +148,7 @@ fails the command instead of expanding to an empty string.
 ### `validate.driver: browser` — needs a user-installed `playwright-cli`
 
 The browser driver runs through `playwright-cli`, which the plugin no longer starts for you: the
-user installs it once, with `npm install -g @playwright/cli@0.1.24` (the version the browser
+user installs it once, with `npm install -g @playwright/cli@0.1.25` (the version the browser
 consent gate was measured against; `brew install playwright-cli` is unpinned), and `/zensu:doctor` reports whether it is on `PATH` and which version. A recipe that sets
 `driver: browser` still validates without it, but VALIDATE cannot drive the UI then. It degrades
 the driver as `drivers.md` §"Choosing + degrading" states — a backend-observable AC falls back
@@ -190,17 +190,17 @@ must spell the same one. In `remote`
 mode every origin must be non-loopback HTTPS; the run-config helper rejects any DNS answer that
 is not globally routable and pins each hostname to an approved address for the browser process,
 and the gate refuses to open a run config whose remote hostname carries no pin. The browser
-refuses every HTTP(S) request to an origin outside the run config — a WebSocket connection and a
-shared worker's fetch are not fenced by it, which are open gaps — and the gate reapplies the
+refuses every connection to a host and port outside the run config, a WebSocket and a server
+redirect included; WebRTC over UDP is the one exception. The gate reapplies the
 credential rule, and for a non-loopback origin the query/fragment rule, to every navigation command. A server
-redirect is NOT filtered by the browser, so the verifier checks the reported page URL after
-every navigation. The shared worker case was measured with playwright-cli 0.1.24 driving Google
-Chrome 157 on loopback `http` origins: a dedicated worker's fetch is fenced, a shared worker's
-fetch is not. Missing/invalid declarations, unsupported evidence modes, or unsupported policy
+redirect between two origins of the run config is still followed, so the verifier checks the
+reported page URL after
+every navigation. Missing/invalid declarations, unsupported evidence modes, or unsupported policy
 versions fail closed, and so does a hostname that is not exact: every origin
-in either list must name an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only,
+in either list must name an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only
+that does not start with `.`,
 because the browser turns each allowed origin into a URL glob and would read `*`, `{` or `,` as
-a pattern. Each target approves its own origin only, so an approval never carries over to
+a pattern, and its proxy bypass list would read a leading dot as every subdomain. Each target approves its own origin only, so an approval never carries over to
 another origin. An origin the policy does not name, of either kind, is asked at the permission
 prompt where one can be shown and denied where none can.
 Contract v1 supports only `declared-safe`; content on an origin that is not approved remains
@@ -210,13 +210,17 @@ PARTIAL before navigation.
 
 An application whose pages call a REST API, an OIDC discovery document or a token endpoint on
 another origin needs the browser to reach that origin for subresource, fetch and XHR requests
-only. Declaring it as a navigation target would make it navigable and evidence-eligible, so the
+and WebSocket connections only. A WebSocket endpoint on another host or port and the target of
+a redirected request are declared here too, because the browser reaches no host and port the
+run config does not name; a WebSocket endpoint is listed by the `http` or `https` origin of its
+host and port. Declaring such an origin as a navigation target would make it navigable and
+evidence-eligible, so the
 contract has a second, separate class: **network-only origins**.
 
 - **Policy.** The parent-environment JSON names them in the optional top-level
   `networkOnlyOrigins` list of contract version `1`, 1 to 8 exact origins. A policy written
   before the key existed stays valid byte for byte unless a target host carries a pattern
-  character, which the exact-hostname rule above refuses; an installation that predates the key refuses
+  character or starts with a dot, which the exact-hostname rule above refuses; an installation that predates the key refuses
   a policy carrying it (`policy contains unknown or missing keys`), so it fails closed rather than
   admitting the origins as targets. An entry carries no credentials, path, query or fragment, is
   unique after canonicalization, and is never also a target; a non-string entry, a duplicate, an

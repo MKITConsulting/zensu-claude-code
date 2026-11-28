@@ -18,13 +18,14 @@ paths:
 `session-hub@zensu` companion carries the maintained one as `/session-hub:session-trail`.
 `.claude/rules/session-hub-companion.md` says which copy each check grades.
 
-**A selector verb summarizes what its answer needs, not the machine.** `resolve()` used to build
-the full index before it tried the exact-id tier, and `--all` drops the project-directory filter,
-so every `show`, `takeover`, `handoff`, `adopt` and `release` process summarized every transcript
-modified inside `--days` and JSON-parsed every Claude Desktop record. Measured on 2026-10-12 on
-one machine: 2,415 transcripts (about 4.2 GiB decoded) and 3,034 records (335 MiB) per process,
-27-31 s CPU and up to 931 MB RSS, and a Session-Hub takeover runs that verb sequence 4 to 6
-times. After this change `show <uuid> --all --json` measured 0.34 s user CPU and 86 MB max RSS.
+**A selector verb summarizes what its answer needs, not the machine.** `--all` drops the
+project-directory filter, so building the full index before the exact-id tier would make every
+`show`, `takeover`, `handoff`, `adopt` and `release` process summarize every transcript
+modified inside `--days` and JSON-parse every Claude Desktop record. Measured on 2026-10-12 on
+one machine with the full index built first: 2,415 transcripts (about 4.2 GiB decoded) and 3,034
+records (335 MiB) per process, 27-31 s CPU and up to 931 MB RSS, and a Session-Hub takeover runs
+that verb sequence 4 to 6 times. With the targeted lookup, `show <uuid> --all --json` measured
+0.34 s user CPU and 86 MB max RSS.
 Two reads stay wide on purpose: every `local_*.json` is still read once as bytes, and only the
 records that carry the id are parsed; plain-text `show` also reads the first 64 KiB of every
 other admitted transcript to find its siblings.
@@ -38,7 +39,7 @@ other admitted transcript to find its siblings.
   candidate rows when there are any and over the full index otherwise. Tiers 3 to 7 always run
   over the full index, which `resolve()` builds lazily, so an id selector that settles at tier 1
   or 2 never builds it, while every other selector, the missing-selector order and the
-  `no session matched` text are today's.
+  `no session matched` text keep their full-index behavior.
 - `siblings()` filters the memoized index when one exists. Otherwise it reads the first
   `CWD_PROBE_BYTES` (64 KiB) of each admitted transcript and takes the first `"cwd":"…"` with a
   sticky match at the first literal occurrence, provided the line that holds it ends inside the
@@ -58,7 +59,7 @@ other admitted transcript to find its siblings.
   `"cliSessionId"` key carries each id; only those files are parsed, and `settledRecord` decides
   what they answer: matches in two stores settle the id as ambiguous (`CCD_AMBIGUOUS`, no
   `CCD_RECORD_PATHS` entry), and inside one store the last match in walk order wins.
-  `ccdIndex()` stays the full map for the surveys, settles every id through the same
+  `ccdIndex()` is the full map for the surveys, settles every id through the same
   `settledRecord`, and reuses the same memoized file listing, so a directory that cannot be read
   is counted once and both walks write the same `CCD_RECORD_PATHS` entry.
 
@@ -109,8 +110,10 @@ account owns or that grants group or other write:
   `realDirectory(dir, writableOnlyByCaller)`, and every candidate that passes is a store the
   lookup reads (`stores`, `store` being the first of them). A refused candidate never is, and
   `lineage --diagnose` marks it `REFUSED`; when no candidate resolves, it names the permission
-  fix rather than `ZENSU_CCD_STORE`, which is judged by the same rule. Every refused candidate
-  counts as a refused entry, wherever it sits in the list, because the session's record could be
+  fix rather than `ZENSU_CCD_STORE`, which is judged by the same rule. The one read that reaches
+  past a refused candidate is the saved-environment read, which judges the folder that holds it and
+  reads the presets file there (`.claude/rules/session-trail-linked-sessions.md`). Every refused
+  candidate counts as a refused entry, wherever it sits in the list, because the session's record could be
   in it: a session found in no accepted store reads as refused entries rather than as missing
   (`OM7`, `OM7b`). `ZENSU_CCD_STORE` stays authoritative, so a refused override leaves no store
   at all.
@@ -153,8 +156,7 @@ Measured on 2026-11-02 on macOS, the store, the 69 directories below it and its 
 belonged to the user with no group or other write bit, and the store held no symbolic link, so
 the check refuses nothing there. `umask 022` heads `test-session-trail-verdict.sh` and
 `test-session-trail-lineage.sh`, so their fixture stores pass under any runner umask. `OM0` to
-`OM4` in the verdict suite pin the check, `OM0` as the control; against the code before the
-check, `OM1` to `OM4` fail and the FIFO case hangs until its timeout. `OM5` pins the
+`OM4` in the verdict suite pin the check, `OM0` as the control. `OM5` pins the
 plugin-tree-incomplete diagnostic and the lazy load, `OM6` a refused `ccd-session-presets.json`
 in both forms, `OM7` a refused candidate passed over for a later one, `OM7b` a refused candidate
 after an accepted one, which is counted too, `OM8` and `OM9` the decisions a refused presets file and a refused,
@@ -192,7 +194,9 @@ therefore lists, in this order:
   when it was measured. A profiles folder that exists and cannot be listed counts once as unread in
   `ccdStoreProbe` and nowhere else; `lineage --diagnose` names it on an `UNREAD` line and as
   `profilesUnread`, and a session no read store holds then reads `PROFILES_UNREAD_REASON` rather
-  than a plain miss (`DF11`).
+  than a plain miss (`DF11`). A takeover whose saved-environment read went past the record's own
+  presets file names it too, as `linkedSessions.presetsProfilesUnread` and in a brief note (`DF12`,
+  `.claude/rules/session-trail-linked-sessions.md`).
 
 **No store comes from a process's arguments (decision 2026-11-18).** A confined process of the same
 user can start a process named `Claude`, the genuine Claude binary included, on a folder of its own
@@ -234,7 +238,10 @@ variables (`DF6`), the folders that are no candidate and the absent process sour
 host account across stores (`DF8`), a profile folder that is a symbolic link and the additive remedy
 that reads it through its real folder (`DF9`), the store folder each read judged and the started
 set's branches with a running session (`DF10`, `.claude/rules/session-trail-linked-sessions.md`)
-and an unlistable profiles folder (`DF11`, skipped as root). `WR4b` pins the release line for a
+and an unlistable profiles folder (`DF11`, skipped as root). `DF12` runs in two homes of its own, one
+with a default store and two profile stores and one whose default store is a symbolic link to a
+store `ZENSU_CCD_EXTRA_STORES` names, and pins the saved environments a record's linked sessions
+name across stores, refused candidates included (`.claude/rules/session-trail-linked-sessions.md`). `WR4b` pins the release line for a
 source in another data folder of the same account.
 
 **Bounds, accepted and named.**
@@ -247,7 +254,10 @@ source in another data folder of the same account.
   every linked session that could start as `started-unread`, because the host id names a record
   no read store holds.
 - A refused candidate that is another spelling of an accepted store is counted as refused,
-  although the store is read through the accepted spelling; that is the fail-safe direction.
+  although the store is read through the accepted spelling; that is the fail-safe direction. The
+  folder that holds a refused candidate is still judged, and its `ccd-session-presets.json` read,
+  when the saved environments look past the record's own presets file, because Claude Desktop keeps
+  that file beside the store spelling it writes (`DF12`).
 - The resolver of a linked session's delivery route, `storeCandidates` in
   `hooks/lib/linked-session-v1.js`, reads the named stores, its platform's default stores and the
   Session Hub profile stores in the order `ccdStoreCandidates` probes them, but probes the profile
@@ -271,8 +281,7 @@ desktop-record parse count through an `--import` preload, targeted-versus-full e
 `show --json`, `takeover --json` and the SIBLINGS line, the out-of-window fallback, the prefix
 ambiguity, the retention delta against a control, two desktop records carrying one id (`TL9`),
 siblings the probe cannot place (`TL10`) and the read scope of `release` keep-owner attribution
-(`TL11`). Against the code before this change seven of its twelve checks fail; the five that
-pass are the behavior-preservation controls.
+(`TL11`). Five of its twelve checks are the behavior-preservation controls.
 
 **Version: `patch`.** No schema field, strict key set, hook, matcher, config key or attestation
 change; `session-lineage-v1.mjs` is untouched.

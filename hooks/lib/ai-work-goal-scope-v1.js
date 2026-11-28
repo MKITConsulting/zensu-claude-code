@@ -2,7 +2,8 @@
 
 // Goal scope is independent of the repository product binding and host identity.
 const UUID = /^(?!00000000-0000-0000-0000-000000000000$)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const reason = v => typeof v === 'string' && v.trim() && [...v].length <= 500 && !/[\x00-\x1f\x7f-\x9f]/.test(v);
+const boundedText = (v, max) => typeof v === 'string' && v.trim() !== '' && [...v].length <= max && !/[\x00-\x1f\x7f-\x9f]/.test(v);
+const reason = v => boundedText(v, 500);
 function fromOptions(options) {
   const featureId = options.feature ?? null;
   const featureRevisionId = options['feature-revision'] ?? null;
@@ -33,4 +34,4 @@ function startArgs(scope) {
   if (!scope?.taskScope) throw new Error('Missing goal scope');
   return [...(scope.featureId ? ['--feature', scope.featureId] : []), ...(scope.featureRevisionId ? ['--feature-revision', scope.featureRevisionId] : []), ...(scope.maintenanceReason ? ['--maintenance-reason', scope.maintenanceReason] : [])];
 }
-module.exports = { fromOptions, contextArgs, confirm, assertSame, startArgs };
+module.exports = { fromOptions, contextArgs, confirm, assertSame, startArgs, UUID, boundedText };

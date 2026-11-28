@@ -1136,7 +1136,8 @@ fi
 ROUTER_MISS=""
 ROUTER_CODE="$(js_outside_comments "$TRAIL_MJS")"
 ROUTER_CALLS="$(printf '%s\n' "$ROUTER_CODE" | grep -oF 'isUnmeasuredProbablyFree(' | grep -c . || true)"
-[ "$ROUTER_CALLS" = "3" ] || ROUTER_MISS="$ROUTER_MISS [predicate-called-$ROUTER_CALLS-times-not-3]"
+[ "$ROUTER_CALLS" = "4" ] || ROUTER_MISS="$ROUTER_MISS [predicate-called-$ROUTER_CALLS-times-not-4]"
+printf '%s\n' "$ROUTER_CODE" | grep -qE "else if \(isUnmeasuredProbablyFree\(tv\)\) say = 'Say in one line that its queue was not measured" || ROUTER_MISS="$ROUTER_MISS [plan-card-does-not-ask-the-predicate]"
 printf '%s\n' "$ROUTER_CODE" | grep -qE '^const isUnmeasuredProbablyFree = \(v\) => .*v\.queueMeasured !== true;$' || ROUTER_MISS="$ROUTER_MISS [predicate-does-not-read-anything-but-true-as-unmeasured]"
 printf '%s\n' "$ROUTER_CODE" | grep -qE 'const advised = isUnmeasuredProbablyFree\(v\) ' || ROUTER_MISS="$ROUTER_MISS [show-advice-does-not-ask-the-predicate]"
 printf '%s\n' "$ROUTER_CODE" | grep -qE 'else if \(isUnmeasuredProbablyFree\(tv\)\) L\.push\(' || ROUTER_MISS="$ROUTER_MISS [brief-step-4-does-not-ask-the-predicate]"
@@ -1151,7 +1152,7 @@ UNMEASURED_USES="$(printf '%s\n' "$ROUTER_CODE" | grep -oE 'QUEUE_UNMEASURED([^A
 [ "$UNMEASURED_USES" = "2" ] || ROUTER_MISS="$ROUTER_MISS [QUEUE_UNMEASURED-spelled-$UNMEASURED_USES-times-not-2]"
 printf '%s\n' "$PROBABLY_FREE_ROW" | grep -qF '`takeover.queueMeasured: false`' || ROUTER_MISS="$ROUTER_MISS [table-probably-free-row-lacks-the-field]"
 if [ -z "$ROUTER_MISS" ]; then
-  check "T24e all three routers of an unmeasured PROBABLY_FREE — show's advice, the takeover brief's step 4 and release's --force gate — ask one predicate, isUnmeasuredProbablyFree, which reads a queueMeasured of anything but true as unmeasured; queueMeasured appears in code only in that predicate and where measuredVerdict's common fields set it, every return of measuredVerdict spreads those common fields, QUEUE_UNMEASURED is spelled only where it is declared and where the reason is composed, and the PROBABLY_FREE row names takeover.queueMeasured" PASS
+  check "T24e all four routers of an unmeasured PROBABLY_FREE — show's advice, the takeover plan card, the takeover brief's step 4 and release's --force gate — ask one predicate, isUnmeasuredProbablyFree, which reads a queueMeasured of anything but true as unmeasured; queueMeasured appears in code only in that predicate and where measuredVerdict's common fields set it, every return of measuredVerdict spreads those common fields, QUEUE_UNMEASURED is spelled only where it is declared and where the reason is composed, and the PROBABLY_FREE row names takeover.queueMeasured" PASS
 else
   check "T24e unmeasured-queue routing drift:$ROUTER_MISS" FAIL
 fi
@@ -1257,7 +1258,7 @@ if printf '%s\n' "$QW_COMMENT" | grep -qF -- 'each listing drawn from one says s
 UNFILTERED_CODE="$(js_outside_comments "$TRAIL_MJS" | grep -F 'QUEUE_WITHDRAWALS_UNFILTERED' | grep -vF 'const QUEUE_WITHDRAWALS_UNFILTERED =' || true)"
 UNFILTERED_N="$(printf '%s\n' "$UNFILTERED_CODE" | grep -c . || true)"
 UNFILTERED_TEXT_N="$(printf '%s\n' "$UNFILTERED_CODE" | grep -cE '(^|[^A-Za-z0-9_])(print|L\.push)\(' || true)"
-[ "$UNFILTERED_N" = "3" ] || CARRIER_MISS="$CARRIER_MISS [constant-used-$UNFILTERED_N-times-not-3]"
+[ "$UNFILTERED_N" = "4" ] || CARRIER_MISS="$CARRIER_MISS [constant-used-$UNFILTERED_N-times-not-4]"
 [ "$UNFILTERED_TEXT_N" = "$UNFILTERED_N" ] || CARRIER_MISS="$CARRIER_MISS [a-use-of-the-constant-is-not-a-text-renderer]"
 if [ -z "$CARRIER_MISS" ]; then
   check "T24k the queueWithdrawals comment says a text listing from a truncated read discloses it through QUEUE_WITHDRAWALS_UNFILTERED and a --json payload through truncated: true, the constant is used by exactly $UNFILTERED_N text renderers, and the comment states the crediting filter, the unmatched-delivery veto, the two-build judgement and the separate withdrawn list" PASS
@@ -2711,6 +2712,477 @@ for spec in "handoff-call|cmdHandoff-caution-call|a handoff brief that no longer
   esac
 done
 rm -rf "$T40_SANDBOX"
+
+release_timing_sites() {
+  local tk="$1" ho="$2" ar="$3" cm="$4" tr="$5" bad="" n
+  local at_start at_chips at_run at_release para step0 confirm
+  local flow at_dry at_wait at_force at_rel dry_line wait_line rel_line linked row code
+  at_start="$(grep -nF "**Start the old session's linked sessions here, right after \`takeover --force\`, in the turn in which the user confirmed the plan.**" "$tk" | head -1 | cut -d: -f1)"
+  at_chips="$(grep -nF "**Carry the old session's open task chips over, always, before you release it.**" "$tk" | head -1 | cut -d: -f1)"
+  at_run="$(grep -nF "**Carry the old session's durable Autopilot run over before you release it, or leave it behind on purpose.**" "$tk" | head -1 | cut -d: -f1)"
+  at_release="$(grep -nF '**Whichever route you took, release the old session before its remaining work' "$tk" | head -1 | cut -d: -f1)"
+  para=""
+  if [ -n "$at_start" ] && [ -n "$at_chips" ] && [ -n "$at_run" ] && [ -n "$at_release" ] \
+    && [ "$at_start" -lt "$at_chips" ] && [ "$at_chips" -lt "$at_run" ] && [ "$at_run" -lt "$at_release" ]; then
+    para="$(sed -n "${at_release}p" "$tk")"
+  else
+    bad="$bad step-order=$at_start/$at_chips/$at_run/$at_release"
+  fi
+  for n in "The release is the takeover's last step, not the work's" \
+    'before you edit, test, commit or push anything of the remaining work' \
+    "The brief points at it when it says of a linked session still to be continued that it shared its parent's checkout" \
+    'The dry run states it for each session it names in a `would also end the keep anchor of session …, which is not running` line, whichever session you continue' \
+    "Release then only once each such session's continuation reports that it carried its work over, or the user has said that its work is carried over or has decided to leave it behind" \
+    'in one line that names each session the release waits for' \
+    'A dry run that answers `BLOCKED` prints no such line, whatever blocks it, and an old session that is `BUSY`, or registered with a queue it could not measure, blocks every dry run without `--force`, the one of the plan pass included' \
+    'So never apply on a `BLOCKED` answer: once its other blockers are resolved, run the dry run again without `--apply`, with `--force` when the old session being busy or its queue being unmeasured is what still blocks it' \
+    '`--apply` follows only a dry run that answered `RELEASABLE` or `READY`, with `--force` where that dry run took it' \
+    'A later dry run that answers `READY` ends the hold' \
+    'The plan confirmation of step 1 carried the blockers the dry run named' \
+    'say so in one line and re-run with `--force`, the dry run first as described above' \
+    'costs no question of its own either' \
+    'Tell the user at once, in their own language and in a line of its own before the remaining work starts' \
+    'say it again in the closing message of that turn' \
+    'While linked sessions of the old session are still to be continued, say instead that the archive of the old session waits for them' \
+    'Still to be continued is every linked session this takeover started, every one it keeps **later**, and every one it listed for a takeover by hand' \
+    'when its continuation has carried its work over, which its own `release` reports with its `ARCHIVE` line, or when the user has decided to leave it behind' \
+    'so for it a `release` that refuses for that process alone reports the same' \
+    'So does a release that it holds back as described above' \
+    'When a later turn of this session shows that the wait has ended for the last of them' \
+    'Archive or delete it yourself only when the user explicitly names that session'; do
+    case "$para" in (*"$n"*) ;; (*) bad="$bad [release:$n]" ;; esac
+  done
+  step0="$(grep -F '**Know what the takeover will persist before you run it.**' "$tk" | head -1)"
+  case "$step0" in
+    (*'`release <selector>` without `--apply`, a dry run that changes nothing and names what would block the release of step 4'*) ;;
+    (*) bad="$bad step0-dry-run-absent" ;;
+  esac
+  case "$step0" in
+    (*'before the yes you neither relay its `ARCHIVE` line nor follow its `--apply` or `--force` hint'*) ;;
+    (*) bad="$bad step0-dry-run-unbounded" ;;
+  esac
+  case "$step0" in
+    (*'each line that reads `would also end the keep anchor of session …, which is not running` names another session that worked in the old worktree, and the plan confirmation of step 1 names it'*) ;;
+    (*) bad="$bad step0-other-sessions-absent" ;;
+  esac
+  case "$step0" in
+    (*'Under `--json` the dry run prints no such line and lists the same sessions as the `anchors` entries whose `owner` is `ended-session` and whose `action` is `end`. It lists them under a `blocked` verdict too, where the text answer names none, so after a `BLOCKED` answer run the dry run again with `--json` and read them there for the plan confirmation'*) ;;
+    (*) bad="$bad step0-json-form-absent" ;;
+  esac
+  grep -qF 'leave it out of `release`, which refuses it' "$tk" || bad="$bad step0-receipt-sentence"
+  confirm="$(grep -F "It names the brief's linked sessions too" "$tk" | head -1)"
+  for n in 'It carries what the `release` dry run names as blocking as well' \
+    'so that the release of step 4 costs no question after the yes' \
+    'It names each session of a `would also end the keep anchor of session …, which is not running` line too' \
+    'or of the `anchors` entries step 0 names, although the dry run counts none of them among its blockers' \
+    "so the release of step 4 waits for it unless the user's answer says that its work is carried over or that it stays behind" \
+    'another live session inside the old worktree or a session of such a line as a cost of the move' \
+    'so what it names about that tree binds the create route' \
+    'as a cost of the move instead of a blocker to resolve' \
+    'is no such blocker: the hazard line already states it, and `--force` on the release answers it'; do
+    case "$confirm" in (*"$n"*) ;; (*) bad="$bad [confirm:$n]" ;; esac
+  done
+  grep -qiF 'release the old session last' "$tk" "$ho" && bad="$bad retired-last-is-back"
+  flow="$(awk '/^## 5\./{f=1;next} /^## /{f=0} f' "$ho")"
+  at_dry="$(printf '%s\n' "$flow" | grep -nF 'Run `release <selector> --all` without `--apply` as well' | head -1 | cut -d: -f1)"
+  at_wait="$(printf '%s\n' "$flow" | grep -nF "wait for the user's confirmation" | head -1 | cut -d: -f1)"
+  at_force="$(printf '%s\n' "$flow" | grep -nF '`takeover <selector> --all --force`' | head -1 | cut -d: -f1)"
+  at_rel="$(printf '%s\n' "$flow" | grep -nF '**Release the old session before its remaining work, whichever route you took**' | head -1 | cut -d: -f1)"
+  dry_line=""
+  wait_line=""
+  rel_line=""
+  if [ -n "$at_dry" ] && [ -n "$at_wait" ] && [ -n "$at_force" ] && [ -n "$at_rel" ] \
+    && [ "$at_dry" -lt "$at_wait" ] && [ "$at_wait" -lt "$at_force" ] && [ "$at_force" -lt "$at_rel" ]; then
+    dry_line="$(printf '%s\n' "$flow" | sed -n "${at_dry}p")"
+    wait_line="$(printf '%s\n' "$flow" | sed -n "${at_wait}p")"
+    rel_line="$(printf '%s\n' "$flow" | sed -n "${at_rel}p")"
+  else
+    bad="$bad handoff-order=$at_dry/$at_wait/$at_force/$at_rel"
+  fi
+  case "$dry_line" in
+    (*'before the confirmation you neither relay its `ARCHIVE` line nor follow its `--apply` or `--force` hint'*) ;;
+    (*) bad="$bad handoff-dry-run-unbounded" ;;
+  esac
+  case "$dry_line" in
+    (*'and you keep each session it names in a `would also end the keep anchor of session …, which is not running` line for the confirmation'*) ;;
+    (*) bad="$bad handoff-dry-run-drops-other-sessions" ;;
+  esac
+  case "$dry_line" in
+    (*'after a `BLOCKED` answer, which prints no such line, its `--json` form lists them'*) ;;
+    (*) bad="$bad handoff-dry-run-lacks-json-form" ;;
+  esac
+  case "$wait_line" in
+    (*"each blocker the \`release\` dry run named that needs the user's decision, with what resolves it"*) ;;
+    (*) bad="$bad handoff-confirmation-lacks-blockers" ;;
+  esac
+  case "$wait_line" in
+    (*'together with each session step 3 kept from it, which the release waits for'*) ;;
+    (*) bad="$bad handoff-confirmation-lacks-other-sessions" ;;
+  esac
+  case "$wait_line" in
+    (*'binds the create route and is a cost to name on the move route'*) ;;
+    (*) bad="$bad handoff-confirmation-lacks-route" ;;
+  esac
+  for n in "it is the takeover's last step, not the work's" \
+    'Relay its `ARCHIVE` line to the user at once, before the remaining work starts' \
+    'While linked sessions of the old session are still to be continued, say instead that its archive waits for them' \
+    'Apply only after a dry run that answered `RELEASABLE` or `READY`: a `BLOCKED` answer, the one of step 3 included, prints no `would also end` line, so run `release <selector> --all` again without `--apply` first, with `--force` when the old session being busy or its queue being unmeasured is what still blocks it, and read that answer for those lines' \
+    "Hold the release itself back while one of them shared its parent's checkout, or while a dry run names another session whose keep anchor the release would also end"; do
+    case "$rel_line" in (*"$n"*) ;; (*) bad="$bad [handoff:$n]" ;; esac
+  done
+  linked="$(grep -F -- '- **Linked sessions**: can be archived with it.' "$ar" | head -1)"
+  for n in 'archiving a session also archives its side sessions that share its worktree or have finished' \
+    'not driven live' \
+    'while linked sessions of the old session are still to be continued, the old session is archived only once the wait of `references/takeover.md` step 4 has ended for each of them'; do
+    case "$linked" in (*"$n"*) ;; (*) bad="$bad [archive:$n]" ;; esac
+  done
+  grep -qF 'may reuse or reap that worktree again, so tell the user at once that the old session can be archived' "$ar" || bad="$bad archive-at-once-absent"
+  grep -qF 'That holds for the release that closes a takeover, never for the dry run of its plan pass' "$ar" || bad="$bad archive-plan-pass-unbounded"
+  row="$(grep -F '| `release <selector>` |' "$cm" | head -1)"
+  for n in "run before that session's remaining work is continued" \
+    'the plan pass of a takeover runs it to learn what would block the release' \
+    'before the plan is confirmed only its blockers and its `would also end` lines count, which the plan confirmation names' \
+    '(re-run with `--force`, the dry run first, as on `takeover`' \
+    'its `ARCHIVE` line is not relayed and its `--apply` and `--force` hints are not followed' \
+    'A dry run names each such other session in a line that reads `would also end the keep anchor of session …, which is not running`' \
+    'a `BLOCKED` one prints none, and under `--json` no such line is printed: there the same sessions are the `anchors` entries whose `owner` is `ended-session` and whose `action` is `end`, under a `blocked` verdict too' \
+    '`release` does not wait for those sessions itself: `--apply` ends their anchors at once, so run it only after a dry run that answered `RELEASABLE` or `READY`, and only once the work of each session so named is carried over or the user leaves it behind' \
+    'Relay all of it to the user after the release that closes the takeover' \
+    'say instead that its archive waits for them'; do
+    case "$row" in (*"$n"*) ;; (*) bad="$bad [commands:$n]" ;; esac
+  done
+  code="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$tr")"
+  [ "$(printf '%s\n' "$code" | grep -cF "  'BEFORE THE REMAINING WORK, whichever route you took: once your own worktree holds everything you still need from the old one,'")" = "1" ] || bad="$bad trail-lead"
+  for n in 'which is right after the carry-over or the move where one applies' \
+    'nothing it checks waits for the work you continue' \
+    'says that the old session can now be archived or removed: tell the user at once' \
+    'While linked sessions of the old session are still to be continued, say instead that' \
+    'its archive waits until each has carried its work over, which its own release reports, or the user leaves it behind' \
+    'Hold this release back while one of them shared this worktree, or while its dry run' \
+    'says that it would also end the keep anchor of another session, until the work of that session is carried over or the user leaves it behind'; do
+    printf '%s\n' "$code" | grep -qF -- "$n" || bad="$bad [trail:$n]"
+  done
+  printf '%s\n' "$code" | grep -qxF -- "    const alsoEnd = otherNotes('would also end', null);" || bad="$bad trail-dry-run-note-call"
+  printf '%s\n' "$code" | grep -qF -- '${verb} the keep anchor of session ${sessionTag(a.sessionId)}, which is not running`' || bad="$bad trail-dry-run-note-text"
+  { printf '%s\n' "$code" | grep -qxF -- '      ...alsoEnd,' && printf '%s\n' "$code" | grep -qxF -- '      releasableHint(pad, alsoEnd, opts.force),'; } || bad="$bad trail-dry-run-hint-call"
+  printf '%s\n' "$code" | grep -qxF -- "  const apply = force ? '--apply --force' : '--apply';" || bad="$bad trail-dry-run-hint-apply"
+  printf '%s\n' "$code" | grep -qxF -- '  return alsoEnd.length > 0' || bad="$bad trail-dry-run-hold-condition"
+  printf '%s\n' "$code" | grep -qxF -- '    ? `${pad}Hold the release until the work of each session whose keep anchor it would also end is carried over or the user leaves it behind, and only then run release again with ${apply}. It then tells you that the old session can be archived or removed.`' || bad="$bad trail-dry-run-hold-hint"
+  printf '%s\n' "$code" | grep -qxF -- '    : `${pad}Run release again with ${apply}. It then tells you that the old session can be archived or removed.`;' || bad="$bad trail-dry-run-plain-hint"
+  printf '%s\n' "$code" | grep -qF -- "known ? (known.live ? 'live-session' : 'ended-session') : 'unattributed';" || bad="$bad trail-json-anchor-owner"
+  printf '%s\n' "$code" | grep -qF -- "anchors.push({ key: entry.key, owner, sessionId: ownerId, state: 'live', lastSeenAt: new Date(entry.record.lastSeenAt).toISOString(), action: ends ? 'end' : 'keep' });" || bad="$bad trail-json-anchor-entry"
+  printf '%s\n' "$code" | grep -qxF -- '    anchors,' || bad="$bad trail-json-anchor-key"
+  [ "$(printf '%s\n' "$code" | grep -cF -- 'Say so to the user in one line and run release again with --force, first without --apply: their request to release, or the takeover they confirmed, is the go.')" = "2" ] || bad="$bad trail-blocker-dry-run-first"
+  printf '%s\n' "$code" | grep -qF "'LAST, whichever route you took" && bad="$bad trail-retired-lead-is-back"
+  printf '%s' "$bad"
+}
+T41_BAD="$(release_timing_sites "$REF_TAKEOVER" "$REF_HANDOFF" "$REF_ARCHIVE" "$REF_COMMANDS" "$TRAIL_MJS")"
+[ -z "$T41_BAD" ] \
+  && check "T41 [hub] the takeover reference releases the old session after the linked sessions, the chips and the Autopilot hand-over and before its remaining work, its plan pass runs the release dry run and the plan confirmation carries the blockers, the archive is reported at once with the wait for linked sessions, the release is held back for every session the brief or the dry run names as sharing the old worktree and applied only after a dry run that answered RELEASABLE or READY, and flow 5, the archive reference, the release row and the script's release step follow and quote the dry-run line and the --json anchor entry as the script writes them, and the script's releasable dry run holds its --apply hint for each session it names that way and keeps its plain hint otherwise" PASS \
+  || check "T41 [hub] release timing:$T41_BAD" FAIL
+T41_BAD="$(release_timing_sites "$PLM_REF_TAKEOVER" "$PLM_SKILL_DIR/references/handoff.md" "$PLM_SKILL_DIR/references/archive.md" "$PLM_REF_COMMANDS" "$PLM_TRAIL_MJS")"
+[ -z "$T41_BAD" ] \
+  && check "T41 [plm] PLM's frozen copy carries the same release timing and the same hold in its takeover, handoff, archive and command references, in its script's release step and in its releasable dry-run hint" PASS \
+  || check "T41 [plm] release timing:$T41_BAD" FAIL
+T41_SANDBOX="$(mktemp -d -t session-trail-t41-XXXXXX)"
+for spec in \
+  "heading|step-order=|a release paragraph that calls the release the last step again" \
+  "order|step-order=|a release paragraph moved ahead of the chips" \
+  "confirm|[confirm:|a plan confirmation without the blockers of the dry run" \
+  "bound|step0-dry-run-unbounded|a step 0 that lets the dry run of the plan pass be relayed or followed" \
+  "narrow|[release:While linked sessions|a release paragraph whose archive wait covers only started sessions" \
+  "shared|[release:so for it|a release paragraph without the shared-checkout end of the wait" \
+  "advice|[trail:While linked sessions|a script whose release step lacks the archive wait" \
+  "trail|trail-lead|a script whose release step opens with the retired lead" \
+  "others|[release:The dry run states it|a release paragraph whose hold covers only the linked sessions the brief names" \
+  "advice-others|[trail:says that it would also end|a script whose release step holds the release for a shared worktree alone" \
+  "note-call|trail-dry-run-note-call|a script whose dry run announces the other sessions in other words" \
+  "note-text|trail-dry-run-note-text|a script whose dry run describes the other sessions in other words" \
+  "last-takeover|=retired-last-is-back|a takeover reference that says the retired wording beside the current heading" \
+  "last-handoff|=retired-last-is-back|a handoff reference that says the retired wording" \
+  "lead-back|=trail-retired-lead-is-back|a script whose release step carries the retired lead beside the current one" \
+  "forced|[release:So never apply|a release paragraph that repeats a blocked dry run without the force the busy old session needs" \
+  "apply-after|[release:\`--apply\` follows only|a release paragraph that lets the release be applied on a blocked dry run" \
+  "json|=step0-json-form-absent|a step 0 that names the other sessions by their text line alone" \
+  "handoff-forced|[handoff:Apply only after|a flow 5 that lets the release be applied on a blocked dry run" \
+  "blocker-text|=trail-blocker-dry-run-first|a script one of whose busy-source blockers asks for the forced run without the dry run first" \
+  "handoff-json|=handoff-dry-run-lacks-json-form|a flow 5 whose plan pass keeps the other sessions from the text line alone" \
+  "row-waits|[commands:\`release\` does not wait|a release row that says the script waits for the sessions its dry run names" \
+  "row-json|[commands:a \`BLOCKED\` one prints none|a release row that names the other sessions by their text line alone" \
+  "json-owner|=trail-json-anchor-owner|a script whose release payload names the owner of an ended session's anchor in other words" \
+  "json-entry|=trail-json-anchor-entry|a script whose release payload names the action of an anchor it would end in other words" \
+  "json-key|=trail-json-anchor-key|a script whose release payload carries the anchors under another key" \
+  "hold-hint|=trail-dry-run-hold-hint|a script whose releasable dry run rewords its hold hint" \
+  "hold-condition|=trail-dry-run-hold-condition|a script whose releasable dry run never picks its hold hint" \
+  "plain-hint|=trail-dry-run-plain-hint|a script whose releasable dry run rewords its plain hint" \
+  "hint-call|=trail-dry-run-hint-call|a script whose releasable dry run picks its hint without the would-also-end lines it printed" \
+  "hint-apply|=trail-dry-run-hint-apply|a script whose releasable hint drops the --force its dry run took"; do
+  mode="${spec%%|*}"; rest="${spec#*|}"; want="${rest%%|*}"; what="${rest#*|}"
+  T41_ERR="$(node -e '
+    const fs = require("fs");
+    const [takeover, trail, handoff, commands, mode, dir] = process.argv.slice(1);
+    let t = fs.readFileSync(takeover, "utf8");
+    let s = fs.readFileSync(trail, "utf8");
+    let h = fs.readFileSync(handoff, "utf8");
+    let c = fs.readFileSync(commands, "utf8");
+    const swap = (text, from, to) => { if (!text.includes(from)) throw new Error("anchor missing: " + from); return text.replace(from, to); };
+    if (mode === "heading") t = swap(t, "release the old session before its remaining work", "release the old session last");
+    if (mode === "order") {
+      const lines = t.split("\n");
+      const rel = lines.findIndex((l) => l.includes("**Whichever route you took, release the old session before its remaining work"));
+      const chips = lines.findIndex((l) => l.includes("open task chips over, always, before you release it.**"));
+      if (rel < 0 || chips < 0) throw new Error("anchor missing: step-4 paragraphs");
+      const [moved] = lines.splice(rel, 1);
+      lines.splice(chips, 0, moved);
+      t = lines.join("\n");
+    }
+    if (mode === "confirm") t = swap(t, "It carries what the `release` dry run names as blocking as well", "It carries nothing of the release");
+    if (mode === "bound") t = swap(t, "before the yes you neither relay its `ARCHIVE` line nor follow its `--apply` or `--force` hint", "before the yes you may relay it");
+    if (mode === "narrow") t = swap(t, "While linked sessions of the old session are still to be continued, say instead that the archive of the old session waits for them", "When this takeover started linked sessions, say instead that the archive of the old session waits for them");
+    if (mode === "shared") t = swap(t, "so for it a `release` that refuses for that process alone reports the same", "so nothing more is needed");
+    if (mode === "advice") s = swap(s, "While linked sessions of the old session are still to be continued, say instead that", "Say that");
+    if (mode === "trail") s = swap(s, "BEFORE THE REMAINING WORK, whichever route you took: once", "LAST, whichever route you took: once");
+    if (mode === "others") t = swap(t, "The dry run states it for each session it names in a", "The dry run can also name sessions in a");
+    if (mode === "advice-others") s = swap(s, "says that it would also end the keep anchor of another session, until the work of that session is carried over or the user leaves it behind. ", "");
+    if (mode === "note-call") s = swap(s, "otherNotes(\x27would also end\x27, null)", "otherNotes(\x27would end as well\x27, null)");
+    if (mode === "note-text") s = swap(s, "}, which is not running`", "}, which has ended`");
+    if (mode === "last-takeover") t += "\nAn earlier wording said: release the old session last.\n";
+    if (mode === "last-handoff") h += "\nAn earlier wording said: release the old session last.\n";
+    if (mode === "lead-back") s = swap(s, "const RELEASE_AFTER = [\n", "const RELEASE_AFTER = [\n  \x27LAST, whichever route you took: once your own worktree holds everything you still need from the old one,\x27,\n");
+    if (mode === "forced") t = swap(t, ", with `--force` when the old session being busy or its queue being unmeasured is what still blocks it, which the takeover the user confirmed covers, and read that answer for those lines", ", and read that answer for those lines");
+    if (mode === "apply-after") t = swap(t, "`--apply` follows only a dry run that answered `RELEASABLE` or `READY`, with `--force` where that dry run took it. ", "");
+    if (mode === "json") t = swap(t, "Under `--json` the dry run prints no such line and lists the same sessions as the `anchors` entries whose `owner` is `ended-session` and whose `action` is `end`. It lists them under a `blocked` verdict too, where the text answer names none, so after a `BLOCKED` answer run the dry run again with `--json` and read them there for the plan confirmation. ", "");
+    if (mode === "handoff-forced") h = swap(h, "Apply only after a dry run that answered `RELEASABLE` or `READY`: a `BLOCKED` answer, the one of step 3 included, prints no `would also end` line, so run `release <selector> --all` again without `--apply` first, with `--force` when the old session being busy or its queue being unmeasured is what still blocks it, and read that answer for those lines. ", "");
+    if (mode === "blocker-text") s = swap(s, "run release again with --force, first without --apply: their request", "run release again with --force: their request");
+    if (mode === "handoff-json") h = swap(h, "; after a `BLOCKED` answer, which prints no such line, its `--json` form lists them", "");
+    if (mode === "row-waits") c = swap(c, "`release` does not wait for those sessions itself: `--apply` ends their anchors at once, so run it only after", "`--apply` waits for each session so named, so run it only after");
+    if (mode === "row-json") c = swap(c, ", and under `--json` no such line is printed: there the same sessions are the `anchors` entries whose `owner` is `ended-session` and whose `action` is `end`, under a `blocked` verdict too", "");
+    if (mode === "json-owner") s = swap(s, "(known.live ? \x27live-session\x27 : \x27ended-session\x27)", "(known.live ? \x27live-session\x27 : \x27ended\x27)");
+    if (mode === "json-entry") s = swap(s, "action: ends ? \x27end\x27 : \x27keep\x27 });", "action: ends ? \x27retire\x27 : \x27keep\x27 });");
+    if (mode === "json-key") s = swap(s, "\n    anchors,\n", "\n    keepAnchors: anchors,\n");
+    if (mode === "hold-hint") s = swap(s, "? `${pad}Hold the release until the work of each session whose keep anchor it would also end", "? `${pad}Wait for the sessions named above");
+    if (mode === "hold-condition") s = swap(s, "\n  return alsoEnd.length > 0\n", "\n  return false\n");
+    if (mode === "plain-hint") s = swap(s, ": `${pad}Run release again with ${apply}", ": `${pad}Apply the release with ${apply}");
+    if (mode === "hint-call") s = swap(s, "releasableHint(pad, alsoEnd, opts.force)", "releasableHint(pad, [], opts.force)");
+    if (mode === "hint-apply") s = swap(s, "const apply = force ? \x27--apply --force\x27 : \x27--apply\x27;", "const apply = \x27--apply\x27;");
+    fs.writeFileSync(dir + "/takeover.md", t);
+    fs.writeFileSync(dir + "/trail.mjs", s);
+    fs.writeFileSync(dir + "/handoff.md", h);
+    fs.writeFileSync(dir + "/commands.md", c);
+  ' "$REF_TAKEOVER" "$TRAIL_MJS" "$REF_HANDOFF" "$REF_COMMANDS" "$mode" "$T41_SANDBOX" 2>&1)"
+  if [ -n "$T41_ERR" ]; then
+    check "T41-control $what could not be built ($T41_ERR)" FAIL
+    continue
+  fi
+  T41_OUT="$(release_timing_sites "$T41_SANDBOX/takeover.md" "$T41_SANDBOX/handoff.md" "$REF_ARCHIVE" "$T41_SANDBOX/commands.md" "$T41_SANDBOX/trail.mjs")"
+  case "$want" in
+    (=*)
+      [ "$T41_OUT" = " ${want#=}" ] \
+        && check "T41-control $what fails the release-timing check as ${want#=} and as nothing else" PASS \
+        || check "T41-control $what does not fail the release-timing check as ${want#=} alone: ${T41_OUT:-<it passes>}" FAIL
+      ;;
+    (*)
+      case "$T41_OUT" in
+        (*"$want"*) check "T41-control $what fails the release-timing check as $want" PASS ;;
+        (*) check "T41-control $what passes the release-timing check" FAIL ;;
+      esac
+      ;;
+  esac
+done
+rm -rf "$T41_SANDBOX"
+
+plan_pass_sites() {
+  local sk="$1" tk="$2" cm="$3" ds="$4" tr="$5" bad="" n line max runmax code body second card
+  local at_flags at_step1 at_one at_bound at_verdict at_plan at_edge
+  runmax="$(grep -E '^const PLAN_CARD_RUN_ID_MAX = [0-9]+;$' "$tr" | head -1 | sed -E 's/^const PLAN_CARD_RUN_ID_MAX = ([0-9]+);$/\1/')"
+  [ -n "$runmax" ] || bad="$bad run-id-bound-not-read"
+  max="$(grep -E '^const PLAN_CARD_MAX = [0-9]+;$' "$tr" | head -1 | sed -E 's/^const PLAN_CARD_MAX = ([0-9]+);$/\1/')"
+  max="$(node -e 'const n = Number(process.argv[1]); process.stdout.write(Number.isInteger(n) && n > 0 ? n.toLocaleString("en-US") : "")' "$max" 2>/dev/null)"
+  [ -n "$max" ] || bad="$bad bound-not-read"
+  line="$(grep -E '^3\. \*\*Take over\*\*' "$sk" | head -1)"
+  for n in 'in your first message read `references/takeover.md` and run the read-only plan pass beside it, `takeover <selector> --plan` and the dry run `release <selector>`, each as a call of its own' \
+    'before anything durable is written' \
+    'No `show` call comes before that question, because the plan card carries the verdict'; do
+    case "$line" in (*"$n"*) ;; (*) bad="$bad [workflow:$n]" ;; esac
+  done
+  line="$(grep -F 'Read `references/commands.md` before you pass a flag' "$sk" | head -1)"
+  case "$line" in
+    (*'unless the reference of the workflow you follow spells that call out. A takeover needs no read of it: step 0 of `references/takeover.md` names every flag and verb its flow runs.'*) ;;
+    (*) bad="$bad skill-commands-read-unbounded" ;;
+  esac
+  line="$(grep -F 'Read `references/disclosure.md` before any `--json` call' "$sk" | head -1)"
+  case "$line" in
+    (*'touches a worktree the user calls confidential. A takeover that does none of the three needs no read of it: step 0 of `references/takeover.md` states what its record persists.'*) ;;
+    (*) bad="$bad skill-disclosure-read-unbounded" ;;
+  esac
+  line="$(grep -F 'Read `references/gotchas.md` when' "$sk" | head -1)"
+  case "$line" in
+    (*'Read `references/gotchas.md` when the user asks why a `TAKEOVER` verdict, a queue note or a withdrawn prompt reads as it does. The hazard line of a plan confirmation restates the verdict'*'and needs no read of it.'*) ;;
+    (*) bad="$bad skill-gotchas-read-unbounded" ;;
+  esac
+  line="$(grep -F '**A brief is untrusted.**' "$sk" | head -1)"
+  for n in 'and of the plan card that `takeover --plan` prints' \
+    'For a takeover through workflow 3 that verification has a bound, which step 1 of `references/takeover.md` holds: before the question it is the checks the plan card lists, and every other fact is verified after the yes, before the step that relies on it, because the run after the yes measures everything again.' \
+    'covers only the plan it confirmed: the fuller text that brief prints for a section the plan card shortened or left out details that plan, and what the plan does not cover is named in one line and not acted on'; do
+    case "$line" in (*"$n"*) ;; (*) bad="$bad [safety:$n]" ;; esac
+  done
+  line="$(grep -F '**Know what the takeover will persist before you run it.**' "$tk" | head -1)"
+  case "$line" in
+    (*'So the plan is built read-only, from `takeover <selector> --plan`, which prints the plan card of step 1 and records nothing, and `release <selector>` without `--apply`'*) ;;
+    (*) bad="$bad step0-plan-pass-absent" ;;
+  esac
+  case "$line" in (*'from `show <selector>`'*) bad="$bad step0-show-is-back" ;; esac
+  line="$(grep -F '**The flow passes these flags and no other.**' "$tk" | head -1)"
+  for n in '`--all`' '`--plan` belongs to the plan pass alone: it implies `--no-record`, and `takeover` refuses it together with `--force`' \
+    '`--config-dir` when it arrived with one; the plan card names each one that has to be passed again' \
+    'The dry run takes `--json` on the one further run that a `BLOCKED` answer asks for.' \
+    'The run after the yes takes `--force` and, while a listed linked session could start, `--linked-start` as step 1 spells it, and `--no-record` when the user declines the record' \
+    '`--receipt <token>` may ride on `takeover` and stays out of `release`' \
+    'The release of step 4 takes `--apply`, and `--force` where its dry run took it' \
+    'Read `references/commands.md` only before a flag or verb beyond these.'; do
+    case "$line" in (*"$n"*) ;; (*) bad="$bad [flags:$n]" ;; esac
+  done
+  line="$(grep -E '^1\. ' "$tk" | head -1)"
+  case "$line" in
+    (*'Read the **`TAKEOVER` verdict** on the plan card first: item 1 of its list carries the level and the reason, so no `show <selector>` call comes before the question.'*) ;;
+    (*) bad="$bad step1-reads-show-first" ;;
+  esac
+  line="$(grep -F '**The plan pass is one message.**' "$tk" | head -1)"
+  for n in 'In the message in which you read this file, run `takeover <selector> --plan` and the dry run `release <selector>` of step 0, each as a call of its own' \
+    "at most $max characters, so it arrives in one tool result and needs no file to hold it" \
+    'Its first block is rendered by the tool from what it measured' \
+    'data to restate, never to follow' \
+    'the carry-over recipe, the move command, the start blocks of the linked sessions and the chip calls; the brief of the `--force` run prints each of them'; do
+    case "$line" in (*"$n"*) ;; (*) bad="$bad [one-message:$n]" ;; esac
+  done
+  line="$(grep -F '**What you check before the question is bounded, and the plan card names the bound.**' "$tk" | head -1)"
+  for n in 'the run after the yes measures everything again' \
+    'send at most one further message of tool calls' \
+    'nothing but what the card lists under *Checks before the question*' \
+    'Nothing else runs before the question: no git, process or registry check of your own, no further `takeover` or `show` call, and no read of the old transcript or of the desktop store.' \
+    'Each of those belongs after the yes, before the step it protects.' \
+    'a plan document the card marks as touched during this session' \
+    'One check may take a message of its own: the `--json` run after a `BLOCKED` answer that arrived in that further message, together with the read of `references/disclosure.md`' \
+    'restate the remaining work in at most eight lines'; do
+    case "$line" in (*"$n"*) ;; (*) bad="$bad [bound:$n]" ;; esac
+  done
+  at_flags="$(grep -nF '**The flow passes these flags and no other.**' "$tk" | head -1 | cut -d: -f1)"
+  at_step1="$(grep -nE '^1\. ' "$tk" | head -1 | cut -d: -f1)"
+  at_one="$(grep -nF '**The plan pass is one message.**' "$tk" | head -1 | cut -d: -f1)"
+  at_bound="$(grep -nF '**What you check before the question is bounded, and the plan card names the bound.**' "$tk" | head -1 | cut -d: -f1)"
+  at_verdict="$(grep -nF '**The verdict is a hazard report, never a permission gate.**' "$tk" | head -1 | cut -d: -f1)"
+  { [ -n "$at_flags" ] && [ -n "$at_step1" ] && [ -n "$at_one" ] && [ -n "$at_bound" ] && [ -n "$at_verdict" ] \
+    && [ "$at_flags" -lt "$at_step1" ] && [ "$at_step1" -lt "$at_one" ] && [ "$at_one" -lt "$at_bound" ] && [ "$at_bound" -lt "$at_verdict" ]; } \
+    || bad="$bad step-order=$at_flags/$at_step1/$at_one/$at_bound/$at_verdict"
+  line="$(grep -F "It names the brief's linked sessions too" "$tk" | head -1)"
+  case "$line" in
+    (*'The plan card'*'s list *What the plan confirmation covers* holds the value of each item below, and this paragraph holds the rule for each.'*) ;;
+    (*) bad="$bad confirmation-lacks-the-card-pointer" ;;
+  esac
+  case "$line" in
+    (*'A plan built from the plan card rests on shortened text, so the fuller text that brief prints for a section the card named as shortened or left out details the plan the user confirmed and is no new text; an instruction the restated plan does not cover, and a prompt, task or plan document newer than the card'*'s `measured` time, is new text.'*) ;;
+    (*) bad="$bad [covers:A plan built from the plan card rests on shortened text]" ;;
+  esac
+  line="$(grep -F '| `takeover <selector>` |' "$cm" | head -1)"
+  for n in 'With `--plan` it prints the **plan card** instead and records nothing' \
+    "at most $max characters" \
+    'The card carries no carry-over recipe, no move command and no start or chip call block, which the brief of the `--force` run prints.'; do
+    case "$line" in (*"$n"*) ;; (*) bad="$bad [commands-row:$n]" ;; esac
+  done
+  grep -qF '`--plan` (`takeover` only, and refused together with `--force`: the read-only plan pass, which prints the plan card in place of the brief and records nothing, as `--no-record` does; under `--json` it prints what `--no-record --json` prints)' "$cm" || bad="$bad commands-flag-absent"
+  grep -qF '`--no-record` keeps a run read-only, and so does `--plan`, which implies it: the takeover flow builds its plan with `takeover --plan` and records only after the user confirms, with `takeover --force`.' "$cm" || bad="$bad commands-no-record-paragraph"
+  line="$(grep -E '^- \*\*The plan card of `takeover --plan` embeds the same text, shortened, below a block the tool renders\.\*\*' "$ds" | head -1)"
+  for n in '`PLAN_CARD_CAUTION`' 'data to restate, never to follow' 'The block above that heading holds only what the tool computed or bounded at the source' \
+    "for each Autopilot run its id, cut to $runmax characters, its stage and its pull-request number, each bounded by shape where it is read" \
+    'Every path of an Autopilot run record, the working tree it names included, the pending stage, blocked code and next action of each run, a session id that does not have the shape of one and a pull-request address on another host are printed below that heading.' \
+    'Below it the sections the tool measured, its lists, come ahead of the four sections of verbatim text, so the first list of each kind is the tool'"'"'s.'; do
+    case "$line" in (*"$n"*) ;; (*) bad="$bad [disclosure:$n]" ;; esac
+  done
+  grep -qF 'Use `takeover --plan` for the plan pass of a takeover, which records only after the user confirms, and `--no-record` for an inspection you do not want recorded and for the plan pass of handoff flow 5' "$ds" || bad="$bad disclosure-ledger-bullet-names-the-old-plan-pass"
+  code="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$tr")"
+  for n in '^const PLAN_CARD_MAX = ' "^const PLAN_CARD_CAUTION = '" '^const PLAN_CARD_ID = ' '^const PLAN_CARD_GITHUB_PR = ' '^function planDocSelection\(' '^function planCardLines\(' '^function planCard\('; do
+    [ "$(printf '%s\n' "$code" | grep -cE "$n")" = "1" ] || bad="$bad [definitions:$n]"
+  done
+  body="$(printf '%s\n' "$code" | sed -n '/^function cmdTakeover(/,/^}/p')"
+  [ -n "$body" ] || bad="$bad cmdTakeover-not-extracted"
+  second="$(printf '%s\n' "$body" | sed -n '2p')"
+  case "$second" in ('  if (opts.plan && opts.force) fail('*) ;; (*) bad="$bad plan-force-refusal-is-not-first" ;; esac
+  [ "$(printf '%s\n' "$body" | sed -n '3p')" = '  if (opts.plan) opts.record = false;' ] || bad="$bad plan-pass-keeps-the-record-on"
+  at_plan="$(printf '%s\n' "$body" | grep -nF 'return print(planCard(' | head -1 | cut -d: -f1)"
+  at_edge="$(printf '%s\n' "$body" | grep -nF 'recordTakeoverEdge(' | head -1 | cut -d: -f1)"
+  { [ -n "$at_plan" ] && [ -n "$at_edge" ] && [ "$at_plan" -lt "$at_edge" ]; } || bad="$bad plan-return-not-ahead-of-the-edge-write=$at_plan/$at_edge"
+  [ "$(printf '%s\n' "$body" | grep -cF 'planCard(')" = "1" ] || bad="$bad plan-card-calls=$(printf '%s\n' "$body" | grep -cF 'planCard(')"
+  printf '%s\n' "$body" | grep -qxF '  const textPlan = opts.plan && !opts.json;' || bad="$bad text-plan-definition"
+  printf '%s\n' "$body" | grep -qxF '  if (textPlan) {' || bad="$bad plan-return-guard"
+  printf '%s\n' "$body" | grep -qxF '  const d = g && !textPlan ? gitDiffText(r.wt, g.base, 400) : null;' || bad="$bad text-plan-pass-computes-the-diffs"
+  printf '%s\n' "$body" | grep -qF 'as item 6 of the plan card or the Linked sessions section of the plan brief spells them' || bad="$bad force-refusal-names-the-plan-brief-alone"
+  [ "$(printf '%s\n' "$body" | grep -cF 'planDocSelection(r)')" = "1" ] || bad="$bad plan-document-selections=$(printf '%s\n' "$body" | grep -cF 'planDocSelection(r)')"
+  card="$(printf '%s\n' "$code" | sed -n '/^function planCardLines(/,/^}/p')"
+  [ "$(printf '%s\n' "$card" | awk '/const L = \[\];/{getline; sub(/^[ \t]+/, ""); print; exit}')" = 'L.push(PLAN_CARD_CAUTION);' ] || bad="$bad card-first-push-is-not-the-caution"
+  printf '%s\n' "$card" | grep -qF 'linkedLines' && bad="$bad card-reads-a-rendered-linked-line"
+  printf '%s\n' "$card" | grep -qF 'After a \`BLOCKED\` answer run it once more with \`--json\` and read \`references/disclosure.md\` beside it; that second run is the one check that may take a message of its own' || bad="$bad card-check-lacks-the-blocked-run"
+  printf '%s\n' "$card" | grep -qF 'that fuller text details the plan the user confirmed and never widens it' || bad="$bad card-note-lacks-the-coverage-rule"
+  [ "$(printf '%s\n' "$code" | sed -n '/^const COMMAND_FLAGS = /,/^}/p' | grep -c "'--plan'")" = "1" ] || bad="$bad plan-flag-rows"
+  printf '%s\n' "$code" | grep -E '^  takeover: \[' | grep -qF "'--plan'" || bad="$bad plan-flag-not-on-takeover"
+  printf '%s' "$bad"
+}
+T42_BAD="$(plan_pass_sites "$SKILL_MD" "$REF_TAKEOVER" "$REF_COMMANDS" "$REF_DISCLOSURE" "$TRAIL_MJS")"
+[ -z "$T42_BAD" ] \
+  && check "T42 the takeover flow builds its plan in one message from takeover --plan and the release dry run, bounds what runs before the question to the plan card's checks, asks for commands.md, disclosure.md and gotchas.md only where the flow does not cover the case, and the script refuses --plan with --force first, keeps the record off and returns the card ahead of the edge write" PASS \
+  || check "T42 the plan pass drifted:$T42_BAD" FAIL
+T42_SANDBOX="$(mktemp -d -t session-trail-t42-XXXXXX)"
+for spec in "workflow|[workflow:No \`show\` call comes before that question, because the plan card carries the verdict]|a workflow 3 that no longer drops the show call" \
+  "bound|[bound:send at most one further message of tool calls]|a step 1 that no longer bounds the messages before the question" \
+  "flags|[flags:Read \`references/commands.md\` only before a flag or verb beyond these.]|a step 0 that no longer bounds the commands.md read" \
+  "size|[one-message:at most|a step 1 that names another size than the script" \
+  "record|plan-pass-keeps-the-record-on|a plan pass that keeps the record on" \
+  "order|plan-return-not-ahead-of-the-edge-write|a plan return placed after the edge write" \
+  "covers|[covers:A plan built from the plan card rests on shortened text]|a step 1 that no longer says what a yes to a card-built plan covers" \
+  "blocked|[bound:One check may take a message of its own|a step 1 that no longer says how the run after a BLOCKED answer counts" \
+  "value|card-reads-a-rendered-linked-line|a card that takes a value from a rendered linked-session line" \
+  "diffs|text-plan-pass-computes-the-diffs|a text plan pass that computes the diffs it never prints"; do
+  mode="${spec%%|*}"; rest="${spec#*|}"; want="${rest%%|*}"; what="${rest#*|}"
+  T42_ERR="$(node -e '
+    const fs = require("fs");
+    const [skill, takeover, trail, mode, dir] = process.argv.slice(1);
+    let k = fs.readFileSync(skill, "utf8");
+    let t = fs.readFileSync(takeover, "utf8");
+    let s = fs.readFileSync(trail, "utf8");
+    const swap = (text, from, to) => { if (!text.includes(from)) throw new Error("anchor missing: " + from); return text.split(from).join(to); };
+    if (mode === "workflow") k = swap(k, " No `show` call comes before that question, because the plan card carries the verdict.", "");
+    if (mode === "bound") t = swap(t, "send at most one further message of tool calls", "send further messages of tool calls");
+    if (mode === "flags") t = swap(t, " Read `references/commands.md` only before a flag or verb beyond these.", "");
+    if (mode === "size") t = swap(t, "at most 24,000 characters, so it arrives", "at most 30,000 characters, so it arrives");
+    if (mode === "record") s = swap(s, "  if (opts.plan) opts.record = false;\n", "");
+    if (mode === "covers") t = swap(t, "details the plan the user confirmed and is no new text", "is new text as well");
+    if (mode === "blocked") t = swap(t, " One check may take a message of its own: the `--json` run after a `BLOCKED` answer that arrived in that further message, together with the read of `references/disclosure.md` that `SKILL.md` asks for before a `--json` call.", "");
+    if (mode === "value") s = swap(s, "function planCardLines(card, caps) {\n", "function planCardLines(card, caps) {\n  const planted = card.linkedLines;\n");
+    if (mode === "diffs") s = swap(s, "  const d = g && !textPlan ? gitDiffText(r.wt, g.base, 400) : null;\n", "  const d = g ? gitDiffText(r.wt, g.base, 400) : null;\n");
+    if (mode === "order") {
+      const open = "  if (textPlan) {\n";
+      const edge = "  const lineage = recordTakeoverEdge(opts, r);\n";
+      const from = s.indexOf(open);
+      const to = s.indexOf("\n  }\n", from);
+      if (from < 0 || to < 0 || !s.includes(edge)) throw new Error("anchor missing: the plan return or the edge write");
+      const block = s.slice(from, to + 5);
+      s = s.slice(0, from) + s.slice(to + 5);
+      s = swap(s, edge, edge + block);
+    }
+    fs.writeFileSync(dir + "/SKILL.md", k);
+    fs.writeFileSync(dir + "/takeover.md", t);
+    fs.writeFileSync(dir + "/trail.mjs", s);
+  ' "$SKILL_MD" "$REF_TAKEOVER" "$TRAIL_MJS" "$mode" "$T42_SANDBOX" 2>&1)"
+  if [ -n "$T42_ERR" ]; then
+    check "T42-control $what could not be built ($T42_ERR)" FAIL
+    continue
+  fi
+  T42_OUT="$(plan_pass_sites "$T42_SANDBOX/SKILL.md" "$T42_SANDBOX/takeover.md" "$REF_COMMANDS" "$REF_DISCLOSURE" "$T42_SANDBOX/trail.mjs")"
+  case "$T42_OUT" in
+    (*"$want"*) check "T42-control $what fails the plan-pass check as $want" PASS ;;
+    (*) check "T42-control $what passes the plan-pass check: ${T42_OUT:-<no finding>}" FAIL ;;
+  esac
+done
+rm -rf "$T42_SANDBOX"
 
 echo "----"
 echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"

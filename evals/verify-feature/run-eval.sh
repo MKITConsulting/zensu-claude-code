@@ -6,6 +6,7 @@ unset ZENSU_WRAPPER_TEST_MODE ZENSU_WRAPPER_TEST_KILL_WATCHER
 for ambient in $(compgen -e); do
   case "$ambient" in
     PLAYWRIGHT_MCP_*|PWTEST_*) unset "$ambient" ;;
+    PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK) unset "$ambient" ;;
   esac
 done
 
@@ -17,6 +18,11 @@ fi
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$EVAL_DIR/../.." && pwd)"
 OWNED_PROCESS="$PLUGIN_DIR/scripts/owned-process.js"
+PROMPTFOO="${VERIFY_FEATURE_PROMPTFOO:-$PLUGIN_DIR/node_modules/.bin/promptfoo}"
+case "$PROMPTFOO" in
+  (/*) ;;
+  (*) echo "verify-feature eval: VERIFY_FEATURE_PROMPTFOO must be an absolute path" >&2; exit 64 ;;
+esac
 PROMPTFOO_STATE="$(mktemp -d -t zensu-verify-feature-promptfoo-XXXXXX)"
 RESERVATION_PID=""
 PROMPTFOO_PID=""
@@ -42,7 +48,11 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 
-for cli in promptfoo claude jq node git curl playwright-cli; do
+if [ ! -x "$PROMPTFOO" ]; then
+  echo "verify-feature eval: promptfoo is not installed at $PROMPTFOO; run npm ci in $PLUGIN_DIR to install the version package.json pins" >&2
+  exit 127
+fi
+for cli in claude jq node git curl playwright-cli; do
   if ! command -v "$cli" >/dev/null 2>&1; then
     echo "verify-feature eval: required CLI '$cli' is not on PATH" >&2
     exit 127
@@ -69,7 +79,7 @@ export ZENSU_VERIFY_FIXTURE_PORT="$(sed -n '1p' "$PORT_FILE")"
 export ZENSU_VERIFY_NAVIGATION_POLICY_V1="$(printf '{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:%s","evidenceMode":"declared-safe"}]}' "$ZENSU_VERIFY_FIXTURE_PORT")"
 
 cd "$EVAL_DIR"
-node "$OWNED_PROCESS" promptfoo eval \
+node "$OWNED_PROCESS" "$PROMPTFOO" eval \
   --config promptfooconfig.yaml \
   --no-cache \
   --no-share \

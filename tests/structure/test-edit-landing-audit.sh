@@ -806,10 +806,13 @@ check "S3 the audit declares it runs in both modes" "$(verdict $?)"
 for marker in 'EDIT NOT LANDED' 'PENDING PREDICATE' 'UNVERIFIED' \
               'UNVERIFIED (foreign root)' 'UNVERIFIED (no work tree)' 'EDIT LANDING AUDIT FAULT' \
               'UNVERIFIED (pattern claim)' 'UNVERIFIED (malformed claim)' 'CLAIM CORRECTED —' \
-              'CLAIM RETRACTED —' 'CLAIM CORRECTION IGNORED —' 'EDIT LANDING AUDIT ROOT —'; do
+              'CLAIM RETRACTED —' 'CLAIM CORRECTION IGNORED —' 'EDIT LANDING AUDIT ROOT —' \
+              'EDIT SUPERSEDED —'; do
   printf '%s' "$BLOCK" | grep -qF "$marker"
   check "S4 the skill tells the model how to react to $marker" "$(verdict $?)"
 done
+printf '%s' "$BLOCK" | grep -qF '"supersededBy":'
+check "S4a the skill names the supersede proof field for a claim a later claimed step replaced" "$(verdict $?)"
 printf '%s' "$BLOCK" | grep -qF 'CHAIN-END SUMMARY'
 check "S5 a non-clean verdict is carried into the CHAIN-END SUMMARY" "$(verdict $?)"
 printf '%s' "$BLOCK" | grep -qF 'Do NOT auto-fix'
@@ -1655,6 +1658,8 @@ printf '%s\n' "$OUT_CP1" | grep -v '^EDIT LANDED' | while IFS= read -r cp_line; 
   printf '[10:01:00] %s\n' "$cp_line"
 done >> "$MR/copy.log"
 printf '%s\n' "[10:01:01] UNVERIFIED — a WIRED entry names no files: list and cannot be graded: [10:00:03] R1-S13 WIRED — PASS (1 attempts)" >> "$MR/copy.log"
+printf '%s\n' "[10:01:02] EDIT SUPERSEDED — S1: src.txt, replaced by R1-F9" \
+  "[10:01:03] EDIT SUPERSEDED — S1 IMPL completed — files: src/copied-verdict.txt, replaced by R1-F9" >> "$MR/copy.log"
 OUT_CP2="$(run_audit --log "$MR/copy.log" --project "$MR/anchor" --receipt -)"
 { [ "$(wc -l < "$MR/copy.log")" -gt "$CP_LINES_BEFORE" ] \
   && grep -F '[10:01:00] UNVERIFIED' "$MR/copy.log" | grep -qF 'WIRED'; }
@@ -1665,6 +1670,9 @@ CP_TALLY2="$(printf '%s\n' "$OUT_CP2" | grep '^EDIT LANDING AUDIT' || true)"
 check "X29 copied verdict lines are not claims: the re-run tallies are unchanged" "$(verdict $?)"
 [ "$(printf '%s\n' "$OUT_CP2" | grep -cF 'a WIRED entry at run-log line')" -eq 1 ]
 check "X29a the re-run reports only the original bare WIRED entry, never a copy of its verdict" "$(verdict $?)"
+{ grep -qF 'EDIT SUPERSEDED — S1 IMPL completed — files: src/copied-verdict.txt' "$MR/copy.log" \
+  && ! printf '%s\n' "$OUT_CP2" | grep -qF 'copied-verdict.txt'; }
+check "X29b a copied EDIT SUPERSEDED verdict line is not a claim, even when its step spells a claim marker" "$(verdict $?)"
 cat > "$MR/prose.log" <<'EOF'
 [10:00:01] S1 IMPL completed — files: src.txt
 [10:00:02] PRECONDITION DRIFT — node: used by S1 but not named in any IMPL or WIRED entry

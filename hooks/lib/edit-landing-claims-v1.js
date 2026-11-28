@@ -16,6 +16,7 @@ const VERIFIED_MARKER = "WIRED (verified, no change)";
 const VERDICT_HEADS = Object.freeze([
   "EDIT LANDED ",
   "EDIT NOT LANDED ",
+  "EDIT SUPERSEDED ",
   "EDIT LANDING AUDIT ",
   "PENDING PREDICATE ",
   "UNVERIFIED ",
