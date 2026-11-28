@@ -143,10 +143,11 @@ choice > `--tdd-mode` caller default > config > vanilla, plus the fail-safe that
 unreadable marker forces nothing), the two preconditions `--tdd-complete` refuses on —
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
 anchors on — the `build` route a Claude Desktop linked session inherits from its parent, the
-brief note on its first prompt and the `/zensu:doctor` `linked session:` row that shows a
-desktop-store miss (`linked-session-route`, against a fake desktop store and real git
-worktrees; it also holds every suite that runs a lineage reader to unset the desktop identity
-variables), and the 5-agent review fan-out wiring in `skills/build/references/review-chain.md`.
+brief note on its first prompt, the `/zensu:doctor` `linked session:` row that shows a
+desktop-store miss and the reminder's time budget (`linked-session-route`, against a fake desktop
+store and real git worktrees; it also holds every suite that runs a lineage reader to unset the
+desktop identity variables), and the 5-agent review fan-out wiring in
+`skills/build/references/review-chain.md`.
 
 ### Review chain & findings (31)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
