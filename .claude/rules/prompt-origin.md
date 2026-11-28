@@ -188,6 +188,39 @@ the router to treating a side-session brief as typed and to silence on a cross-s
 suite replaces that command with a fixed placeholder before it measures; without that, the same
 tree measured 5,699 and 5,775 characters at two install depths.
 
+## Process budget
+
+Under a fan-out burst every `node` start costs seconds: at a load average of 90 to 120 on 16 cores
+one took 1.6 to 2.9 s (`.claude/rules/session-delivery-route.md` §"The reminder's time budget").
+Measured with a classifying `node` shim on a linked session's first prompt, macOS bash 3.2, with no
+config file naming a key the hook reads:
+
+| Hook | `node` children | Root verifications | Bound | Pin |
+|---|---|---|---|---|
+| `user-prompt-tdd-reminder.sh` | at most 9 | 1 | prompt deadline 20 s, registration 30 s | `L59` in `tests/structure/test-linked-session-route.sh` |
+| `user-prompt-zen-mode.sh` | 4: the principal check, the session bind, the root verification and the merged child | 1 | prompt deadline 20 s, registration 30 s | `Z118` and `Z119` in `tests/structure/test-zen-mode.sh` |
+| `user-prompt-intent-router.sh` | 1, the principal check that also reads the prompt; a keyword prompt adds the child that derives the session key | 0 | the host default, 30 s | `C26` in `tests/structure/test-intent-router-hook.sh` |
+
+Before these cuts zen-mode started 5, the fifth being the default rung's config read
+(`zensu_zen_mode_default_on` now takes the shell pre-check, `.claude/rules/hook-process-budget.md`),
+and the router 2, or 4 on a keyword prompt: separate prompt and `session_id` reads and a
+`session-key` child. In the transcripts last written during the 2026-11-20 burst the host cancelled
+zen-mode 7 times at its then 20 s limit, recording 20.5 to 34.0 s, the reminder 15 times at 30 s,
+worktree-keep 23 times at 10 s, and the router never.
+
+- Zen-mode verifies the root once and does not memoize it: no second verification follows, so the
+  memo of `.claude/rules/stop-latency.md` would save nothing.
+- Zen-mode runs under `hooks/lib/zensu-prompt-deadline.sh` with `zen_deadline_fallback`, whose
+  outputs `.claude/rules/zen-mode-chain-anchor.md` states. The router has no deadline: two `node`
+  children stay far below its host limit, and a router the host kills loses only advisory text.
+- The router binds no session: its ledger key needs only the payload's `session_id`
+  (`.claude/rules/prompt-ledger.md`).
+- Not done here: worktree-keep, which hit its 10 s limit in the same burst, keeps its own costs.
+
+Version: `patch`. The zen-mode registration's `timeout` moved from 20 to 30 s, which is not a hook
+added, removed or renamed and not a matcher change; no schema field, strict key set, config key or
+attestation moves, and every changed hook still emits only `additionalContext`.
+
 ## Version
 
 `patch`, walked against `.claude/rules/runtime-lineage.md`: no schema field, no strict key set,

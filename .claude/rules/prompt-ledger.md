@@ -88,8 +88,11 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101`, `Z103`
   generation, then a short line with the triage asked instead of guessed, its Plan-mode
   permission, the routing to `/zensu:bootstrap`,
   `/zensu:ghost-scan` or the hybrid sequence, the no-delegation rule, the `/zensu:pilot` exception
-  and the dismiss clause. The key comes from the payload's `session_id` through
-  `zensu_resolve_session_id`; a payload without one gets the full notice every time.
+  and the dismiss clause. The key comes from the payload's `session_id`, hashed by the core's
+  `sessionKey` in the one `node` child a keyword prompt adds, and passes `zensu_resolve_session_id`,
+  which answers a canonical key in shell and refuses one that differs from an injected
+  `ZENSU_SESSION_KEY`; a payload without one, or with a refused one, gets the full notice every
+  time (`C26` and `C27` in `tests/structure/test-intent-router-hook.sh`).
 - **`user-prompt-zen-mode.sh`:** the full directive once per generation and anchor variant
   (`zen-none`, `zen-armed`), then a short body with the per-turn rules, the substance list (never
   drop a failing test, an unfinished step, a risk or a limitation), the ranking rule and its
@@ -148,11 +151,11 @@ exists, and every record whose key directory is gone. It emits nothing.
 
 - **A delivery can be lost while the ledger says sent:** a rewind or an edit of the prompt that
   carried the full text, another plugin's `UserPromptSubmit` hook blocking that prompt, or the host
-  stopping the reminder's supervisor after its worker marked the ledger and before the supervisor
-  forwarded the text. The worker marks its output delivered before it marks the ledger, so a
-  deadline that meets it in between forwards the full text rather than replacing it, and a
-  fallback the deadline prints marks nothing itself (`.claude/rules/session-delivery-route.md`
-  §"The reminder's time budget"). The short lines carry every per-turn obligation, so what is lost is the long-form detail and the
+  stopping the reminder's or zen-mode's supervisor after its worker marked the ledger and before
+  the supervisor forwarded the text. Each worker marks its output delivered before it marks the
+  ledger, so a deadline that meets it in between forwards the full text rather than replacing it,
+  and a fallback the deadline prints marks nothing itself (`.claude/rules/session-delivery-route.md`
+  §"The reminder's time budget", `.claude/rules/prompt-origin.md` §"Process budget"). The short lines carry every per-turn obligation, so what is lost is the long-form detail and the
   examples, never an obligation, and the next `/compact` or `/clear` restores the full text.
 - **A reset that never ran** (the `SessionStart` hook killed, timed out or not registered) leaves
   short lines for the rest of that generation, with the same bound. A reset that ran and failed is

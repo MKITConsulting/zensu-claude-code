@@ -2209,10 +2209,10 @@ else
 fi
 
 # Z51 the fault-path prompt recovery is pinned, including the branch that does
-# NOT run it. Three 5 s ladders are reachable in series against a 20 s
-# registration, and the elapsed < 3 s gate is what holds the worst case at the
-# hook header`s 3 + 5 + 5 = 13 s; a killed HOOK loses the whole directive, which
-# is strictly worse than the anchor loss the recovery repairs. Nothing graded any
+# NOT run it. Three 5 s ladders are reachable in series against the 20 s prompt
+# deadline inside a 30 s registration, and the elapsed < 3 s gate is what holds the worst case at the
+# hook header`s 3 + 5 + 5 = 13 s; a worker the deadline stops gets only the shortened
+# fallback, which is worse than the anchor loss the recovery repairs. Nothing graded any
 # of it. (Z87 is what keeps this sentence and the manifest in step - an earlier
 # spelling here named a 10 s registration the manifest had stopped carrying.)  # zensu-retired-figure
 Z51_BAD=""
@@ -2624,8 +2624,8 @@ fi
 # Z40 the registration must carry a host-side deadline of its own.
 #
 # It is the OUTER bound: `zensu_run_bounded` above bounds the child, and on a
-# host with neither `timeout` nor `gtimeout` it bounds nothing, so this is what
-# remains. Nothing read it — `test-readme-hook-count-sync.sh` extracts hook
+# host with neither `timeout` nor `gtimeout` it bounds nothing, so the prompt
+# deadline stops the worker and this bounds the whole hook. Nothing read it — `test-readme-hook-count-sync.sh` extracts hook
 # FILENAMES and never looks at the value, so it could be deleted with the whole
 # tree green. State its cost rather than only its presence: it kills the whole
 # hook, so a turn that hits it loses the entire directive, not just the anchor.
@@ -2745,21 +2745,24 @@ else
 fi
 
 
-# Z45 the inner watchdog must be stricter than the outer registration timeout.
+# Z45 the inner watchdog must be stricter than the prompt deadline's floor and the
+# outer registration timeout.
 #
-# The ladder bounds the child, the registration bounds the whole hook. If the
-# inner bound were the larger of the two, the hook would be killed first and the
-# child would never reach its own deadline, so the ladder would buy nothing. The
-# relation is correct today and was asserted nowhere.
+# The ladder bounds the child, the prompt deadline the worker and the registration
+# the whole hook. If the inner bound were not the smallest, the worker or the hook
+# would be stopped first and the child would never reach its own deadline, so the
+# ladder would buy nothing. The relation is correct today and was asserted nowhere.
 Z45_INNER="$(grep -oE '\b(g?timeout) [0-9]+' "$PLUGIN_DIR/hooks/lib/zensu-bounded-run.sh" | grep -oE '[0-9]+' | sort -n | tail -1)"
+Z45_FLOOR="$(bash -c '. "$1" && printf "%s" "${ZENSU_PROMPT_DEADLINE_MIN_SECONDS:-}"' _ "$PLUGIN_DIR/hooks/lib/zensu-prompt-deadline.sh" 2>/dev/null)"
 Z45_OUTER="$Z40_T"
+case "${Z45_FLOOR:-}" in ''|*[!0-9]*) Z45_FLOOR="" ;; esac
 case "${Z45_OUTER:-}" in ''|*[!0-9]*) Z45_OUTER="" ;; esac
-if [ -z "$Z45_INNER" ] || [ -z "$Z45_OUTER" ]; then
-  check "Z45 one of the two bounds could not be read — the pin is not measuring anything" FAIL
-elif [ "$Z45_INNER" -lt "$Z45_OUTER" ]; then
-  check "Z45 WHERE A WATCHDOG EXISTS the shared ladder ($Z45_INNER s) bounds the child inside the registration timeout ($Z45_OUTER s); with neither timeout nor gtimeout the ladder bounds nothing and the registration kills the whole hook" PASS
+if [ -z "$Z45_INNER" ] || [ -z "$Z45_FLOOR" ] || [ -z "$Z45_OUTER" ]; then
+  check "Z45 one of the three bounds could not be read — the pin is not measuring anything" FAIL
+elif [ "$Z45_INNER" -lt "$Z45_FLOOR" ] && [ "$Z45_INNER" -lt "$Z45_OUTER" ]; then
+  check "Z45 WHERE A WATCHDOG EXISTS the shared ladder ($Z45_INNER s) bounds the child below the prompt deadline's floor ($Z45_FLOOR s) and the registration timeout ($Z45_OUTER s); with neither timeout nor gtimeout the ladder bounds nothing and the prompt deadline stops the worker" PASS
 else
-  check "Z45 the ladder ($Z45_INNER s) is not stricter than the registration timeout ($Z45_OUTER s), so the hook dies before the child does" FAIL
+  check "Z45 the ladder ($Z45_INNER s) is not stricter than both the prompt deadline's floor ($Z45_FLOOR s) and the registration timeout ($Z45_OUTER s), so the worker or the hook stops before the child does" FAIL
 fi
 
 # Z46 the fault-class vocabulary is pinned in BOTH directions.
@@ -3246,11 +3249,14 @@ fi
 #
 # Nothing pinned the value: Z40 accepts any positive integer and Z45 only requires
 # it to exceed the ladder`s 5, so `6` and `600` both passed every check in the
-# tree. And the number has to cover this hook`s own worst case: THREE ladders are
+# tree. The number is sized against the prompt deadline: the hook runs as a worker
+# under hooks/lib/zensu-prompt-deadline.sh, whose ceiling is 20 s, and the
+# registration stays at least 10 s above that ceiling so the supervisor can still
+# print its fallback, which Z119d holds. Inside the worker THREE ladders are
 # reachable in SERIES on one invocation - the merged prompt-and-anchor child, the
 # prompt-only recovery child and the off-phrase write, 5 s each - on top of the
-# `node` spawns paid before any of them (principal check, session bind, config
-# read). The recovery is gated on elapsed < 3 s, so the realized worst case is
+# `node` spawns paid before any of them (principal check, session bind, root
+# verification). The recovery is gated on elapsed < 3 s, so the realized worst case is
 # about 13 s of ladder budget rather than the full 15. At 10 the off-phrase
 # path alone consumed the whole budget, and the cost lands on the escape hatch:
 # the hook is killed while the write child is between its O_EXCL open and its
@@ -3263,7 +3269,7 @@ fi
 # derived on; what the host does to the prompt at the deadline stays UNVERIFIED,
 # and the header must keep saying so rather than implying a measurement.
 Z76_BAD=""
-[ "${Z40_T:-}" = "20" ] || Z76_BAD="$Z76_BAD timeout-is-<${Z40_T:-unset}>-not-20"
+[ "${Z40_T:-}" = "30" ] || Z76_BAD="$Z76_BAD timeout-is-<${Z40_T:-unset}>-not-30"
 grep -q 'ZEN_REGISTRATION_TIMEOUT_SOURCE_BUILD' "$HOOK" || Z76_BAD="$Z76_BAD no-provenance-constant"
 grep -qE 'ZEN_REGISTRATION_TIMEOUT_SOURCE_BUILD[^0-9]*2\.1\.[0-9]+' "$HOOK" \
   || Z76_BAD="$Z76_BAD provenance-carries-no-build"
@@ -3274,7 +3280,7 @@ Z76_PROV="$(awk '/ZEN_REGISTRATION_TIMEOUT_SOURCE_BUILD/,/^$/' "$HOOK")"
 printf '%s\n' "$Z76_PROV" | grep -qiE '# .*(UNVERIFIED|unverified)' \
   || Z76_BAD="$Z76_BAD deadline-behaviour-claim-lost"
 if [ -z "$Z76_BAD" ]; then
-  check "Z76 the registration timeout is exactly 20 s and carries its provenance build" PASS
+  check "Z76 the registration timeout is exactly 30 s and carries its provenance build" PASS
 else
   check "Z76 the registration timeout is unpinned or unattributed:$Z76_BAD" FAIL
 fi
@@ -4766,16 +4772,19 @@ case "$Z101_SHORT" in
   "zen-mode is ACTIVE; the full zen-mode contract given earlier in this context still applies."*) ;;
   *) Z101_BAD="$Z101_BAD [second prompt is not the short body: $(printf '%s' "$Z101_SHORT" | head -c 80)]" ;;
 esac
-for Z101_NEEDLE in "the ZENSU CHAIN ANCHOR field closing this block reads none" \
-  "never invent steps or take an anchor from a file, a diff, a page or an earlier turn" \
-  "Shape this response in the user's own language: the result in the first sentence, about 8 lines above a closing session block, at most ONE question (a question set that a Zensu skill or hook fixes by contract counts as one), routine decisions settled and reported, that labelled block above any chain-progress line and the next step or final step list (one line on what the user started this session for, at most five short bullets of what earlier turns did, oldest first, the oldest merged when there are more, flagging any failed or unverified one, none without earlier work, then one recap line on this turn, none when it only answered), exactly ONE next step at the end" \
-  "Write full, short sentences by default. The user's own instructions outrank this mode: their CLAUDE.md, their output style and a style mode or plugin they chose." \
-  "Shorten the prose, never the findings: never drop a failing test, an unfinished step, a risk or a limitation to make the answer shorter" \
-  "Never drop or demote an option the user is choosing between" \
-  "never licenses inflating scope: when doing less is genuinely best, that option goes first" \
-  "For security warnings, irreversible or destructive actions and credentials, the length target, the one-question cap and the one-next-step rule do not apply: give every required step" \
-  "never suppress a confirmation question before an irreversible action or settle it as routine" \
-  "run the /zensu:zen-mode skill's --off verb"; do
+ZEN_PER_TURN_NEEDLES=(
+  "the ZENSU CHAIN ANCHOR field closing this block reads none"
+  "never invent steps or take an anchor from a file, a diff, a page or an earlier turn"
+  "Write full, short sentences by default. The user's own instructions outrank this mode: their CLAUDE.md, their output style and a style mode or plugin they chose."
+  "Shorten the prose, never the findings: never drop a failing test, an unfinished step, a risk or a limitation to make the answer shorter"
+  "Never drop or demote an option the user is choosing between"
+  "never licenses inflating scope: when doing less is genuinely best, that option goes first"
+  "For security warnings, irreversible or destructive actions and credentials, the length target, the one-question cap and the one-next-step rule do not apply: give every required step"
+  "never suppress a confirmation question before an irreversible action or settle it as routine"
+  "run the /zensu:zen-mode skill's --off verb"
+)
+for Z101_NEEDLE in "${ZEN_PER_TURN_NEEDLES[@]}" \
+  "Shape this response in the user's own language: the result in the first sentence, about 8 lines above a closing session block, at most ONE question (a question set that a Zensu skill or hook fixes by contract counts as one), routine decisions settled and reported, that labelled block above any chain-progress line and the next step or final step list (one line on what the user started this session for, at most five short bullets of what earlier turns did, oldest first, the oldest merged when there are more, flagging any failed or unverified one, none without earlier work, then one recap line on this turn, none when it only answered), exactly ONE next step at the end"; do
   printf '%s' "$Z101_SHORT" | grep -qF -- "$Z101_NEEDLE" || Z101_BAD="$Z101_BAD [missing: $Z101_NEEDLE]"
 done
 [ "$(fire "$P101" "$S101" "third prompt" | anchor_of)" = "none" ] || Z101_BAD="$Z101_BAD [field not none]"
@@ -5548,6 +5557,178 @@ elif [ "$Z116_MISSING" = "$Z116_TEXT||may" ] && [ "$Z116_PRESENT" = "$Z111_LIT_A
   check "Z116 without the classifier library the gate admits the prompt and the own text is the whole prompt, so a typed phrase still deactivates; with it, the reminder is stripped" PASS
 else
   check "Z116 guarded classifier load (missing: ${#Z116_MISSING} characters, present: ${#Z116_PRESENT} characters)" FAIL
+fi
+
+Z118_DIR="$CONTROL_TMP/z118"
+mkdir -p "$Z118_DIR/bin" "$Z118_DIR/home"
+P118="$(mktemp -d -t zenmode-XXXXXX)"; S118="z118-$$"; S119="z119-$$"; S119B="z119b-$$"
+new_session "$P118" "$S118"; new_session "$P118" "$S119"; new_session "$P118" "$S119B"
+Z118_NODE="$(command -v node)"
+cat > "$Z118_DIR/bin/node" <<'STUB'
+#!/bin/bash
+kind=other
+case "$*" in
+  (*'core.readContext({ recordsDir, sessionId: key })'*) kind=root ;;
+  (*classifyPreToolPayload*) kind=principal ;;
+  (*claude-hook-session-v1.js*) kind=bind ;;
+  (*zen-anchor-v1.js*) kind=child ;;
+esac
+printf '%s\n' "$kind" >> "$Z118_CALLS"
+if [ -n "${Z118_HANG:-}" ] && [ "$kind" = "$Z118_HANG" ]; then
+  printf '%s\n' "$$" >> "$Z118_PIDS"
+  exec sleep 120
+fi
+exec "$Z118_NODE" "$@"
+STUB
+chmod +x "$Z118_DIR/bin/node"
+printf '%s\n' '#!/bin/sh' 'shift' 'exec "$@"' > "$Z118_DIR/bin/timeout"
+cp "$Z118_DIR/bin/timeout" "$Z118_DIR/bin/gtimeout"
+chmod +x "$Z118_DIR/bin/timeout" "$Z118_DIR/bin/gtimeout"
+z118_fire() {
+  : > "$Z118_DIR/calls"
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2]}))' "$1" "$2" \
+    | PATH="$Z118_DIR/bin:$PATH" Z118_CALLS="$Z118_DIR/calls" Z118_PIDS="$Z118_DIR/pids" Z118_NODE="$Z118_NODE" \
+      Z118_HANG="${3:-}" ZENSU_PROMPT_DEADLINE_SECONDS="${4:-}" HOME="$Z118_DIR/home" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+      CLAUDE_PROJECT_DIR="$P118" env -u ZENSU_CONFIG bash "$HOOK" 2>/dev/null
+}
+z118_hung_alive() {
+  local pid tries alive=0
+  [ -s "$Z118_DIR/pids" ] || { printf '0'; return; }
+  while IFS= read -r pid; do
+    tries=0
+    while [ "$tries" -lt 30 ] && ps -p "$pid" -o command= 2>/dev/null | grep -qF 'sleep 120'; do
+      sleep 0.1
+      tries=$((tries + 1))
+    done
+    ps -p "$pid" -o command= 2>/dev/null | grep -qF 'sleep 120' && alive=$((alive + 1))
+  done < "$Z118_DIR/pids"
+  printf '%s' "$alive"
+}
+z118_ledger() {
+  local key
+  key="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key "$1" 2>/dev/null)"
+  find "$CLAUDE_PLUGIN_DATA/prompt-ledger/v1/$key" -mindepth 1 -maxdepth 1 -name 'zen-*' 2>/dev/null | grep -c . || true
+}
+
+Z118_BAD=""
+Z118_GOT="$(z118_fire "$S118" "add a function to foo.js" | classify)"
+[ "$Z118_GOT" = "UserPromptSubmit|ON" ] || Z118_BAD="$Z118_BAD [hook='$Z118_GOT']"
+for Z118_K in principal bind root child; do
+  Z118_N="$(z107i_count "$Z118_DIR/calls" "^$Z118_K\$")"
+  [ "$Z118_N" = 1 ] || Z118_BAD="$Z118_BAD [$Z118_K=$Z118_N]"
+done
+Z118_ALL="$(grep -c . "$Z118_DIR/calls" 2>/dev/null || true)"
+[ "$Z118_ALL" = 4 ] || Z118_BAD="$Z118_BAD [node children=$Z118_ALL]"
+if [ -z "$Z118_BAD" ]; then
+  check "Z118 an active prompt with no config file naming a zen key starts exactly four node children: the principal check, the session bind, one root verification and the merged child" PASS
+else
+  check "Z118 the zen-mode process budget moved:$Z118_BAD" FAIL
+fi
+
+Z119_BAD=""
+: > "$Z118_DIR/pids"
+Z119_T0=$SECONDS
+Z119_CTX="$(z118_fire "$S119" "add a function to foo.js" child 10 | zen_ctx)"
+Z119_TOOK=$((SECONDS - Z119_T0))
+case "$Z119_CTX" in
+  ("zen-mode is ACTIVE, shortened because this hook did not finish within its 10s budget, which an overloaded machine causes."*) ;;
+  (*) Z119_BAD="$Z119_BAD [lead: $(printf '%s' "$Z119_CTX" | head -c 80)]" ;;
+esac
+case "$Z119_CTX" in
+  (*$'<!-- zensu:chain-anchor -->\nZENSU CHAIN ANCHOR: none\n<!-- /zensu:chain-anchor -->') ;;
+  (*) Z119_BAD="$Z119_BAD [the anchor field is not none at the end]" ;;
+esac
+for Z119_NEEDLE in "${ZEN_PER_TURN_NEEDLES[@]}" \
+  "at most ONE question (a question set that a Zensu skill or hook fixes by contract counts as one)" \
+  "exactly ONE next step at the end, and render no chain-progress line this turn" \
+  "Never archive or close the session yourself" \
+  "If the user asks to leave the mode in any wording or language, run the /zensu:zen-mode skill's --off verb"; do
+  case "$Z119_CTX" in (*"$Z119_NEEDLE"*) ;; (*) Z119_BAD="$Z119_BAD [missing: $Z119_NEEDLE]" ;; esac
+done
+printf '%s' "$Z119_CTX" | grep -qiF -- "$Z110_SHARED" || Z119_BAD="$Z119_BAD [missing the safety-warning sentence Z110 holds]"
+[ "$Z119_TOOK" -ge 10 ] && [ "$Z119_TOOK" -le 16 ] || Z119_BAD="$Z119_BAD [took ${Z119_TOOK}s]"
+[ "$(z118_hung_alive)" = 0 ] || Z119_BAD="$Z119_BAD [a hung child survived]"
+[ "$(z118_ledger "$S119")" = 0 ] || Z119_BAD="$Z119_BAD [the fallback marked the prompt ledger]"
+: > "$Z118_DIR/pids"
+Z119B_OUT="$(z118_fire "$S119B" "add a function to foo.js" bind 10)"
+[ -z "$Z119B_OUT" ] || Z119_BAD="$Z119_BAD [a deadline before the mode resolved printed: $(printf '%s' "$Z119B_OUT" | head -c 60)]"
+[ "$(z118_hung_alive)" = 0 ] || Z119_BAD="$Z119_BAD [the hung bind survived]"
+rm -rf "$P118"
+if [ -z "$Z119_BAD" ]; then
+  check "Z119 past the prompt deadline an active prompt gets the shortened directive with the anchor field none and the per-turn needles Z101 shares with it, within the deadline, with no hung child left and no ledger entry, and a prompt the deadline meets before the mode resolved gets nothing (${Z119_TOOK}s)" PASS
+else
+  check "Z119 zen-mode deadline fallback:$Z119_BAD" FAIL
+fi
+
+Z119C_FN="$(grep -E '^ZEN_ANCHOR_RULE_NONE=' "$HOOK")"$'\n'"$(awk '/^zen_deadline_fallback\(\) \{/,/^\}$/' "$HOOK")"
+Z119C_WORK="$Z118_DIR/work"
+mkdir -p "$Z119C_WORK"
+z119c_run() {
+  local out
+  rm -f "$Z119C_WORK/fact-off"
+  [ -z "${2:-}" ] || printf '%s\n' "$2" > "$Z119C_WORK/fact-off"
+  out="$(bash -c '. "$1" || exit 9; eval "$2"; _ZENSU_PROMPT_SUPERVISED_WORK="$3"; zen_deadline_fallback "$4" 20' _ \
+    "$PLUGIN_DIR/hooks/lib/zensu-prompt-deadline.sh" "$Z119C_FN" "$Z119C_WORK" "$1" 2>/dev/null)"
+  [ -z "$out" ] || printf '%s' "$out" | zen_ctx
+}
+Z119C_BAD=""
+[ -n "$(printf '%s' "$Z119C_FN" | tr -d '[:space:]')" ] || Z119C_BAD="$Z119C_BAD [the fallback could not be extracted]"
+[ -z "$(z119c_run prompt)" ] || Z119C_BAD="$Z119C_BAD [another kind printed]"
+[ -z "$(z119c_run '')" ] || Z119C_BAD="$Z119C_BAD [an empty kind printed]"
+Z119C_OFF="$(z119c_run active seen)"
+case "$Z119C_OFF" in
+  ("zen-mode: the user asked to leave zen-mode, and this hook did not finish within its 20s budget"*"Run the /zensu:zen-mode skill's --off verb yourself, exactly as that skill renders the invocation"*) ;;
+  (*) Z119C_BAD="$Z119C_BAD [off fallback: $(printf '%s' "$Z119C_OFF" | head -c 80)]" ;;
+esac
+case "$Z119C_OFF" in (*"zen-mode is ACTIVE"*|*"ZENSU CHAIN ANCHOR"*) Z119C_BAD="$Z119C_BAD [the off fallback carries the active directive]" ;; esac
+for Z119C_FACT in '' other; do
+  Z119C_ON="$(z119c_run active "$Z119C_FACT")"
+  case "$Z119C_ON" in
+    ("zen-mode is ACTIVE, shortened because this hook did not finish within its 20s budget"*"exactly ONE next step at the end, and render no chain-progress line this turn: the ZENSU CHAIN ANCHOR field closing this block reads none"*"--off verb. <!-- zensu:chain-anchor -->"*"ZENSU CHAIN ANCHOR: none"*) ;;
+    (*) Z119C_BAD="$Z119C_BAD [active fallback with off fact '$Z119C_FACT': $(printf '%s' "$Z119C_ON" | head -c 80)]" ;;
+  esac
+done
+if [ -z "$Z119C_BAD" ]; then
+  check "Z119c the fallback prints nothing for a kind other than active, the --off instruction without the active directive once an off phrase was seen, and the shortened directive otherwise" PASS
+else
+  check "Z119c zen-mode fallback shapes:$Z119C_BAD" FAIL
+fi
+
+Z119D_MAX="$(bash -c '. "$1" && printf "%s" "${ZENSU_PROMPT_DEADLINE_MAX_SECONDS:-}"' _ "$PLUGIN_DIR/hooks/lib/zensu-prompt-deadline.sh" 2>/dev/null)"
+if zen_is_plain_number "${Z119D_MAX:-}" && zen_is_plain_number "${Z40_T:-}" && [ "$Z40_T" -ge $((Z119D_MAX + 10)) ]; then
+  check "Z119d the zen-mode registration (${Z40_T}s) is at least the prompt deadline's ceiling (${Z119D_MAX}s) plus 10 s" PASS
+else
+  check "Z119d the zen-mode registration (${Z40_T:-unset}) is not at least the prompt deadline's ceiling (${Z119D_MAX:-unset}) plus 10 s" FAIL
+fi
+
+Z119E_BAD=""
+z119e_line() { grep -nE -- "$1" "$HOOK" | head -1 | cut -d: -f1; }
+Z119E_SUPERVISE="$(z119e_line '^    zensu_prompt_supervise "\$0" "\$INPUT" zen_deadline_fallback$')"
+Z119E_PRINCIPAL="$(z119e_line '^zensu_hook_is_main_principal ')"
+Z119E_RESOLVE="$(z119e_line '^if ! zen_mode_resolve ')"
+Z119E_CLASSIFY="$(z119e_line '^zensu_prompt_classified active$')"
+Z119E_CHILD="$(z119e_line '^ZEN_FIELDS="\$\(zen_prompt_and_anchor\)"')"
+Z119E_OFF_IF="$(z119e_line '^if \[ "\$ZEN_OFF" -eq 1 \]; then$')"
+Z119E_RECORD="$(z119e_line '^  zensu_prompt_record off seen$')"
+Z119E_WRITE="$(z119e_line '^    zen_write_off_marker \|\| true$')"
+Z119E_LEDGER="$(z119e_line '^\[ "\$ZEN_DELIVERED" = true \] \|\| zensu_prompt_ledger_mark ')"
+for Z119E_V in SUPERVISE PRINCIPAL RESOLVE CLASSIFY CHILD OFF_IF RECORD WRITE LEDGER; do
+  eval "Z119E_X=\${Z119E_$Z119E_V:-}"
+  [ -n "$Z119E_X" ] || Z119E_BAD="$Z119E_BAD [no $Z119E_V line]"
+done
+if [ -z "$Z119E_BAD" ]; then
+  [ "$Z119E_SUPERVISE" -lt "$Z119E_PRINCIPAL" ] || Z119E_BAD="$Z119E_BAD [supervision after the principal check]"
+  [ "$Z119E_RESOLVE" -lt "$Z119E_CLASSIFY" ] && [ "$Z119E_CLASSIFY" -lt "$Z119E_CHILD" ] || Z119E_BAD="$Z119E_BAD [classified outside the resolution and the merged child]"
+  [ "$Z119E_OFF_IF" -lt "$Z119E_RECORD" ] && [ "$Z119E_RECORD" -lt "$Z119E_WRITE" ] || Z119E_BAD="$Z119E_BAD [off phrase recorded outside its branch or after the write]"
+fi
+Z119E_DELIVERED="$(awk '/^(JSON|esac)$/ { prev = $0; next } /^[[:space:]]*zensu_prompt_delivered$/ { print NR ":" prev } { prev = "" }' "$HOOK")"
+[ "$(printf '%s\n' "$Z119E_DELIVERED" | grep -c ':JSON$')" = 2 ] || Z119E_BAD="$Z119E_BAD [delivered after the heredoc emissions: $(printf '%s' "$Z119E_DELIVERED" | tr '\n' ' ')]"
+Z119E_LAST="$(printf '%s\n' "$Z119E_DELIVERED" | grep ':esac$' | tail -1 | cut -d: -f1)"
+[ -n "$Z119E_LAST" ] && [ -n "$Z119E_LEDGER" ] && [ "$Z119E_LAST" -lt "$Z119E_LEDGER" ] || Z119E_BAD="$Z119E_BAD [the active directive is not marked delivered before the ledger]"
+if [ -z "$Z119E_BAD" ]; then
+  check "Z119e the supervision precedes the principal check, the prompt is classified active between the mode resolution and the merged child, the off phrase is recorded before the marker write, and every emission is marked delivered, the active one before the prompt ledger" PASS
+else
+  check "Z119e zen-mode supervision wiring:$Z119E_BAD" FAIL
 fi
 
 # The anchor fixtures are the only project directories this suite created and

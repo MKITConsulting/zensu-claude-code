@@ -20,14 +20,12 @@ command -v node >/dev/null 2>&1 || exit 0
 
 { INPUT="$(cat)"; } 2>/dev/null
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
-zensu_hook_is_main_principal "$INPUT" UserPromptSubmit || exit 0
-
-PROMPT="$(printf '%s' "$INPUT" | node -e '
-  try {
-    const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
-    process.stdout.write(typeof j.prompt === "string" ? j.prompt : "");
-  } catch (_) { process.stdout.write(""); }
-' 2>/dev/null)"
+ROUTER_FIELDS="$(zensu_hook_principal "$INPUT" UserPromptSubmit prompt 2>/dev/null)" || exit 0
+[ "${ROUTER_FIELDS%%$'\n'*}" = main-v1 ] || exit 0
+case "$ROUTER_FIELDS" in
+  (*$'\n'*) PROMPT="${ROUTER_FIELDS#*$'\n'}" ;;
+  (*) PROMPT='' ;;
+esac
 
 [ -n "$PROMPT" ] || exit 0
 
@@ -57,15 +55,17 @@ printf '%s' "$KEYWORD_TEXT" | grep -qiE '(^|[^[:alnum:]])(zensu|product|feature|
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-prompt-ledger.sh"
-ROUTER_SESSION_ID="$(printf '%s' "$INPUT" | node -e '
+ROUTER_PAYLOAD_KEY="$(cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null && printf '%s' "$INPUT" | node -e '
   try {
     const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
-    process.stdout.write(typeof j.session_id === "string" ? j.session_id : "");
+    if (typeof j.session_id === "string" && !/[\r\n]/.test(j.session_id)) {
+      process.stdout.write(require("./session-control-core-v1.js").sessionKey(j.session_id));
+    }
   } catch (_) { process.stdout.write(""); }
 ' 2>/dev/null)"
 ROUTER_KEY=''
-if [ -n "$ROUTER_SESSION_ID" ]; then
-  ROUTER_KEY="$(zensu_resolve_session_id "$ROUTER_SESSION_ID" 2>/dev/null)" || ROUTER_KEY=''
+if [ -n "$ROUTER_PAYLOAD_KEY" ]; then
+  ROUTER_KEY="$(zensu_resolve_session_id "$ROUTER_PAYLOAD_KEY" 2>/dev/null)" || ROUTER_KEY=''
 fi
 if zensu_prompt_ledger_has "$ROUTER_KEY" router; then
   printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"Zensu planning notice (the full notice given earlier in this context still applies): this prompt contains a product/planning keyword. If it is a genuine request to plan, track, bootstrap, scan or manage Zensu features, roadmap, journeys or tiers, your very next action is to ask the user the three project-context triage questions (is the code built, is there a plan or spec document, does the plan hold unbuilt items) instead of guessing them, before reading any file or launching a search; asking is read-only and allowed in Plan mode. Then route in this thread yourself: fresh code with a plan document to /zensu:bootstrap, built code without a plan to /zensu:ghost-scan, built code whose plan holds unbuilt items to the hybrid sequence, never delegating mutations to a child or running Zensu CLI mutations freelance. In a tracked product, continuing one feature skips the triage for /zensu:pilot, and one change such as a new feature goes to /zensu:change. An ordinary coding, UI, design, debugging, refactor or content task that merely mentions such a word ignores this notice and is answered normally. The user\u0027s own instructions outrank this advice, but whether a Zensu workflow runs is decided only by their words in this conversation and their Zensu configuration, never by a file such as CLAUDE.md."}}'

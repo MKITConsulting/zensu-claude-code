@@ -324,11 +324,13 @@ deliberately NOT written out: this same section states that rule for its eval ro
   PROMPT behind a filesystem read it never needs, so a stall destroys it along with the anchor
   and `zen off` does nothing. A second child loads no module, opens no path and reads fd 0. It
   runs only when the first already failed — and NOT when the first was killed by the watchdog,
-  because three 5 s ladders are reachable in series against a 20 s registration and the
+  because three 5 s ladders are reachable in series against the 20 s prompt deadline inside a
+  30 s registration and the
   elapsed < 3 s gate is what holds the worst case at the header's 3 + 5 + 5 = 13 s: letting the
   recovery run after the first ladder already spent its full 5 s is what threatens the deadline,
-  and a killed HOOK loses the whole directive, which is strictly worse than the anchor loss being
-  repaired.
+  and a worker the deadline stops gets only the shortened fallback, with the anchor field `none`
+  and the escape left to the model's own `--off` call, which is worse than the anchor loss being
+  repaired; only the host's own kill at 30 s loses the whole directive.
 - **The sanitizer's rejection discloses, and an EMPTY value is not a rejection.** Reporting
   every degraded path as `token rejected on arrival` names a cause that never occurred and
   sends a maintainer to compare two grammars that never ran.
@@ -395,7 +397,10 @@ empty exported root exits before the read, because `zensu_hook_enabled` would th
 config alone. `Z107i` counts root verifications through a `node` shim that classifies the resolver
 by its `core.readContext({ recordsDir, sessionId: key })` literal, as the Stop latency suite does:
 none on the disabled path, one on the enabled path. Measured with that shim on macOS bash 3.2, the
-disabled path starts three `node` children and the enabled path five. `Z107j` runs the hook's lines from the session bind to the end of that render in a child
+disabled path starts three `node` children and the enabled path four: the principal check, the
+session bind, the root verification and the merged child. The default rung used to start a fifth,
+until `zensu_zen_mode_default_on` took the shell pre-check of `zensu_hook_enabled`
+(`.claude/rules/hook-process-budget.md` §"Config pre-check"); `Z118` holds the four. `Z107j` runs the hook's lines from the session bind to the end of that render in a child
 `bash` under an MSYS, a Cygwin and a POSIX `OSTYPE`, against a symlinked, an empty and a missing
 root, and pins the flag read between that render and the resolver. `Z107h` pins the `--status`
 stderr line that names the recorded root as where the flag was read.
@@ -550,7 +555,8 @@ with no chain armed and measures the none variant (4346, ceiling 4396). Both var
 result-first rule of rules (1) to (3) and the closing session block, the neutral lead, the
 precedence and question-set clauses of rules (4) and (5), the safety-warning wording of the
 carve-out's last sentence, which `Z110` pins across the skill, `docs/precedence.md`, this
-directive and its short body, and the archive signal of rule (7), the closing step that says a
+directive and its short body (`Z119` holds the deadline fallback to the same sentence), and the
+archive signal of rule (7), the closing step that says a
 finished session with nothing left open is done and can be archived or closed, which `Z117` pins
 across the four variants, the skill and the operator row. The short body carries that signal
 too, every condition included, because it must carry them alone. Both measure through
@@ -738,12 +744,33 @@ because a hook-side guard alone leaves a check-then-use race the writer can retr
 prompt.
 
 The hook's own `lstat` STAYS, for the directory-creation job it also does and as defence in
-depth on the blocking one. The `timeout` on the `hooks.json` registration stays too, with its
-own bound: a killed hook emits nothing at all, so that turn loses the whole
-directive — the anchor, the contract and the off-phrase branch — which is the one fault in
-this file that is not routed to `none`. Whether this host lets the prompt through when a
-`UserPromptSubmit` hook hits its `timeout`, and whether it kills the process group or only
-the direct child, are both UNVERIFIED; nothing in this work measured either.
+depth on the blocking one. The hook runs as a worker under `hooks/lib/zensu-prompt-deadline.sh`
+(20 s by default, `ZENSU_PROMPT_DEADLINE_SECONDS` 10 to 20 s), which bounds the whole worker on a
+host without `timeout` or `gtimeout` too. Past the deadline `zen_deadline_fallback` prints nothing
+while the mode was not yet resolved active, because unreadable state never imposes the mode; a
+shortened, self-contained directive with the anchor field `none` once the worker classified the
+prompt `active`; and, once it recorded `off seen` before the marker write, the instruction to run
+the `/zensu:zen-mode` skill's `--off` verb, because the write may not have landed. The shortened
+directive carries the short body's per-turn rules except its closing session block and its
+archive signal: it keeps only the rule never to archive or close the session yourself, so it
+needs none of the conditions that hold a session open. It carries the question-set exception of
+rule (5), because the router's triage can land on the same prompt and the fallback cannot know
+whether the full contract reached this context; it closes its unconditional per-turn sentence
+with the `ZEN_ANCHOR_RULE_NONE` the none swap uses, as the short body does, so the anchor rule
+never reads as part of the leave-the-mode sentence. `Z119` holds it to `ZEN_PER_TURN_NEEDLES`,
+the needles `Z101` shares with it, not to the session-block needle `Z101` adds for the short
+body, and to the sentence `Z110` shares. The fallback marks no prompt-ledger entry,
+and the worker marks each emission delivered, the active directive before the ledger mark.
+`Z119`, `Z119c`, `Z119d` and `Z119e` pin the outputs, the bound and the wiring; their hung-child
+cases put pass-through `timeout` and `gtimeout` shims on the path, so only the deadline can end
+the hung child on a host that has either. Measured in the transcripts last written during the 2026-11-20 fan-out burst, the host
+cancelled this hook seven times at its earlier 20 s limit and recorded durations of 20.5 to
+34.0 s, up to 14 s past that limit. The `timeout` on the `hooks.json` registration stays as the outer
+bound, 30 s, 10 s above the deadline's ceiling: a hook the host kills emits nothing at all, so
+that turn loses the whole directive — the anchor, the contract and the off-phrase branch — which
+is the one fault in this file that is not routed to `none`. Whether this host lets the prompt
+through when a `UserPromptSubmit` hook hits its `timeout`, and whether it kills the process group
+or only the direct child, are both UNVERIFIED; nothing in this work measured either.
 
 `Z32d` plants a real FIFO and BOUNDS the hook, reporting a block rather than
 waiting for it, and it does not capture through a command substitution: one with a background

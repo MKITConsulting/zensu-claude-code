@@ -178,6 +178,9 @@ no candidate file of `cfg()` names the key. Parsed JSON can carry the key only i
 that is not a readable regular file, or reads empty while non-empty, goes to node. `C1` in the
 budget suite holds the answers equal to the node reader over every config state it builds, a
 unicode-escaped key among them, and `C2` holds that the decided states start no `node`.
+`zensu_zen_mode_default_on` takes the same pre-check for `zenModeDefault`, under the root it is
+handed, because zen-mode reads that default on every prompt of a session that recorded no choice;
+`C2z` holds it equal to the node reader and node-free when no file names the key.
 `zensu_hook_enabled_strict` and the bounded getters take no such pre-check.
 
 - **The read is bounded.** Bash reads a file one byte per system call here, so the pre-check

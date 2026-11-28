@@ -581,6 +581,55 @@ if [ -z "$CONFIG_ROOT_MISMATCH" ]; then
 else
   check "C2r the root form of zensu_hook_enabled:$CONFIG_ROOT_MISMATCH" FAIL
 fi
+CONFIG_ZEN_MISMATCH=""
+config_zen_case() {
+  local label="$1" expect_decided="$2" override="${3:-}" result
+  result="$(
+    export HOME="$CONFIG_HOME" CLAUDE_PROJECT_DIR="$CONFIG_PROJ"
+    if [ -n "$override" ]; then export ZENSU_CONFIG="$override"; else unset ZENSU_CONFIG; fi
+    . "$CONFIG_LIB"
+    : > "$TMP/config.log"
+    export ZENSU_BUDGET_LOG="$TMP/config.log"
+    SAVED_PATH="$PATH"
+    PATH="$SHIMS"
+    zensu_zen_mode_default_on "$CONFIG_ROOT"; on=$?
+    PATH="$SAVED_PATH"
+    nodes="$(grep -cx node "$TMP/config.log")"
+    val="$(CLAUDE_PROJECT_DIR="$CONFIG_ROOT" _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.zenModeDefault===false?"0":"1")' 2>/dev/null)"
+    if [ -z "$val" ] || [ "$val" = 1 ]; then ref_on=0; else ref_on=1; fi
+    printf '%s %s %s' "$on" "$nodes" "$ref_on"
+  )"
+  set -- $result
+  if [ "${1:-x}" != "${3:-y}" ]; then
+    CONFIG_ZEN_MISMATCH="$CONFIG_ZEN_MISMATCH [$label: on ${1:-x}/${3:-y}]"
+  fi
+  case "$expect_decided:${2:-x}" in
+    (yes:0|no:[1-9]*) ;;
+    (*) CONFIG_ZEN_MISMATCH="$CONFIG_ZEN_MISMATCH [$label: ${2:-x} node]" ;;
+  esac
+}
+config_zen_case "no candidate file" yes
+put "$PROJECT_FILE" text '{"hooks":{"zenModeDefault":false}}'
+config_zen_case "only the ambient overlay switches the default off" yes
+put "$PROJECT_FILE" absent
+put "$ROOT_FILE" text '{"hooks":{"zenModeDefault":false}}'
+config_zen_case "the root's overlay switches the default off" no
+put "$ROOT_FILE" absent
+put "$GLOBAL_FILE" text '{"hooks":{"zenMode":false}}'
+config_zen_case "the global file names zenMode alone" yes
+put "$GLOBAL_FILE" text '{"hooks":{"zenModeDefault":false}}'
+config_zen_case "the global file switches the default off" no
+put "$GLOBAL_FILE" text '{"hooks":{"zenModeDefault":true}}'
+config_zen_case "the global file keeps the default on" no
+put "$GLOBAL_FILE" absent
+printf '%s' '{"hooks":{"zenModeDefault":false}}' > "$TMP/zen-override.json"
+config_zen_case "ZENSU_CONFIG switches the default off" no "$TMP/zen-override.json"
+put "$ROOT_FILE" absent; put "$PROJECT_FILE" absent; put "$GLOBAL_FILE" absent
+if [ -z "$CONFIG_ZEN_MISMATCH" ]; then
+  check "C2z zensu_zen_mode_default_on answers like the node reader under the root it is handed, starts no node when no file it reads names zenModeDefault, and defers to node when one does or ZENSU_CONFIG is set" PASS
+else
+  check "C2z the zen-mode default reader:$CONFIG_ZEN_MISMATCH" FAIL
+fi
 
 CFG_JS="$(. "$CONFIG_LIB" && printf '%s' "$_ZENSU_CFG_JS")"
 SHAPE_HOME="$TMP/shape-home"
