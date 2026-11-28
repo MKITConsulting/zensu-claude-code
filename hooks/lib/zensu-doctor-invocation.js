@@ -66,8 +66,10 @@ const DOCTOR_SEGMENTS = ["hooks", "lib", "zensu-doctor.sh"];
 // justification, which lives in the header of hooks/lib/zensu-session-adopt.sh
 // and is NOT restated here — a second copy is a second thing to go stale, and
 // this comment is where a future reviewer decides whether the list stays at two.
-// In one line: it writes one record for the calling session, one workflow
-// history entry, moves that session's stale review-evidence leases aside, and —
+// In one line: it writes one record for the calling session (first removing,
+// under the records lock, a byte copy or prefix of that record an interrupted
+// adoption left at its superseded name), one workflow history entry, moves that
+// session's stale review-evidence leases aside, and —
 // on an `already-served` refusal with `--confirm` only — recreates that session's
 // own MISSING workflow document and its `.zensu` ancestors under the RECORDED
 // project root — and, under `--restore-root --confirm`, re-creates the RECORDED

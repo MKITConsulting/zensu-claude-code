@@ -45,23 +45,27 @@ ONE implementation serves every hook-side binder and the manual entry point.
 - **Core support:** `ADOPTION_REFUSED_CODE`, `SUPERSEDED_EXISTS_CODE`,
   `isAdoptionRefusal`, `isSupersededRecordConflict`, `isLockTimeout`,
   `supersededRecordName` / `supersededRecordFile` (the ONE spelling of the superseded
-  name; both throw on a version that fails `ADOPTION_SAFE_VERSION_RE`), the history-reason
+  name; both throw on a version that fails `ADOPTION_SAFE_VERSION_RE`),
+  `interruptedAdoptionCopyState` with its answers `INTERRUPTED_COPY_STATES`
+  (§"Interrupted adoptions"), the history-reason
   grammar `ADOPTION_PAIR_SEPARATOR` / `formatAdoptionPair` / `formatAdoptionReason` /
   `parseAdoptionReason` (the writer, the renderers, the binder's `ZENSU_SESSION_ADOPTED` and
   the doctor row all go through it), and `ADOPTION_PROVENANCE` (`recorded`,
   `no-workflow-document`, `unavailable`; the cause of `unavailable` travels beside it as
   `provenanceCause`).
 
-The ladder is `adoptableRecord`, then the crash-resume check, then the opt-out, then
+The ladder is `adoptableRecord`, then the superseded-file check, then the opt-out, then
 `adoptContext` under the per-session records lock, then `discardSupersededLeases`. The
 first three rungs ARE `previewAdoption`, and `adoptForHook` starts from it, so the
 read-only report, the binder's `adoption-refusal` mode and the adoption cannot disagree
-about one record. The probe runs first, so `opted-out` only stands for a record that
-would otherwise have been adopted. The crash-resume check is an `lstat` of
-`supersededRecordFile(...)` and then `isInterruptedAdoptionCopy`: a copy an interrupted
-adoption left of this record is no conflict (§"Interrupted adoptions"), and every other
-file there refuses, because `adoptContext`'s `COPYFILE_EXCL` would refuse it, a dangling
-link included.
+about one state of a record. The probe runs first, so `opted-out` only stands for a
+record that would otherwise have been adopted. The superseded-file check is an `lstat` of
+`supersededRecordFile(...)` and then `interruptedAdoptionCopyState`, and only its
+`not-a-copy` answer refuses, because `adoptContext`'s `COPYFILE_EXCL` would refuse such a
+file, a dangling link included. A copy an interrupted adoption left of this record is no
+conflict, and a file the check could not judge goes on to the opt-out and to the
+adoption under the lock (§"Interrupted adoptions"). A core without the predicate refuses
+every file at that name, as before the completion existed.
 
 The preview is WRITE-FREE, and two consumers rest on that: the report's read-only path,
 whose write-free premise the PreToolUse recognizer's admission of the command rests on,
@@ -145,34 +149,52 @@ superseded copy, because `copyFileSync` carries the source's timestamps over on 
 ## Interrupted adoptions
 
 `adoptContext` copies the record to its superseded name and then swaps the record, both
-under the records lock. Two supervised hooks bind with the adoption opted in and can be
-killed at their deadline: the Stop hook and the UserPromptSubmit route reminder
-(`.claude/rules/stop-latency.md`). A kill between the two steps leaves the record
-untouched and a byte copy of it at the superseded name; a kill inside the copy leaves a
-prefix of that copy, the empty file included. That file used to refuse every later
-adoption as `superseded-record-exists` until someone moved it by hand. Now the next bind
-completes the adoption.
+under the records lock. Any adopting process can be killed between the two steps: a hook
+stopped at its deadline (the Stop hook, `.claude/rules/stop-latency.md`), an interrupt, a
+crash. The completion does not depend on which. A kill between the two steps leaves the
+record untouched and a byte copy of it at the superseded name; a kill inside the copy
+leaves a prefix of that copy, the empty file included. That file used to refuse every
+later adoption as `superseded-record-exists` until someone moved it by hand. Now the next
+bind that adopts completes the adoption; with `hooks.sessionAutoAdopt` off, no bind
+adopts and `/zensu:adopt-session --confirm` does.
 
-- **One predicate.** `isInterruptedAdoptionCopy(recordsDir, key, recordedVersion)` in the
-  core reads the superseded file and the live record through `readRegularFileSnapshot` (no
-  link followed, a regular file with one link, at most `MAX_JSON_BYTES`) and answers true
-  only when the superseded bytes are a prefix of the record's bytes. It never throws; every
-  fault answers false. Such a file holds no byte the record lacks, so removing it loses
+- **One predicate, three answers.** `interruptedAdoptionCopyState(recordsDir, key,
+  recordedVersion)` in the core answers a member of `INTERRUPTED_COPY_STATES` and never
+  throws. `copy`: both files read through `readRegularFileSnapshot` (no link followed, a
+  regular file with one link, at most `MAX_JSON_BYTES`) and the superseded bytes are a
+  prefix of the record's. `not-a-copy`: the bytes differ, or the read of the superseded
+  file failed while an `lstat` before and after it found the same file with the same size
+  and times, which is what a link, a hard link, a directory, an unreadable file and one
+  over the bound give; an `lstat` that fails for any cause but `ENOENT`, and a version
+  the name refuses, answer it too. `indeterminate`: no file at the name, a file that
+  vanished or changed while it was read, or a record whose own read failed. That is what
+  a sibling's completion looks like from outside the lock: it unlinks the copy, copies
+  again and swaps the record. A copy holds no byte the record lacks, so removing it loses
   nothing.
-- **The preview** asks it after the `lstat`. A proven copy is no conflict, so the record
-  reads ADOPTABLE, or `opted-out` under the opt-out, and the preview stays write-free.
-- **`adoptContext`** asks it again under the records lock, after its own `adoptableRecord`
-  verdict, unlinks a proven copy, then copies and swaps as before. It re-mints the record
-  the verdict verified; the residue is never read as a record, and the copy step writes a
-  fresh copy of the verified record at that name. A kill during the completion leaves one
-  of the same shapes, so the bind after it completes the adoption again.
+- **The preview refuses only `not-a-copy`.** `copy` and `indeterminate` are no conflict,
+  so the record reads ADOPTABLE, or `opted-out` under the opt-out, and the preview stays
+  write-free. A reader outside the lock, the binder's `adoption-refusal` mode or the
+  report's read-only path, therefore answers `superseded-record-exists` for a file a
+  sibling is rewriting only in the same-tick case the residuals name, and `adoptForHook`
+  leaves the decision to `adoptContext`.
+- **`adoptContext`** asks the predicate again under the records lock, after its own
+  `adoptableRecord` verdict, unlinks the file only on `copy`, then copies and swaps as
+  before; every other answer leaves the file to `COPYFILE_EXCL`, which refuses a file
+  still there. It re-mints the record the verdict verified; the residue is never read as
+  a record, and the copy step writes a fresh copy of the verified record at that name. A
+  kill during the completion leaves one of the same shapes, so the bind after it
+  completes the adoption again.
 - **Concurrent binds** serialize on the records lock: the winner completes the adoption,
-  and every loser re-checks inside the lock and answers `already-served`. A preview that
-  finds a file it cannot prove a copy probes once more before it refuses (`servedProbe`,
-  the probe the lock-timeout arm uses), because a sibling may have completed the adoption
-  between that preview's probe and its check, and the sibling's kept record is no prefix of
-  the re-minted one. A record that serves by then answers `already-served`, never
-  `superseded-record-exists`.
+  and every loser re-checks inside the lock and answers `already-served`. A preview can
+  still read the old copy beside the record a sibling has just re-minted, which is no
+  prefix of it and answers `not-a-copy`. Such a preview probes once more before it
+  refuses (`servedProbe`, the probe the lock-timeout arm uses), and a record that serves
+  by then answers `already-served`, never `superseded-record-exists`. The preview's own
+  first probe has the same race: its record read can overlap the sibling's swap, and its
+  workflow read the provenance write the sibling makes after it released the lock. A
+  probe that answers `record-unreadable` or `workflow-schema-mismatch` is therefore taken
+  once more (`probeAgain`), and the preview goes on with the second answer, or keeps the
+  first when the second throws.
 - **What still refuses:** other bytes, a link (a dangling one included), a hard-linked
   file, a directory, an unreadable file and one over `MAX_JSON_BYTES`. The remedy pair
   (`ADOPTION_REFUSAL_REMEDIES` and `_zensu_adoption_refusal_remedy`, identical as the seam pin
@@ -184,16 +206,27 @@ completes the adoption.
   adoption skill documents. A kill inside the swap's own write can leave its temporary
   file, `.<key>.json.<pid>.<hex>.tmp`, in the records directory, which nothing reads. A
   copy engine that sizes the destination before it copies can leave a cut-short copy that
-  is no byte prefix; that shape still refuses. Windows is unmeasured for it.
+  is no byte prefix; that shape still refuses. A file replaced within one timestamp tick
+  by one with the same inode number and size reads as unchanged, so a preview can refuse
+  it as `not-a-copy` while a sibling rewrites it, unless the record serves by the second
+  probe. A read that fails for a passing cause, such as too many open files, reads as
+  `not-a-copy` as well. Windows is unmeasured for all of it.
 - **Pins.** In `tests/structure/session-auto-adopt-v1.test.js`: `a bind killed between the
   superseded copy and the record swap is completed by the next bind` (a child running
   `adoptForHook` kills itself with `SIGKILL` right after the copy), `a copy that a kill cut
   short is rolled back and the next bind completes the adoption`, `concurrent binds over an
-  interrupted adoption adopt it exactly once` and the three preview cases after them. In
-  `tests/session-control/session-control-core-v1.test.js`: the predicate's truth table,
-  the completion over a copy and a prefix, and the refusals that remain. In the upgrade
-  suite, `AUTO-14` plants a non-copy that still refuses end to end, and `AUTO-14b` completes
-  a byte copy on the first gate contact.
+  interrupted adoption adopt it exactly once` and the preview cases after them, among them
+  `a superseded file the preview cannot judge is decided by the adoption under the lock,
+  and the opt-out still stands` and `a superseded file a sibling rewrites while the preview
+  reads it never reads as superseded-record-exists`, which runs the real core under an
+  `fs.openSync` hook, and `a refusal a sibling's swap can cause is probed once more, and
+  only that refusal`. In `tests/session-control/session-control-core-v1.test.js`: the
+  predicate's truth table, the `indeterminate` answers under an `fs.openSync` and
+  `fs.readSync` hook, the completion over a copy and a prefix, and the refusals that
+  remain. The hooked cases that delete or replace a file another descriptor holds open run
+  off Windows only. In `tests/structure/session-adopt-report-v1.test.js`: the read-only
+  report over the three answers. In the upgrade suite, `AUTO-14` plants a non-copy that
+  still refuses end to end, and `AUTO-14b` completes a byte copy on the first gate contact.
 
 ## Denies name the token
 
@@ -358,6 +391,9 @@ adoption row). This is a census, and the rule is the search:
   `RUNTIME_ADOPTED` history entry).
 - The opt-out is a session-writable config key and is not ledgered.
 - The `adoption-refusal` probe is a second node spawn, on the deny path only.
+- A record that stays unreadable, or a workflow document that stays at another schema, is
+  probed twice per preview (`probeAgain`): one more `adoptableRecord` call, with its
+  digest walks, on a path that already denies. The cost is unmeasured.
 - A recorded project root that is gone under a lineage this installation serves runs the
   adoption path on EVERY bind: the strict read fails, the probe's orphan read measures the
   runtime digest, `adoptForHook` runs the idempotent lease sweep, and the `.*` gate's
@@ -397,17 +433,19 @@ permissively by a new reader, no attestation change, and the gates deny strictly
 The completion of an interrupted adoption is `patch` as well, walked against
 `.claude/rules/runtime-lineage.md`: no context-record or workflow-state field, no strict
 key set (the verdict keeps its fields), no hook added, removed or re-matched, no
-`permissionDecision` hook, no config key and no attestation change. The core gains one
-read-only export, the superseded name and its contents are unchanged, and the gates deny
-strictly less: an interrupted copy and a preview that a sibling's adoption overtook no
+`permissionDecision` hook, no config key and no attestation change. The core gains two
+read-only exports, the predicate and its frozen answers, the superseded name and its
+contents are unchanged, and the gates deny strictly less: an interrupted copy, a file a
+sibling's completion is rewriting and a preview that a sibling's adoption overtook no
 longer refuse. An older installation of the same lineage still refuses such a copy, and
 the newer one completes it.
 
 ## Port-relevant
 
-Core half: the module's ladder with its crash-resume rung and its second probe before a
-conflict refuses, `isInterruptedAdoptionCopy` with the unlink `adoptContext` performs under
-the records lock, the sticky-`false` combining
+Core half: the module's ladder with its superseded-file rung, which refuses only a
+`not-a-copy` answer, and its second probe before a conflict refuses,
+`interruptedAdoptionCopyState` and `INTERRUPTED_COPY_STATES` with the unlink
+`adoptContext` performs under the records lock on a `copy` answer, the sticky-`false` combining
 rule over the layers a host hands it, the four screens, the renderers built over the
 injected core, `SAFE_TOKEN`, `STATE_NEUTRAL_REASONS` and `establishesNamedState`, plus the
 core's typed errors, `ADOPTION_PROVENANCE`, the reason grammar, `supersededRecordName` /

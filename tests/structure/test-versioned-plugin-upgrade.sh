@@ -4864,7 +4864,7 @@ REFUSAL_GAPS="$(
     // incomplete in order to keep this pin simple: the test dictated what could be
     // documented instead of checking that what exists is documented. Naming the
     // exception explicitly inverts that back.
-    // A SECOND one since the shared preview owns the crash-resume check: the read-only
+    // A SECOND one since the shared preview owns the superseded-file check: the read-only
     // report prints `NOT adoptable (superseded-record-exists)` itself, so it is a
     // headline a user sees and the table has to carry.
     // A THIRD: the report prints `NOT adoptable (session-id-unusable)` before it opens
