@@ -3,10 +3,13 @@ paths:
   - "hooks/stop-chain-enforcer.sh"
   - "hooks/lib/zensu-stop-deadline.sh"
   - "hooks/lib/zensu-prompt-deadline.sh"
+  - "hooks/lib/zensu-supervise.sh"
+  - "hooks/lib/zensu-linked-session.sh"
   - "hooks/lib/stop-idle-probe-v1.js"
   - "hooks/lib/zensu-session.sh"
   - "hooks/lib/session-control-core-v1.js"
   - "tests/structure/test-stop-enforcer-latency.sh"
+  - "tests/structure/test-linked-session-route.sh"
   - "tests/structure/test-deferred-review-claim.sh"
 ---
 
@@ -55,10 +58,11 @@ the early exit releases past it.
   machinery could not run (lease contention, storage preparation) while none of the files it
   looks for exist, the early exit releases.
 
-**Deadline.** The hook re-runs itself as `--zensu-stop-worker` in its own process group
-(`set -m`), with stdin, stdout and stderr in a private `mktemp -d` directory. The watchdog is a
-second job in a process group of its own: at the deadline it marks the directory and sends
-`SIGKILL` to the worker's group. A decision already written is forwarded and stands; otherwise
+**Deadline.** The hook re-runs itself as `--zensu-stop-worker` through `zensu_supervise`, the one
+process-group supervisor in `hooks/lib/zensu-supervise.sh` (§"One supervisor" below): the worker
+runs in its own process group (`set -m`), with stdin, stdout and stderr in a private `mktemp -d`
+directory. The watchdog is a second job in a process group of its own: at the deadline it marks the
+directory and sends `SIGKILL` to the worker's group. A decision already written is forwarded and stands; otherwise
 the Stop is RELEASED with a stderr notice, and the supervisor writes the same text as a
 `systemMessage` because the worker's stdout file is empty. `SIGTERM`, `SIGINT` or `SIGHUP` to
 the supervisor kills both groups at once.
@@ -66,8 +70,9 @@ the supervisor kills both groups at once.
 - **Neither group is the host's, and that is what keeps the bound.** A hook shares the Claude
   Code CLI's process group, and the host can reap that group. When the
   supervisor dies that way, the watchdog outlives it, kills the worker at the deadline and
-  removes the directory. Every kill names a job leader's own group (`kill -- -<leader>`) and
-  falls back to the bare pid; nothing here may ever use `kill 0`, which from a shared group
+  removes the directory. Every kill names a job leader's own group (`kill -- -<leader>`), and the
+  bare pid only where the job led no group of its own when it started; nothing here may ever use
+  `kill 0`, which from a shared group
   would kill the host.
 - Worker output goes to files, never to the host's pipes, so a surviving grandchild cannot hold
   them open. A kill mid-lease is safe: `artifactIsStale` treats a dead owner as stale at once.
@@ -82,18 +87,6 @@ the supervisor kills both groups at once.
   (green run 36556263889, session setup included), and a deadline near that figure would
   silently stop enforcing there. The floor keeps a lowered value above an ordinary macOS or
   Linux armed Stop.
-- **Copies.** `hooks/lib/zensu-prompt-deadline.sh` supervises `hooks/user-prompt-tdd-reminder.sh`
-  and `hooks/user-prompt-zen-mode.sh` with the same worker, watchdog, kill, cleanup and abort shape
-  (`.claude/rules/session-delivery-route.md` §"The reminder's time budget",
-  `.claude/rules/prompt-origin.md` §"Process budget"), and
-  `_zensu_linked_session_answer` in `hooks/lib/zensu-linked-session.sh` runs a third, budget-only
-  group watchdog around the lineage resolver. They stay copies because the deadline action
-  differs: this hook keeps a decision already written and otherwise releases with a notice, each
-  prompt hook prints a fallback it supplies, keyed on what its worker classified and recorded,
-  and the lineage watchdog answers `deferred`; the bounds differ as well (10 to 75 s, 10 to 20 s,
-  the deadline minus a reserve). A fix to the group kill, its Git Bash fallback, the cleanup or the
-  abort traps moves every copy. One owner that takes the deadline action as a parameter is a
-  follow-up.
 - **A kill can land inside an adopting bind.** All three supervised workers bind with automatic
   adoption opted in (`.claude/rules/automatic-adoption.md`), so a deadline kill can fall
   between the adoption's copy to the superseded name and its record swap, or inside the copy.
@@ -101,6 +94,88 @@ the supervisor kills both groups at once.
   interrupted adoption (`.claude/rules/automatic-adoption.md` §"Interrupted adoptions"). A kill
   after the swap leaves a served record without its `RUNTIME_ADOPTED` entry and lease sweep, the
   residual that section names.
+
+**One supervisor (`hooks/lib/zensu-supervise.sh`).** Three callers bound a child with the same
+process-group shape: this hook, the prompt library (`hooks/lib/zensu-prompt-deadline.sh`), which
+supervises `hooks/user-prompt-tdd-reminder.sh` and `hooks/user-prompt-zen-mode.sh`
+(`.claude/rules/session-delivery-route.md` §"The reminder's time budget",
+`.claude/rules/prompt-origin.md` §"Process budget"), and the lineage read inside the reminder
+(`_zensu_linked_session_answer` in `hooks/lib/zensu-linked-session.sh`). One owner holds that
+shape, and each caller hands it the two things that differ: its bound and its deadline action.
+
+- **What the owner holds.** `zensu_supervise_files PREFIX INPUT` makes the private `mktemp -d`
+  directory with the worker's stdin and names it in `ZENSU_SUPERVISE_WORK`.
+  `zensu_supervise ACTION SECONDS WORK COMMAND...` starts COMMAND as the background job under
+  `set -m`, so it leads a process group of its own, with its stdio in WORK's files, or inherited
+  when WORK is empty. It starts the watchdog in a group of its own, which sleeps SECONDS, marks the
+  deadline in WORK, kills the worker and removes WORK once the supervisor is gone. It waits for the
+  worker with stderr discarded, kills the watchdog's group, and holds the TERM, INT and HUP abort
+  traps (143, 130, 129) and the EXIT cleanup while it runs. A worker that finished in time is
+  forwarded through `zensu_supervise_forward`, which returns 0 only when it forwarded stdout, and
+  keeps its status. At the deadline, which is WORK's marker, or exit status 137 without WORK, the
+  owner calls `ACTION WORK` instead and returns the action's status.
+- **The directory's names.** The owner writes `in`, `out`, `err` and `deadline` in WORK, and only
+  the owner reads `out` and `err`: an action asks `zensu_supervise_forward`. The prompt library adds
+  its own names in the same directory (`done`, `classified`, `fact-<name>`) and its worker checks
+  `in`, so a rename of `in` or `deadline` touches `hooks/lib/zensu-prompt-deadline.sh` too.
+- **Every kill.** `_zensu_supervise_kill_group LEADER MODE` refuses an empty leader, `0`, `1`, a
+  zero-led and a non-numeric one, so no kill can reach `kill -- -1` or the caller's own group. Right
+  after the start the owner records whether the worker leads a group of its own (`kill -0 -- -<pid>`):
+  in `group` mode every kill of the worker names its group only, so a watchdog that fires after the
+  worker was reaped signals a process that reused the ID only when that process leads a group of
+  that ID; in `pid` mode, where the job led no group, it kills the bare pid. A kill without a mode,
+  which the watchdog's own kill uses, tries the group and falls back to the bare pid.
+- **What it refuses.** Fewer than four arguments, and a non-empty WORK other than the directory the
+  last `zensu_supervise_files` made, a symlink or a missing directory, return 1 before anything
+  starts: never 2, which a Stop or prompt hook reads as blocking, and never a removal of a directory
+  the owner did not make.
+- **What each caller keeps.** This hook: the 10 to 75 s deadline and `_zensu_stop_deadline_action`,
+  which forwards a decision already written and otherwise adds the release notice and its
+  `systemMessage`. The prompt library, for the reminder and zen-mode alike: the 10 to 20 s deadline
+  less the whole seconds already spent, its worker arguments and `_zensu_prompt_deadline_action`,
+  which forwards a worker that marked its output delivered and otherwise runs the fallback its hook
+  names (`emit_deadline_fallback`, `zen_deadline_fallback`) over the facts the worker recorded. The
+  lineage read: the budget it is handed, no private directory, the resolver itself as the job, and
+  `_zensu_linked_session_deadline_action`, whose 124 `zensu_linked_session_resolve` reads as
+  `deferred`. An action receives only the directory; whatever else it needs travels in its library's
+  globals, set right before the call (`_ZENSU_STOP_DEADLINE`, `_ZENSU_PROMPT_FALLBACK`,
+  `_ZENSU_PROMPT_DEADLINE`).
+- **One fix site.** A change to a kill, its Git Bash fallback, the cleanup or the abort traps is made
+  once. `L28b` here fails when another file under `hooks/` turns job control on in any spelling
+  (`set -m`, a `set` flag group holding `m`, `set -o monitor`) or sends a kill to a negative pid, or
+  when one of the three callers stops handing `zensu_supervise` its action outside a comment. `L28c`
+  pins the owner's kills, refusals, action arguments and forwarder status, and `L28d` the two
+  deadline libraries when the owner is missing or a symlink.
+- **No new process.** The owner starts what the copies started: the directory, the worker, the
+  watchdog and its `sleep` for the two hook supervisors, and the resolver, the watchdog and its
+  `sleep` for the lineage read; the mode check is the `kill` builtin. The forwarder skips `cat` for an
+  empty file, so the reminder starts one `cat` fewer for a worker that printed nothing. Each library
+  sources the owner from its own directory by parameter expansion, with no subshell, and only when it
+  is a regular file and no symlink, as the hooks load the deadline libraries. When the owner did not
+  load, the Stop hook and the reminder run unsupervised, as they do without their deadline library,
+  and a budgeted lineage read answers `deferred` without starting the resolver (`L28d`, `L72d` in
+  `tests/structure/test-linked-session-route.sh`).
+- **Three differences from the former copies, all deliberate.** The Stop supervisor now waits on its
+  worker with stderr discarded, as the reminder's did, so a deadline kill no longer adds bash's
+  `line N: <pid> Killed: 9 …` job notice to this hook's stderr (measured on `/bin/bash` 3.2.57;
+  `L20` and `L27` require its absence); the release notice, its `systemMessage` and the exit status
+  are unchanged. The lineage read gets the abort traps: a SIGTERM, SIGINT or SIGHUP to the shell that
+  supervises it stops the resolver's and the watchdog's groups at once and exits 143, 130 or 129,
+  the status that signal gave the shell before, where the two groups used to run on until the budget
+  (`L72c`). The reminder's deadline kills that shell with SIGKILL, which runs no trap, so a resolver
+  and its watchdog still outlive a reminder deadline (`L72`, `L72b`). And a worker that led its own
+  group is killed through that group alone: the bare-pid fallback the three copies always added now
+  runs only in `pid` mode.
+- **Bounds.** The owner holds the shell's TERM, INT, HUP and EXIT traps while it runs and clears
+  them when it returns, and it leaves job control off (`set +m`) whatever the caller had, so a
+  caller supervises from a shell that exits right after it, as both hook supervisors do, or from a
+  subshell, as the lineage read does inside its command substitution. Moving the lineage read out of
+  that substitution would let the owner clear the reminder worker's own EXIT trap
+  (`zensu_prompt_delivered`). The watchdog removes the directory only once the supervisor's PID is
+  gone; that PID is `BASHPID`, or `$$` on bash 3.2, which has no `BASHPID`, so a caller with a
+  private directory supervises from its shell's top level. A prefix assignment on the call reaches
+  the job: the lineage read passes the resolver's two variables that way, and on `/bin/bash` 3.2.57
+  they reach the background job and do not outlive the call.
 
 **User-visible notices (`stop_notice` + `emit_stop_notices`).** Claude Code shows the stderr of
 an exit-0 Stop hook to nobody (read from the host binary; `.claude/rules/autopilot-run-scope.md`
@@ -378,3 +453,7 @@ or config key. Routing the denial-note name through `zensu_session_key_canonical
 persisted shape: a canonical key yields the same file name as before. The lease checks, exit codes 64–66 and the
 keeper lines are internal to `_tdd_locked_run`, and the third arguments of `tdd_chain_snapshot`
 and `zensu_hook_principal` are optional, so every two-argument caller sees what it saw before.
+The one supervisor is `patch` on the same walk: no schema field, strict key set, hook, matcher,
+config key or attestation moves. Three in-tree libraries share one owner; the only output that
+changes is a bash job notice no longer written to a released Stop's stderr, and the lineage read
+now stops its resolver and watchdog on a signal it did not trap before.

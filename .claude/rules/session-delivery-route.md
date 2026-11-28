@@ -9,6 +9,7 @@ paths:
   - "hooks/lib/desktop-store-read-v1.js"
   - "hooks/lib/zensu-linked-session.sh"
   - "hooks/lib/zensu-prompt-deadline.sh"
+  - "hooks/lib/zensu-supervise.sh"
   - "hooks/lib/zensu-doctor.sh"
   - "hooks/lib/zensu-doctor-report.js"
   - "hooks/session-start-banner.sh"
@@ -357,14 +358,16 @@ children on a linked first prompt, one verification. `L59` in
 `tests/structure/test-linked-session-route.sh` holds at most nine and exactly one.
 
 **A deadline for the whole hook.** `hooks/lib/zensu-prompt-deadline.sh` re-runs the reminder as a
-worker in its own process group, with stdin, stdout and stderr in a private `mktemp -d` directory,
-and a watchdog in a group of its own kills that group at the deadline: 20 s by default,
+worker through the supervisor the Stop hook and the lineage read share, `zensu_supervise` in
+`hooks/lib/zensu-supervise.sh` (`.claude/rules/stop-latency.md` §"One supervisor"): the worker runs
+in its own process group, with stdin, stdout and stderr in a private `mktemp -d` directory, and a
+watchdog in a group of its own kills that group at the deadline: 20 s by default,
 `ZENSU_PROMPT_DEADLINE_SECONDS` clamped to 10 to 20 s, under the registration's explicit `"timeout":
 30` (`L65` holds the registration at least 10 s above the ceiling). The floor sits above the 6 s
-lineage reserve, so a lowered value still leaves the lineage read time to run. The design follows
-the Stop hook's supervisor and stays a copy of it (`.claude/rules/stop-latency.md` §"Deadline" says
-why), with its residuals: on Git Bash the group kill is unverified, the supervisor itself still
-needs the CPU to start, and a kill can land inside an adopting bind. A worker that finished is
+lineage reserve, so a lowered value still leaves the lineage read time to run. The reminder hands
+the supervisor its own bound and its own deadline action, `_zensu_prompt_deadline_action`, and
+carries the supervisor's residuals: on Git Bash the group kill is unverified, the supervisor itself
+still needs the CPU to start, and a kill can land inside an adopting bind. A worker that finished is
 forwarded as it wrote, and so is one the deadline met after it marked its output delivered: the
 reminder calls `zensu_prompt_delivered` after each emission and before the prompt ledger, and the
 supervisor then exits 0 whatever status the kill left. A worker killed before that leaves the
@@ -419,8 +422,11 @@ spelled-out class.
 
 **A budget for the lineage.** The worker hands `zensu_linked_session_resolve` the seconds left until
 the deadline minus the 6 s reserve it passes to `zensu_prompt_lineage_budget` for the rest of its
-run. The resolver then runs in its own process group under a watchdog inside the command
-substitution; one the watchdog kills answers `deferred`,
+run. The resolver then runs through the same supervisor inside the command substitution, without a
+private directory: it is the background job itself, so it leads a process group of its own and its
+watchdog another, and its stdout is the substitution's pipe. One the watchdog kills exits 137, which
+the lineage read's deadline action `_zensu_linked_session_deadline_action` answers as 124, so it
+answers `deferred`,
 writes no marker, and the field comes from the ordinary ladder in the full text (`L60`), so the
 session's own marker and a configured default still decide it (`L60b`); the next prompt resolves
 again (`L61`). A spent budget answers `deferred` without starting the resolver
@@ -430,8 +436,14 @@ that stops the worker during a lineage read caches no answer, and leaves a hung 
 until its watchdog stops it at the lineage budget and then exits (`L72`). A resolver that answers
 after the deadline exits on its own, while its watchdog, orphaned before the worker could stop it,
 sleeps out the budget and then exits (`L72b`). Its last act is the kill it was started for, aimed at
-a group that no longer exists: should the system reuse that process ID within those seconds, the
-process or group now holding it gets the signal, a residual no check covers. The reserve places that budget before the deadline, and the watchdog
+a group that no longer exists. That kill names the group alone, because the resolver led it when it
+started (`.claude/rules/stop-latency.md` §"One supervisor", "Every kill"): should the system reuse
+that process ID within those seconds, only a process that leads a group of that ID gets the signal,
+a residual no check covers. The supervisor's abort
+traps reach the lineage read as well: a SIGTERM, SIGINT or SIGHUP to the shell that supervises it
+stops the resolver's and the watchdog's groups at once and exits 143, 130 or 129 (`L72c`). The
+reminder's deadline stops that shell with a SIGKILL, which runs no trap, so the two cases above keep
+their resolver and watchdog. The reserve places that budget before the deadline, and the watchdog
 counts it from the resolver's start, so a resolver outlives the deadline only when the steps between
 reading the budget and starting the resolver took longer than the reserve less one second, because
 the worker reads the time spent from bash's whole-second `SECONDS`.
@@ -624,7 +636,7 @@ route: a route change moves only the field, and every shape of the reminder carr
   processes through a `node` shim on `PATH`. It skips on native Windows, where the store layout
   it builds is unverified, and carries no native-Windows marker, so
   `windows-native-structure.v1.json` does not list it. It has no `ci-shard-weights.v1.json`
-  figure yet; take one from its first green CI run. Its budget block (`L59` to `L72b`) classifies
+  figure yet; take one from its first green CI run. Its budget block (`L59` to `L72d`) classifies
   every `node` child through a second shim by literals it shares with the code: the inline
   `core.readContext({ recordsDir, sessionId: key })` of `zensu_resolve_project_dir`, the
   resolver's file name, `ZENSU_DIRECTIVE_PLACEHOLDERS` of the substitution,
@@ -634,20 +646,27 @@ route: a route change moves only the field, and every shape of the reminder carr
   watchdog that stops starting `sleep` from `PATH`, or sleeps longer than the deadline or more than
   `PD_SLACK` seconds less, turns `L69` and `L71` red, and a lineage watchdog that stops sleeping the
   exact budget turns `L72` and `L72b` red. The hung-child cases wait for real deadlines; the
-  hook-level fallback cases run side by side, and so do the two lineage cases, which wait about 12 s.
+  hook-level fallback cases run side by side, and so do the two lineage cases, which wait about 12 s;
+  `L72c` stops a supervised lineage read with a SIGTERM, a SIGINT and a SIGHUP, each through a
+  `perl` wrapper that restores the SIGINT a background job starts with ignored, and waits for no
+  budget; `L72d` hides the supervisor and requires 124 at once with no resolver started.
 - The time budget: `hooks/lib/zensu-prompt-deadline.sh` (the clamp, `zensu_prompt_supervise`,
-  the worker entry, `zensu_prompt_classified`, `zensu_prompt_record`, `zensu_prompt_recorded`,
+  the deadline action `_zensu_prompt_deadline_action` with the globals `_ZENSU_PROMPT_FALLBACK` and
+  `_ZENSU_PROMPT_DEADLINE` that carry its fallback and deadline, the worker entry,
+  `zensu_prompt_classified`, `zensu_prompt_record`, `zensu_prompt_recorded`,
   `zensu_prompt_delivered`, `zensu_prompt_lineage_budget`); the reminder's `CI_NOTE`, the `TDD_*`
   sentences and `decided_line` it defines above the supervise call, `emit_deadline_fallback` with
   its six field spellings, which `zensu_delivery_route_field` renders, the stubs it defines when the
-  library does not load, and its three `zensu_prompt_delivered` calls; the optional budget and
-  `_zensu_linked_session_answer` in `hooks/lib/zensu-linked-session.sh`, the third copy of the
-  group watchdog (`.claude/rules/stop-latency.md`); and the reminder's `"timeout": 30` in
-  `hooks/hooks.json`. Zen-mode is the library's second caller (`zen_deadline_fallback`, its
-  `"timeout": 30`), so a change to the library's contract moves both hooks. `Z119c` in
-  `tests/structure/test-zen-mode.sh` drives `zen_deadline_fallback` against the library's
-  private state: it sets `_ZENSU_PROMPT_SUPERVISED_WORK` and writes the `fact-off` file that
-  `zensu_prompt_recorded` reads, so a change to that layout moves the zen suite too.
+  library does not load, and its three `zensu_prompt_delivered` calls; the optional budget,
+  `_zensu_linked_session_answer` and its deadline action `_zensu_linked_session_deadline_action` in
+  `hooks/lib/zensu-linked-session.sh`; `hooks/lib/zensu-supervise.sh`, the one supervisor the two
+  prompt hooks and the lineage read share with the Stop hook (`.claude/rules/stop-latency.md`
+  §"One supervisor"); and the reminder's `"timeout": 30` in `hooks/hooks.json`. Zen-mode is the
+  library's second caller (`zen_deadline_fallback`, its `"timeout": 30`), so a change to the
+  library's contract moves both hooks. `Z119c` in `tests/structure/test-zen-mode.sh` drives
+  `zen_deadline_fallback` against the library's private state: it sets
+  `_ZENSU_PROMPT_SUPERVISED_WORK` and writes the `fact-off` file that `zensu_prompt_recorded`
+  reads, so a change to that layout moves the zen suite too.
 - `evals/plan-approval-hook/`: `route_recorded` in the runner grades `T2.9` on the marker the
   helper writes, through `zensu_delivery_route_marker_path` and
   `zensu_delivery_route_marker_state` rather than a copy of either, the expect script's

@@ -2438,4 +2438,43 @@ PD_LTOOK=$((SECONDS - PD_L0))
 [ "$LH_C" = "down down down" ] || { pd_reap "$LH_RESOLVER" sleep; pd_reap "$LH_SLEEP" sleep; pd_reap "$LH_WATCH" worker-lineage.sh; }
 [ "$LA_C" = "down down" ] || { pd_reap "$LA_RESOLVER" sleep; pd_reap "$LA_SLEEP" sleep; pd_reap "$LA_WATCH" worker-lineage.sh; }
 
+LT_BUDGET=30
+LT_BAD=""
+LT_T0=$SECONDS
+for lt_pair in TERM:143 INT:130 HUP:129; do
+  LT_SIG="${lt_pair%%:*}"
+  LT_DIR="$PD/lineage-$LT_SIG"; mkdir -p "$LT_DIR"
+  MARK_DIR="$LT_DIR" ZT_HANG=resolver ZT_HANG_FOR=120 PATH="$PD/shim:$BSHIM:$PATH" \
+    perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or exit 127' \
+    bash -c 'source "$0"; source "$1"; _zensu_linked_session_answer "$2" term-probe "$3"' \
+    "$CONFIG_LIB" "$LINKED_LIB" "$WT" "$LT_BUDGET" >/dev/null 2>&1 &
+  LT_SHELL=$!
+  PD_TRIES=0
+  while [ "$PD_TRIES" -lt 100 ] && { [ ! -s "$LT_DIR/sleep.120" ] || [ ! -s "$LT_DIR/parent.$LT_BUDGET" ]; }; do
+    sleep 0.1; PD_TRIES=$((PD_TRIES + 1))
+  done
+  LT_RESOLVER="$(cat "$LT_DIR/sleep.120" 2>/dev/null)"; LT_WATCH="$(cat "$LT_DIR/parent.$LT_BUDGET" 2>/dev/null)"
+  kill -"$LT_SIG" "$LT_SHELL" 2>/dev/null
+  wait "$LT_SHELL"; LT_RC=$?
+  LT_AFTER="$(pd_down_within "$LT_RESOLVER" 30) $(pd_down_within "$LT_WATCH" 30)"
+  { [ "$LT_RC" = "${lt_pair#*:}" ] && [ -n "$LT_RESOLVER" ] && [ -n "$LT_WATCH" ] && [ "$LT_AFTER" = "down down" ]; } \
+    || LT_BAD="$LT_BAD $LT_SIG:rc=$LT_RC,resolver=$LT_RESOLVER,watchdog=$LT_WATCH,after=$LT_AFTER"
+  [ "$LT_AFTER" = "down down" ] || { pd_reap "$LT_RESOLVER" sleep; pd_reap "$LT_WATCH" bash; }
+done
+LT_TOOK=$((SECONDS - LT_T0))
+{ [ -z "$LT_BAD" ] && [ "$LT_TOOK" -lt "$LT_BUDGET" ]; } \
+  && check "L72c a SIGTERM, SIGINT or SIGHUP to the shell that supervises a lineage read stops the resolver and its watchdog at once and exits 143, 130 or 129, through the abort traps the shared supervisor gives every caller (${LT_TOOK}s for all three)" PASS \
+  || check "L72c signal during a lineage read (bad:${LT_BAD:- none} took=${LT_TOOK}s)" FAIL
+
+LD_DIR="$PD/lineage-no-owner"; mkdir -p "$LD_DIR"
+LD_T0=$SECONDS
+LD_RC="$(MARK_DIR="$LD_DIR" ZT_HANG=resolver ZT_HANG_FOR=120 PATH="$PD/shim:$BSHIM:$PATH" \
+  bash -c 'source "$0"; source "$1"; unset -f zensu_supervise; _zensu_linked_session_answer "$2" no-owner-probe 5 >/dev/null; printf "%s" "$?"' \
+  "$CONFIG_LIB" "$LINKED_LIB" "$WT" 2>/dev/null)"
+LD_TOOK=$((SECONDS - LD_T0))
+{ [ "$LD_RC" = 124 ] && [ ! -e "$LD_DIR/sleep.120" ] && [ "$LD_TOOK" -lt 5 ]; } \
+  && check "L72d a budgeted lineage read without its supervisor answers 124, which zensu_linked_session_resolve reads as deferred, at once and starts no resolver" PASS \
+  || check "L72d lineage read without the supervisor (rc=$LD_RC resolver=$([ -e "$LD_DIR/sleep.120" ] && echo started || echo none) took=${LD_TOOK}s)" FAIL
+[ -e "$LD_DIR/sleep.120" ] && pd_reap "$(cat "$LD_DIR/sleep.120" 2>/dev/null)" sleep
+
 finish

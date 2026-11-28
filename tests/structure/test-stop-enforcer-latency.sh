@@ -6,6 +6,7 @@ STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 PROBE="$PLUGIN_DIR/hooks/lib/stop-idle-probe-v1.js"
 DEADLINE_LIB="$PLUGIN_DIR/hooks/lib/zensu-stop-deadline.sh"
+SUPERVISE_LIB="$PLUGIN_DIR/hooks/lib/zensu-supervise.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 SESSION_LIB="$PLUGIN_DIR/hooks/lib/zensu-session.sh"
 REAL_NODE="$(command -v node)"
@@ -23,7 +24,7 @@ check() {
   else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$STOP" "$LOG" "$PROBE" "$DEADLINE_LIB" "$HOOKS_JSON" "$SESSION_LIB"; do
+for f in "$STOP" "$LOG" "$PROBE" "$DEADLINE_LIB" "$SUPERVISE_LIB" "$HOOKS_JSON" "$SESSION_LIB"; do
   if [ ! -f "$f" ]; then
     check "L0 required file exists: $f" FAIL
     echo "----"
@@ -44,7 +45,8 @@ WORK="$(cd "$WORK" && pwd -P)"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 export ZENSU_CONFIG="$WORK/no-such-config.json"
-unset CLAUDE_AGENT_TYPE ZENSU_CHAIN ZENSU_AUTOPILOT CLAUDE_SESSION_ID ZENSU_STOP_DEADLINE_SECONDS 2>/dev/null || true
+unset CLAUDE_AGENT_TYPE ZENSU_CHAIN ZENSU_AUTOPILOT CLAUDE_SESSION_ID ZENSU_STOP_DEADLINE_SECONDS \
+  CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID 2>/dev/null || true
 
 mkdir -p "$WORK/count-shim" "$WORK/hang-shim"
 cat >"$WORK/count-shim/node" <<EOF
@@ -446,8 +448,8 @@ drive 2 "$WORK/worker-hang.sh" '{"p":1}' >"$WORK/d.out" 2>"$WORK/d.err"
 D_RC=$?
 ELAPSED=$(( $(date +%s) - T0 ))
 if [ "$D_RC" -eq 0 ] && deadline_notice_only "$WORK/d.out" "$WORK/d.err" && [ "$ELAPSED" -le 15 ] \
-    && grep -q 'releasing Stop' "$WORK/d.err" && grep -q 'partial stderr' "$WORK/d.err"; then
-  check "L20 a worker past the deadline is stopped and the Stop is released with a notice (${ELAPSED}s for a 2 s deadline)" PASS
+    && grep -q 'releasing Stop' "$WORK/d.err" && grep -q 'partial stderr' "$WORK/d.err" && ! grep -q 'Killed' "$WORK/d.err"; then
+  check "L20 a worker past the deadline is stopped and the Stop is released with a notice and no bash job notice (${ELAPSED}s for a 2 s deadline)" PASS
 else
   check "L20 deadline release (rc=$D_RC elapsed=${ELAPSED}s err=$(cat "$WORK/d.err"))" FAIL
 fi
@@ -533,8 +535,8 @@ printf '{"hook_event_name":"Stop","session_id":"lat-hang","cwd":"%s"}' "$CLAUDE_
 H_RC=$?
 ELAPSED=$(( $(date +%s) - T0 ))
 if [ "$H_RC" -eq 0 ] && deadline_notice_only "$WORK/out" "$WORK/err" && [ "$ELAPSED" -ge "$EXPECTED_MIN" ] \
-    && [ "$ELAPSED" -le $((EXPECTED_MIN + 15)) ] && grep -q 'releasing Stop' "$WORK/err"; then
-  check "L27 the real Stop hook with a hung child is released at its ${EXPECTED_MIN} s deadline (took ${ELAPSED}s)" PASS
+    && [ "$ELAPSED" -le $((EXPECTED_MIN + 15)) ] && grep -q 'releasing Stop' "$WORK/err" && ! grep -q 'Killed' "$WORK/err"; then
+  check "L27 the real Stop hook with a hung child is released at its ${EXPECTED_MIN} s deadline with no bash job notice (took ${ELAPSED}s)" PASS
 else
   check "L27 real hook deadline (rc=$H_RC elapsed=${ELAPSED}s err=$(cat "$WORK/err"))" FAIL
 fi
@@ -547,6 +549,99 @@ if [ -s "$WORK/hang-pids" ] && [ "$HUNG_ALIVE" -eq 0 ]; then
   check "L28 no hung child of the real hook survives the deadline" PASS
 else
   check "L28 hung children still alive: $HUNG_ALIVE (recorded: $(wc -l <"$WORK/hang-pids" | tr -d ' '))" FAIL
+fi
+
+SHAPE_JOB_CONTROL='(^|[^[:alnum:]_])set[[:space:]]+(-[[:alpha:]]*m[[:alpha:]]*|-o[[:space:]]+monitor)([^[:alnum:]_]|$)'
+SHAPE_GROUP_KILL='kill[[:space:]]+(-s[[:space:]]+[[:alnum:]]+|-[[:alnum:]]+|--)[[:space:]]+"?-'
+SHAPE_FILES="$(cd "$PLUGIN_DIR" && grep -rlE -e "$SHAPE_JOB_CONTROL" -e "$SHAPE_GROUP_KILL" hooks 2>/dev/null | sort | tr '\n' ' ')"
+SHAPE_PROBE="$(printf '%s\n' 'set -m' 'set -um 2>/dev/null' 'set -o monitor' 'kill -KILL -- "-$p"' 'kill -9 -- -"$p"' \
+  'kill -s KILL -- -$p' 'kill -KILL -"$p"' 'set +m' 'set -euo pipefail' 'kill -KILL "$p"' 'kill -0 "$p"' \
+  | grep -cE -e "$SHAPE_JOB_CONTROL" -e "$SHAPE_GROUP_KILL")"
+SUPERVISED_BY=""
+for pair in "zensu-stop-deadline.sh:_zensu_stop_deadline_action" "zensu-prompt-deadline.sh:_zensu_prompt_deadline_action" \
+    "zensu-linked-session.sh:_zensu_linked_session_deadline_action"; do
+  grep -vE '^[[:space:]]*#' "$PLUGIN_DIR/hooks/lib/${pair%%:*}" | grep -qE "zensu_supervise ${pair#*:} " \
+    && SUPERVISED_BY="$SUPERVISED_BY ${pair%%:*}"
+done
+if [ "$SHAPE_FILES" = "hooks/lib/zensu-supervise.sh " ] && [ "$SHAPE_PROBE" = 7 ] \
+    && [ "$SUPERVISED_BY" = " zensu-stop-deadline.sh zensu-prompt-deadline.sh zensu-linked-session.sh" ]; then
+  check "L28b the process-group supervisor is spelled once under hooks/, in hooks/lib/zensu-supervise.sh: no other file turns job control on in any spelling or sends a kill to a negative pid, and the Stop, reminder and lineage callers each hand it their own deadline action outside a comment" PASS
+else
+  check "L28b one supervisor (files spelling job control or a group kill: '$SHAPE_FILES'; probe spellings matched: $SHAPE_PROBE of 7; callers handing zensu_supervise their action:$SUPERVISED_BY)" FAIL
+fi
+
+L28C_KILLS="$(bash -c '
+  source "$1"
+  calls=""
+  kill() { calls="$calls|$*"; return 1; }
+  wait() { return 0; }
+  for leader in "" 0 012 1 x1 12x; do
+    _zensu_supervise_kill_group "$leader" group
+    _zensu_supervise_kill_group "$leader" pid
+    _zensu_supervise_kill_group "$leader"
+  done
+  printf "refused=%s\n" "$calls"
+  calls=""; _zensu_supervise_kill_group 4242 group; printf "group=%s\n" "$calls"
+  calls=""; _zensu_supervise_kill_group 4242 pid; printf "pid=%s\n" "$calls"
+  calls=""; _zensu_supervise_kill_group 4242; printf "default=%s\n" "$calls"
+' _ "$SUPERVISE_LIB" 2>/dev/null)"
+L28C_KILLS_WANT="$(printf '%s\n' 'refused=' 'group=|-KILL -- -4242' 'pid=|-KILL 4242' 'default=|-KILL -- -4242|-KILL 4242')"
+mkdir -p "$WORK/tmp-l28c"
+L28C_RUN="$(TMPDIR="$WORK/tmp-l28c" bash -c '
+  source "$1"
+  act() { printf "args=%s first=%s\n" "$#" "${1:-empty}"; return 5; }
+  d="$(mktemp -d)"; : >"$d/keep"
+  zensu_supervise act 1 "$d" true; printf "foreign=%s kept=%s\n" "$?" "$([ -e "$d/keep" ] && echo yes || echo no)"
+  rm -rf "$d"
+  zensu_supervise act 1 true; printf "short=%s\n" "$?"
+  zensu_supervise act 1 "" sleep 30; printf "deadline=%s\n" "$?"
+  f="$(mktemp -d)"; printf x >"$f/out"
+  zensu_supervise_forward "$f" >/dev/null; s1=$?
+  : >"$f/out"; zensu_supervise_forward "$f"; s2=$?
+  rm -rf "$f"; printf "forward=%s/%s\n" "$s1" "$s2"
+  zensu_supervise_files l28c payload; w="$ZENSU_SUPERVISE_WORK"
+  zensu_supervise act 5 "$w" cat >"$TMPDIR/l28c.out"; s=$?
+  printf "files=%s out=%s gone=%s cleared=%s\n" "$s" "$(cat "$TMPDIR/l28c.out")" \
+    "$([ -e "$w" ] && echo no || echo yes)" "${ZENSU_SUPERVISE_WORK:-yes}"
+  rm -f "$TMPDIR/l28c.out"
+' _ "$SUPERVISE_LIB" 2>/dev/null)"
+L28C_RUN_WANT="$(printf '%s\n' 'foreign=1 kept=yes' 'short=1' 'args=1 first=empty' 'deadline=5' 'forward=0/1' \
+  'files=0 out=payload gone=yes cleared=yes')"
+if [ "$L28C_KILLS" = "$L28C_KILLS_WANT" ] && [ "$L28C_RUN" = "$L28C_RUN_WANT" ] && [ -z "$(ls -A "$WORK/tmp-l28c")" ]; then
+  check "L28c the owner kills only a numeric leader that is neither 0, 1 nor zero-led, names its group in group mode and its bare pid only in pid mode, refuses a directory it did not make and a short call with the non-blocking status 1, hands an action the directory alone, reports whether it forwarded stdout, and clears the directory name it removed" PASS
+else
+  check "L28c owner contract (kills='$(printf '%s' "$L28C_KILLS" | tr '\n' ';')' run='$(printf '%s' "$L28C_RUN" | tr '\n' ';')' tmp=$(ls -A "$WORK/tmp-l28c" | wc -l | tr -d ' '))" FAIL
+fi
+
+L28D_DIR="$WORK/l28d"
+mkdir -p "$L28D_DIR/missing" "$L28D_DIR/linked" "$L28D_DIR/tmp" "$L28D_DIR/mark"
+cp "$DEADLINE_LIB" "$PLUGIN_DIR/hooks/lib/zensu-prompt-deadline.sh" "$L28D_DIR/missing/"
+cp "$DEADLINE_LIB" "$PLUGIN_DIR/hooks/lib/zensu-prompt-deadline.sh" "$L28D_DIR/linked/"
+L28D_VARIANTS="missing"
+ln -s "$SUPERVISE_LIB" "$L28D_DIR/linked/zensu-supervise.sh" 2>/dev/null \
+  && [ -L "$L28D_DIR/linked/zensu-supervise.sh" ] && L28D_VARIANTS="missing linked"
+cat >"$L28D_DIR/worker.sh" <<'EOF'
+#!/bin/bash
+: >"$MARK_DIR/ran.$1"
+EOF
+L28D_OUT=""
+for variant in $L28D_VARIANTS; do
+  L28D_OUT="$L28D_OUT $variant:$(TMPDIR="$L28D_DIR/tmp" MARK_DIR="$L28D_DIR/mark" bash -c '
+    source "$1/zensu-stop-deadline.sh"; source "$1/zensu-prompt-deadline.sh"
+    fb() { :; }
+    declare -F zensu_supervise >/dev/null 2>&1 && printf loaded || printf absent
+    zensu_stop_supervise "$2" "{}"; printf ",stop=%s" "$?"
+    zensu_prompt_supervise "$2" "{}" fb; printf ",prompt=%s" "$?"
+  ' _ "$L28D_DIR/$variant" "$L28D_DIR/worker.sh" 2>/dev/null)"
+done
+L28D_WANT=""
+for variant in $L28D_VARIANTS; do L28D_WANT="$L28D_WANT $variant:absent,stop=0,prompt=0"; done
+if [ "$L28D_OUT" = "$L28D_WANT" ] && [ -z "$(ls -A "$L28D_DIR/mark")" ] && [ -z "$(ls -A "$L28D_DIR/tmp")" ]; then
+  L28D_SCOPE="missing or a symlink"
+  [ "$L28D_VARIANTS" = missing ] && L28D_SCOPE="missing, the symlinked case skipped because this host made no symlink,"
+  check "L28d a deadline library whose supervisor is $L28D_SCOPE loads no supervisor, and the Stop and reminder supervise calls return 0 so the hook runs unsupervised, with no worker started and no directory made" PASS
+else
+  check "L28d deadline libraries without a loadable supervisor (got '$L28D_OUT' want '$L28D_WANT' mark=$(ls -A "$L28D_DIR/mark" | tr '\n' ' ') tmp=$(ls -A "$L28D_DIR/tmp" | wc -l | tr -d ' '))" FAIL
 fi
 
 echo "== one project-root verification per Stop run"
