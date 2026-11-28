@@ -2425,10 +2425,10 @@ function isSupersededRecordConflict(error) {
 }
 
 // Where adoptContext sets the previous record aside. ONE spelling, exported: the
-// shared adoption preview has to ask whether that file is already there — the
-// crash-resume shape, which a preview cannot otherwise see because it never
-// reaches the copy — and a second spelling of the name would let the two disagree
-// about which file blocks the adoption.
+// shared adoption preview has to ask whether that file is already there — a file
+// that is no provable copy of the record blocks the copy, which a preview cannot
+// otherwise see because it never reaches the copy — and a second spelling of the
+// name would let the two disagree about which file blocks the adoption.
 //
 // The version reaches a FILENAME, so the shape is ENFORCED here and no longer left
 // as a caller precondition. adoptableRecord guarantees it for every verdict it
@@ -2448,6 +2448,54 @@ function supersededRecordName(key, recordedVersion) {
 
 function supersededRecordFile(recordsDir, key, recordedVersion) {
   return path.join(recordsDir, supersededRecordName(key, recordedVersion));
+}
+
+const INTERRUPTED_COPY_STATES = Object.freeze({
+  COPY: 'copy',
+  NOT_A_COPY: 'not-a-copy',
+  INDETERMINATE: 'indeterminate',
+});
+
+function supersededFileUnchanged(file, before) {
+  try {
+    const after = fs.lstatSync(file);
+    return sameFileIdentity(before, after)
+      && before.size === after.size
+      && before.mtimeMs === after.mtimeMs
+      && before.ctimeMs === after.ctimeMs;
+  } catch {
+    return false;
+  }
+}
+
+function interruptedAdoptionCopyState(recordsDir, key, recordedVersion) {
+  let file;
+  let before;
+  try {
+    file = supersededRecordFile(recordsDir, key, recordedVersion);
+    before = fs.lstatSync(file);
+  } catch (error) {
+    return error && error.code === 'ENOENT'
+      ? INTERRUPTED_COPY_STATES.INDETERMINATE
+      : INTERRUPTED_COPY_STATES.NOT_A_COPY;
+  }
+  let copy;
+  try {
+    copy = readRegularFileSnapshot(file).data;
+  } catch {
+    return supersededFileUnchanged(file, before)
+      ? INTERRUPTED_COPY_STATES.NOT_A_COPY
+      : INTERRUPTED_COPY_STATES.INDETERMINATE;
+  }
+  let record;
+  try {
+    record = readRegularFileSnapshot(contextRecordFile(recordsDir, key)).data;
+  } catch {
+    return INTERRUPTED_COPY_STATES.INDETERMINATE;
+  }
+  return copy.length <= record.length && copy.equals(record.subarray(0, copy.length))
+    ? INTERRUPTED_COPY_STATES.COPY
+    : INTERRUPTED_COPY_STATES.NOT_A_COPY;
 }
 
 function contextRecordLocation(options) {
@@ -2480,9 +2528,8 @@ function supersedeContextRecord(file, supersededFile, next) {
     fs.copyFileSync(file, supersededFile, fs.constants.COPYFILE_EXCL);
   } catch (error) {
     if (error && error.code === 'EEXIST') {
-      // Names the file, because this is also the crash-resume shape — a death
-      // between the copy and the swap leaves it behind — and the session has
-      // no other write channel to find it with.
+      // Names the file, because the session has no other write channel to find
+      // it with.
       const conflict = new Error(`session-control-v1: a superseded record already exists and adoption would overwrite it: ${supersededFile}`);
       conflict.code = SUPERSEDED_EXISTS_CODE;
       conflict.supersededFile = supersededFile;
@@ -2561,6 +2608,9 @@ function adoptContext(options) {
     // no record is ever rewritten, a second one is minted beside it, and the
     // first stays readable under a name that says what happened to it.
     const supersededFile = supersededRecordFile(recordsDir, key, verdict.recorded);
+    if (interruptedAdoptionCopyState(recordsDir, key, verdict.recorded) === INTERRUPTED_COPY_STATES.COPY) {
+      fs.unlinkSync(supersededFile);
+    }
     supersedeContextRecord(file, supersededFile, next);
     return {
       context: next,
@@ -6201,7 +6251,7 @@ module.exports = {
   contextRecordLocation,
   supersedeContextRecord,
   // PRODUCTION consumers: hooks/lib/session-auto-adopt-v1.js branches on the two
-  // predicates to tell a concurrent winner (`already-served`) and a crash-resume
+  // predicates to tell a concurrent winner (`already-served`) and a superseded-file
   // conflict from every other refusal. A port that drops them reports every
   // refusal as unavailable. The constants travel with them for the unit layer.
   ADOPTION_REFUSED_CODE,
@@ -6210,6 +6260,8 @@ module.exports = {
   isSupersededRecordConflict,
   supersededRecordName,
   supersededRecordFile,
+  INTERRUPTED_COPY_STATES,
+  interruptedAdoptionCopyState,
   LOCK_TIMEOUT_CODE,
   isLockTimeout,
   // The read-only path helper. Exported because SessionStart needs to ASK where

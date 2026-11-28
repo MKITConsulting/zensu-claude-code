@@ -987,6 +987,27 @@ test('MAIN the read-only preview: an adoptable preview is the one answer that re
   assert.equal(code, 0);
 });
 
+test('MAIN the read-only report refuses only a superseded file the preview proved no copy, and reads ADOPTABLE over a copy and over a file it cannot judge', () => {
+  const realAdopter = require(path.join(LIB, 'session-auto-adopt-v1.js'));
+  const states = CORE().INTERRUPTED_COPY_STATES;
+  const previewFor = (state) => realAdopter.createAutoAdopter({
+    core: { ...CORE(), adoptableRecord: () => SEAM_ADOPTABLE, interruptedAdoptionCopyState: () => state },
+    sweep: { discardSupersededLeases: () => ({ discarded: 0, failed: [], unsafe: '', unsafeAt: '' }) },
+    fs: { lstatSync: () => ({}) },
+    readConfig: () => ({}),
+  }).previewAdoption;
+  for (const state of [states.COPY, states.INDETERMINATE]) {
+    const passing = runMain(seam({ autoAdopt: { previewAdoption: previewFor(state) } }), false);
+    assert.ok(passing.out.startsWith('Zensu session adoption — ADOPTABLE'), `${state}: ${passing.out.slice(0, 80)}`);
+    assert.equal(passing.code, 0, state);
+  }
+  const foreign = runMain(seam({ autoAdopt: { previewAdoption: previewFor(states.NOT_A_COPY) } }), false);
+  assert.ok(foreign.out.startsWith('Zensu session adoption — NOT adoptable (superseded-record-exists)'), foreign.out.slice(0, 80));
+  assert.ok(foreign.out.includes('this file could not be proven to be one.\nMove it aside, then re-run this command with --confirm.\n'), foreign.out);
+  assert.equal(foreign.out.includes('holds something else'), false);
+  assert.equal(foreign.code, 1);
+});
+
 test('MAIN a pruned minting installation is marked as pruned from the plugin cache, never as gone from disk', () => {
   const { out, code } = runMain(seam({
     core: { adoptableRecord: () => ({ ...SEAM_ADOPTABLE, prunedPluginRoot: true }) },

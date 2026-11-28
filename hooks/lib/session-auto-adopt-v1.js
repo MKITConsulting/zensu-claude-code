@@ -439,6 +439,9 @@ function createAutoAdopter(deps) {
   const alreadyServed = core.ADOPTION_REFUSALS && typeof core.ADOPTION_REFUSALS.ALREADY_SERVED === 'string'
     ? core.ADOPTION_REFUSALS.ALREADY_SERVED
     : 'already-served';
+  const racedRefusals = new Set(['RECORD_UNREADABLE', 'WORKFLOW_SCHEMA']
+    .map((name) => (core.ADOPTION_REFUSALS ? core.ADOPTION_REFUSALS[name] : undefined))
+    .filter((reason) => typeof reason === 'string'));
   // An injected reader answers ONE merged config (the unit seam); the default
   // reader answers the layers, so a `false` in either one switches the path off.
   const readLayers = typeof options.readConfig === 'function'
@@ -500,15 +503,25 @@ function createAutoAdopter(deps) {
     }
   }
 
-  // The probe once more, for a caller that waited on the records lock until it
-  // timed out: the holder was very likely a sibling that has finished by now. Only
-  // the served answer is used; any other answer, or a throw, leaves the timeout.
-  function servesNow(request) {
+  // The probe once more, for a caller about to report a failure that a sibling's
+  // finished adoption explains: a wait on the records lock that timed out, or a
+  // superseded file the preview found to be no copy of the record it read, which a
+  // sibling's swap produces as well. Only the served answer is used; any other
+  // answer, or a throw, leaves the caller's own answer.
+  function servedProbe(request) {
     try {
       const probe = core.adoptableRecord(coreOptions(request));
-      return Boolean(probe) && probe.ok !== true && probe.reason === alreadyServed;
+      return Boolean(probe) && probe.ok !== true && probe.reason === alreadyServed ? probe : null;
     } catch {
-      return false;
+      return null;
+    }
+  }
+
+  function probeAgain(request, first) {
+    try {
+      return core.adoptableRecord(coreOptions(request));
+    } catch {
+      return first;
     }
   }
 
@@ -516,16 +529,23 @@ function createAutoAdopter(deps) {
   // lstat, never existsSync or stat: adoptContext's own check is COPYFILE_EXCL,
   // which a DANGLING link at that name trips as well, and a followed link would
   // answer "absent" for exactly the file that refuses the copy. A core that
-  // predates the shared name, a version the name refuses, and any read fault all
-  // answer null — the retry token is then the honest one.
+  // predates the shared name, a version the name refuses, and a fault of this
+  // lstat answer null — the retry token is then the honest one. The core's
+  // not-a-copy answer, a failed read of an unchanged file included, answers the
+  // path, and so does a core without the copy predicate.
   function supersededConflict(request, recorded) {
     if (typeof recorded !== 'string'
         || typeof core.supersededRecordFile !== 'function'
         || typeof core.sessionKey !== 'function') return null;
     try {
-      const file = core.supersededRecordFile(request.recordsDir, core.sessionKey(request.sessionId), recorded);
+      const key = core.sessionKey(request.sessionId);
+      const file = core.supersededRecordFile(request.recordsDir, key, recorded);
       fsModule.lstatSync(file);
-      return file;
+      const states = core.INTERRUPTED_COPY_STATES;
+      if (typeof core.interruptedAdoptionCopyState !== 'function' || !states) return file;
+      return core.interruptedAdoptionCopyState(request.recordsDir, key, recorded) === states.NOT_A_COPY
+        ? file
+        : null;
     } catch {
       return null;
     }
@@ -549,6 +569,7 @@ function createAutoAdopter(deps) {
         error: errorMessage(error),
       });
     }
+    if (probe && probe.ok !== true && racedRefusals.has(probe.reason)) probe = probeAgain(request, probe);
     const state = probeState(probe);
     if (!probe || probe.ok !== true) {
       const reason = probe && typeof probe.reason === 'string' ? probe.reason : AUTO_ADOPT_REASONS.PROBE_FAILED;
@@ -567,16 +588,20 @@ function createAutoAdopter(deps) {
       }
       return verdict(AUTO_ADOPT_OUTCOMES.REFUSED, reason, state);
     }
-    // The crash-resume shape, asked HERE so every consumer of this preview agrees
-    // about it. The record is adoptable, yet a superseded file from an interrupted
-    // adoption already sits at the name adoptContext would copy to, and its
-    // COPYFILE_EXCL refuses every later attempt until the file is moved — so
-    // "retry" would be a loop. It used to be asked by the hook binder alone, which
-    // left the read-only report answering ADOPTABLE for a state the deny named as
-    // a refusal. Above the opt-out for the reason the opt-out comment gives: a
+    // The superseded-file conflict, asked HERE so every consumer of this preview
+    // agrees about it. It used to be asked by the hook binder alone, which left the
+    // read-only report answering ADOPTABLE for a state the deny named as a
+    // refusal. Above the opt-out for the reason the opt-out comment gives: a
     // refusal keeps its own reason under the opt-out too.
     const blocking = supersededConflict(request, state.recorded);
     if (blocking !== null) {
+      const served = servedProbe(request);
+      if (served !== null) {
+        return verdict(AUTO_ADOPT_OUTCOMES.ALREADY_SERVED, alreadyServed, {
+          ...probeState(served),
+          recorded: request.observedRecorded,
+        });
+      }
       return verdict(AUTO_ADOPT_OUTCOMES.REFUSED, AUTO_ADOPT_REASONS.SUPERSEDED_EXISTS, {
         ...state,
         supersededFile: blocking,
@@ -627,7 +652,7 @@ function createAutoAdopter(deps) {
         });
       }
       if (isLockTimeout(error)) {
-        if (servesNow(request)) {
+        if (servedProbe(request) !== null) {
           return verdict(AUTO_ADOPT_OUTCOMES.ALREADY_SERVED, AUTO_ADOPT_REASONS.ADOPTED_CONCURRENTLY, {
             ...failed,
             leases: sweepServed(request),

@@ -5290,7 +5290,7 @@ function parentheticalWriter() {
 // bind began adopting on its own. Four things it has to get right, each of which
 // one spelling of it got wrong: reaching the row means the automatic adoption
 // already ran and did not bind the session; the read-only report prints a refusal
-// — or names the superseded record file an interrupted adoption left behind —
+// — or names a superseded record file that is no provable copy of the record —
 // only for a record the adoption REFUSES; an ADOPTABLE answer there has TWO causes
 // and not one, the opt-out (which governs the automatic path only) and an adoption
 // that did not complete (a lock timeout, or a fault inside the adoption itself),

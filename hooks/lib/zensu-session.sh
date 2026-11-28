@@ -341,8 +341,8 @@ zensu_session_pruned_plugin_root_model() {
 # Prints ONE token on stdout naming why the automatic adoption did not bind this
 # session: an ADOPTION_REFUSALS value, `opted-out`, `adopted-concurrently` (a
 # sibling hook won the lock and the record serves now — retry the call),
-# `superseded-record-exists` (adoptable, but the file an interrupted adoption left
-# behind is in the way — moving it is the remedy, a retry is a loop) or
+# `superseded-record-exists` (adoptable, but a file that is not a provable copy of
+# the record is in the way — moving it is the remedy, a retry is a loop) or
 # `not-completed` (adoptable, yet the caller's own bind failed inside the
 # adoption — a lock timeout; retry). Read-only: it previews and never adopts.
 # Non-zero when the question cannot be answered — which includes a record that
@@ -746,7 +746,7 @@ _zensu_adoption_refusal_remedy() {
     (not-completed|lock-timeout)
       printf '%s' 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call' ;;
     (superseded-record-exists)
-      printf '%s' 'A superseded record from an interrupted adoption is already in place; /zensu:adopt-session names the file, and moving it aside lets the adoption complete' ;;
+      printf '%s' 'The file at the superseded record name is not a provable copy of this record; /zensu:adopt-session names the file, and moving it aside lets the adoption complete' ;;
     (*)
       printf '%s' 'Run /zensu:adopt-session for the full report, and /zensu:adopt-session --confirm to retry the adoption by hand' ;;
   esac

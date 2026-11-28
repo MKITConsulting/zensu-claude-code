@@ -636,9 +636,10 @@ function adoptionRefusalToken(payload, environment = process.env) {
     case OUTCOMES.ADOPTABLE:
       // Adoptable, yet the caller's own bind failed inside adoptContext: a lock
       // timeout, or a fault in the adoption itself — a retry. The OTHER cause that
-      // used to be separated here, a superseded record already in place, is asked
-      // by the shared preview now and arrives above as a REFUSED verdict, so the
-      // hook deny, the manual report and the adoption agree about that state.
+      // used to be separated here, a superseded record that is no provable copy of
+      // the record, is asked by the shared preview now and arrives above as a
+      // REFUSED verdict, so the hook deny, the manual report and the adoption agree
+      // about that state.
       return REASONS.NOT_COMPLETED;
     default:
       return null;
