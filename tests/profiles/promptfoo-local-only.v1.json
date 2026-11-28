@@ -127,6 +127,7 @@
     "test-session-control-claude.sh",
     "test-session-control-core.sh",
     "test-session-control-sandbox-hook-integration.sh",
+    "test-session-hub-interaction.sh",
     "test-session-hub-plugin.sh",
     "test-session-hub-receipt.sh",
     "test-session-hub-takeover-notice.sh",

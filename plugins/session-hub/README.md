@@ -7,7 +7,7 @@ another. To move a session it types a takeover command into a new session, waits
 for this plugin's receipt, and it reads the limits this plugin's usage feed
 writes.
 
-The plugin holds three things and nothing else:
+The plugin holds four things and nothing else:
 
 - `/session-hub:session-trail`, which lists the Claude Code sessions on this
   machine, shows what one is doing, takes one over, releases the old one so it
@@ -18,6 +18,9 @@ The plugin holds three things and nothing else:
   takeover command reaches a session.
 - The hooks module `hooks/usage-feed.ts`, which writes the rate-limit readings
   the Session Hub shows.
+- The courier launcher `hooks/lib/session-hub-courier-v1.mjs` and its contract
+  `hooks/interaction-contract.json`, through which a later release lets a hook
+  reach the Session Hub. No hook or module starts it yet.
 
 It needs no Zensu account, no `zensu` CLI and not the Zensu plugin.
 
@@ -117,6 +120,33 @@ module API, which can change between releases. Anthropic can also switch modules
 of installed plugins off at any time. The feed then writes nothing, the receipt
 hook keeps running, and the Session Hub reads the limits from Claude's usage
 popover as it does without the plugin.
+
+## The Session Hub channel
+
+A later release lets a session reach the Session Hub directly: a hook or the
+hooks module starts the courier, a small program inside the Session Hub app,
+which connects to the Session Hub over a private Unix socket and relays one
+line each way. This plugin already ships the launcher and the contract file
+`hooks/interaction-contract.json`, which tells the Session Hub which channel
+the plugin speaks. No hook or module starts the courier yet.
+
+Before every start the launcher reads the Session Hub's pointer
+`<config root>/zensu/session-hub/v1/hub.json`, which names the socket and the
+courier, and checks the courier with `/usr/bin/codesign` against the Session
+Hub's release signature (team `3P6C5C4S5B`, identifier
+`dev.zensu.session-hub.courier`). The pointer is only a hint: a courier that
+fails the check is never started, and the courier in turn checks that the
+Session Hub is at the other end. The launcher writes nothing.
+
+### Option for development builds
+
+A development build of the Session Hub runs with a courier that does not carry
+the release signature. On such a Mac, the option `allow_unsigned_courier` lets
+the launcher start a courier that fails the check, as long as the file is named
+`zensu-session-hub-courier`. The option is off by default; leave it off on
+every other Mac. Claude Code lists it in `/config`, keeps it under
+`pluginConfigs["session-hub@zensu"]` in your user settings and never takes it
+from a project's settings.
 
 ## Next to the Zensu plugin
 

@@ -261,6 +261,11 @@
       "summary": "The runtime-lineage axis: same major (same minor while the major is 0), never backwards, and a sibling plugin root."
     },
     {
+      "path": "tests/structure/session-hub-courier-v1.test.js", "registered": 22,
+      "runs": [{ "driver": "tests/structure/test-session-hub-interaction.sh" }],
+      "summary": "The companion's courier launcher for the Session Hub channel: its constants against the interaction contract, the unsigned-courier option, the config root and pointer rules, the request and reply lines, the codesign check and its requirement, the trust rule, and the relay's spawn, exits, bounds and refusals, against a stand-in courier."
+    },
+    {
       "path": "tests/structure/session-hub-receipt-v1.test.js", "registered": 21,
       "runs": [{ "driver": "tests/structure/test-session-hub-receipt.sh" }],
       "summary": "The companion's Session Hub takeover receipt entry: the command token, the refused prompt shapes, the receipt fields, the config switch, the principal and plugin-root guards, the hook entry, the home it writes under, and its exit 0 with no output when the home lookup, the clock or the lineage module fails."

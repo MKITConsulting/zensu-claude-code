@@ -13,5 +13,13 @@
   "keywords": ["session-hub", "session-trail", "takeover", "handover", "usage-feed"],
   "skills": [
     "./skills/session-trail"
-  ]
+  ],
+  "userConfig": {
+    "allow_unsigned_courier": {
+      "type": "boolean",
+      "title": "Accept an unsigned Session Hub courier",
+      "description": "For development builds of the Zensu Session Hub only. Lets this plugin start a courier that does not carry the Session Hub release signature. Leave it off on every other Mac.",
+      "default": false
+    }
+  }
 }
