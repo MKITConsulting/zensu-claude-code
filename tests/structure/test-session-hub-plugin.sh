@@ -39,9 +39,11 @@ LICENSE
 README.md
 cliff.toml
 hooks/hooks.json
+hooks/interaction-contract.json
 hooks/lib/claude-path-v1.js
 hooks/lib/desktop-store-read-v1.js
 hooks/lib/git-environment-v1.js
+hooks/lib/session-hub-courier-v1.mjs
 hooks/lib/session-hub-receipt-v1.mjs
 hooks/lib/worktree-keep-v1.js
 hooks/usage-feed-contract.json
@@ -68,7 +70,7 @@ else
 fi
 WANT="$(printf '%s\n' "$ALLOWED" | LC_ALL=C sort -u)"
 if [ "$LISTED" = "$WANT" ]; then
-  check "H1 plugins/session-hub holds exactly the allowlisted files: the manifest, the license, the hooks, the vendored libraries, the session-trail skill and its docs" PASS
+  check "H1 plugins/session-hub holds exactly the allowlisted files: the manifest, the license, the hooks, the interaction contract, the vendored libraries, the courier launcher, the session-trail skill and its docs" PASS
 else
   EXTRA="$(LC_ALL=C comm -13 <(printf '%s\n' "$WANT") <(printf '%s\n' "$LISTED") | tr '\n' ' ')"
   MISSING="$(LC_ALL=C comm -23 <(printf '%s\n' "$WANT") <(printf '%s\n' "$LISTED") | tr '\n' ' ')"
@@ -79,7 +81,7 @@ MANIFEST_BAD="$(node -e '
   const fs = require("fs");
   const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const bad = [];
-  const keys = ["name", "version", "displayName", "description", "author", "homepage", "repository", "license", "keywords", "skills"];
+  const keys = ["name", "version", "displayName", "description", "author", "homepage", "repository", "license", "keywords", "skills", "userConfig"];
   if (JSON.stringify(Object.keys(m)) !== JSON.stringify(keys)) bad.push("keys=" + Object.keys(m).join(","));
   if (m.name !== "session-hub") bad.push("name");
   if (m.displayName !== "Zensu Session Hub") bad.push("displayName");
@@ -90,7 +92,7 @@ MANIFEST_BAD="$(node -e '
   process.stdout.write(bad.join(" "));
 ' "$MANIFEST" 2>&1)"
 [ -z "$MANIFEST_BAD" ] \
-  && check "H2 the manifest names session-hub, Zensu Session Hub, FSL-1.1-Apache-2.0, a semver version and only the session-trail skill, with no agents, commands, MCP servers or hooks key" PASS \
+  && check "H2 the manifest names session-hub, Zensu Session Hub, FSL-1.1-Apache-2.0, a semver version, only the session-trail skill and its userConfig, with no agents, commands, MCP servers or hooks key" PASS \
   || check "H2 the companion manifest: $MANIFEST_BAD" FAIL
 
 ENTRY_VERSION="$(node -e '

@@ -7,6 +7,7 @@ cd "$REPO_ROOT"
 CLAUDE_CODE_TOOL=".github/tools/claude-code"
 SUITES=(
   test-session-hub-plugin
+  test-session-hub-interaction
   test-session-hub-receipt
   test-session-hub-usage-feed
   test-session-trail-skill
