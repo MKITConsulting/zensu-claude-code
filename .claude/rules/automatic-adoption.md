@@ -150,13 +150,13 @@ superseded copy, because `copyFileSync` carries the source's timestamps over on 
 
 `adoptContext` copies the record to its superseded name and then swaps the record, both
 under the records lock. Any adopting process can be killed between the two steps: a hook
-stopped at its deadline (the Stop hook, `.claude/rules/stop-latency.md`), an interrupt, a
-crash. The completion does not depend on which. A kill between the two steps leaves the
-record untouched and a byte copy of it at the superseded name; a kill inside the copy
-leaves a prefix of that copy, the empty file included. That file used to refuse every
-later adoption as `superseded-record-exists` until someone moved it by hand. Now the next
-bind that adopts completes the adoption; with `hooks.sessionAutoAdopt` off, no bind
-adopts and `/zensu:adopt-session --confirm` does.
+stopped at its deadline (the Stop hook and the route reminder,
+`.claude/rules/stop-latency.md`), an interrupt, a crash. The completion does not depend on
+which. A kill between the two steps leaves the record untouched and a byte copy of it at
+the superseded name; a kill inside the copy leaves a prefix of that copy, the empty file
+included. The next bind that adopts completes the adoption instead of refusing it as
+`superseded-record-exists`; with `hooks.sessionAutoAdopt` off, no bind adopts and
+`/zensu:adopt-session --confirm` does.
 
 - **One predicate, three answers.** `interruptedAdoptionCopyState(recordsDir, key,
   recordedVersion)` in the core answers a member of `INTERRUPTED_COPY_STATES` and never

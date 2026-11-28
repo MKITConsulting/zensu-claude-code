@@ -94,11 +94,12 @@ the supervisor kills both groups at once.
   abort traps moves every copy. One owner that takes the deadline action as a parameter is a
   follow-up.
 - **A kill can land inside an adopting bind.** Both supervised workers bind with automatic
-  adoption opted in (`.claude/rules/automatic-adoption.md`), so a deadline kill between the
-  adoption's copy to the superseded name and its record swap leaves the crash-resume shape,
-  `superseded-record-exists`, which refuses every later automatic adoption of that record until
-  the superseded file is moved. The window is one file copy and one rename. The core completing or
-  rolling back an interrupted adoption on the next bind would close it, and is a separate change.
+  adoption opted in (`.claude/rules/automatic-adoption.md`), so a deadline kill can fall
+  between the adoption's copy to the superseded name and its record swap, or inside the copy.
+  The window is one file copy and one rename. The next bind that adopts completes the
+  interrupted adoption (`.claude/rules/automatic-adoption.md` §"Interrupted adoptions"). A kill
+  after the swap leaves a served record without its `RUNTIME_ADOPTED` entry and lease sweep, the
+  residual that section names.
 
 **User-visible notices (`stop_notice` + `emit_stop_notices`).** Claude Code shows the stderr of
 an exit-0 Stop hook to nobody (read from the host binary; `.claude/rules/autopilot-run-scope.md`
