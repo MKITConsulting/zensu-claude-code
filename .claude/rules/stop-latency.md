@@ -231,9 +231,10 @@ already canonical; with them it makes one verification and no `session-key` call
   `session-control-core-v1.js session-key `. Rewording either turns the count checks of the
   latency suite red, and rewording the first also those of `BR4b` in
   `tests/structure/test-background-review.sh`, `Z107i` and `Z118` in
-  `tests/structure/test-zen-mode.sh` and the budget block of
-  `tests/structure/test-linked-session-route.sh` (`L59` and its hung-child cases), whose shims
-  classify by the same literal. Three in-code rationales assume every `zensu_resolve_project_dir` call
+  `tests/structure/test-zen-mode.sh`, the budget block of
+  `tests/structure/test-linked-session-route.sh` (`L59` and its hung-child cases) and the
+  bound-run budget checks of `tests/structure/test-worktree-keep.sh` (`K26`, `K26b`, `K27` and
+  `K27c`), whose shims classify by the same literal. Three in-code rationales assume every `zensu_resolve_project_dir` call
   spawns `node`: the optional argument of `zensu_pending_review_claim_file` in
   `zensu-tdd-phase.sh`, the `zensu_pending_review_file` note in `zensu-autopilot-state.sh`, and
   the `S7t` comment in `tests/structure/test-autopilot-stop-enforcer.sh`. They hold for every

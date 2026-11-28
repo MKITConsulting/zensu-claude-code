@@ -625,6 +625,7 @@ zensu_combined_summary_enabled() {
 _zensu_config_bounded_int() {
   local key="$1" default="$2" min="$3" max="$4" val
   command -v node >/dev/null 2>&1 || { echo "$default"; return 0; }
+  _zensu_config_key_unset "$key" && { echo "$default"; return 0; }
   # `hasOwnProperty` plus the object/array test, matching the strict reader above. Every
   # caller today passes a literal key, so nothing inherited is reachable in practice — but
   # this is now a reusable primitive whose three previous copies used static dot access,

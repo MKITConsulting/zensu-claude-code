@@ -106,7 +106,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-worktree-keep.sh\"",
-            "timeout": 10
+            "timeout": 20
           }
         ]
       }
@@ -202,7 +202,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-worktree-keep.sh\"",
-            "timeout": 10
+            "timeout": 20
           },
           {
             "type": "command",
@@ -228,7 +228,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-end-worktree-keep.sh\"",
-            "timeout": 10
+            "timeout": 20
           }
         ]
       }

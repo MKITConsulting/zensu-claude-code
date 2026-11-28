@@ -17,7 +17,12 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 { INPUT="$(cat)"; } 2>/dev/null
 case "$INPUT" in *'.claude/worktrees'*|*'.claude\\worktrees'*) ;; *) exit 0 ;; esac
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
-zensu_hook_is_main_principal "$INPUT" SessionStart || exit 0
+PRINCIPAL_SOURCE="$(zensu_hook_principal "$INPUT" SessionStart source 2>/dev/null)" || exit 0
+case "$PRINCIPAL_SOURCE" in
+  (main-v1) SOURCE="" ;;
+  (main-v1$'\n'*) SOURCE="${PRINCIPAL_SOURCE#main-v1$'\n'}" ;;
+  (*) exit 0 ;;
+esac
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 VERB="session-start"
 zensu_hook_enabled worktreeKeep || VERB="release"
@@ -30,7 +35,6 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-worktree-keep.sh"
 zensu_worktree_keep_anchor "$INPUT" || exit 0
 ROOT="$ZENSU_WK_ROOT"
 SESSION_KEY="$ZENSU_WK_SESSION_KEY"
-SOURCE="$(zensu_worktree_keep_read_field "$INPUT" source)"
 IDLE_HOURS="$(zensu_worktree_keep_idle_hours 2>/dev/null)" || IDLE_HOURS=72
 MSYS_EXCL="$(zensu_msys_env_exclusions WK_CWD 2>/dev/null)" || MSYS_EXCL=""
 

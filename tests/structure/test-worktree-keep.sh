@@ -56,12 +56,12 @@ reg() {
     const arr=h.hooks[process.argv[2]]||[];
     const hit=arr.flatMap(e=>e.hooks||[]).find(z=>(z.command||"").includes(process.argv[3]));
     if(!hit) process.exit(1);
-    process.exit(hit.timeout===10?0:2);
+    process.exit(hit.timeout===20?0:2);
   ' "$HOOKS_JSON" "$1" "$2" 2>/dev/null
 }
-reg SessionStart session-start-worktree-keep.sh && check "K2 SessionStart registers session-start-worktree-keep.sh with timeout 10" PASS || check "K2 SessionStart registers session-start-worktree-keep.sh with timeout 10" FAIL
-reg UserPromptSubmit user-prompt-worktree-keep.sh && check "K2 UserPromptSubmit registers user-prompt-worktree-keep.sh with timeout 10" PASS || check "K2 UserPromptSubmit registers user-prompt-worktree-keep.sh with timeout 10" FAIL
-reg SessionEnd session-end-worktree-keep.sh && check "K2 SessionEnd registers session-end-worktree-keep.sh with timeout 10" PASS || check "K2 SessionEnd registers session-end-worktree-keep.sh with timeout 10" FAIL
+reg SessionStart session-start-worktree-keep.sh && check "K2 SessionStart registers session-start-worktree-keep.sh with timeout 20" PASS || check "K2 SessionStart registers session-start-worktree-keep.sh with timeout 20" FAIL
+reg UserPromptSubmit user-prompt-worktree-keep.sh && check "K2 UserPromptSubmit registers user-prompt-worktree-keep.sh with timeout 20" PASS || check "K2 UserPromptSubmit registers user-prompt-worktree-keep.sh with timeout 20" FAIL
+reg SessionEnd session-end-worktree-keep.sh && check "K2 SessionEnd registers session-end-worktree-keep.sh with timeout 20" PASS || check "K2 SessionEnd registers session-end-worktree-keep.sh with timeout 20" FAIL
 
 . "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 unit_check "K3 the worktree-keep unit file passes" "$UNIT"
@@ -348,5 +348,199 @@ grep -qF 'UNBOUND session gets no drift disclosure' "$PLUGIN_DIR/docs/worktree-k
 grep -qF 'read_field cwd' "$PLUGIN_DIR/hooks/user-prompt-worktree-keep.sh" \
   && check "K21b-control the prompt hook really has no payload fallback" FAIL \
   || check "K21b-control the prompt hook really has no payload fallback" PASS
+
+BUDGET_SHIM="$SBOX/budget-shim"
+BUDGET_TRACE="$SBOX/budget-trace.log"
+REAL_NODE="$(command -v node)"
+mkdir -p "$BUDGET_SHIM"
+cat > "$BUDGET_SHIM/node" <<SHIM_EOF
+#!/bin/bash
+case "\$*" in
+  (*classifyPreToolPayload*) kind=principal ;;
+  (*'sessionKey(j.session_id)'*) kind=payload-anchor ;;
+  (*claude-hook-session-v1.js*) kind=bind ;;
+  (*'core.readContext({ recordsDir, sessionId: key })'*) kind=verify ;;
+  (*'session-control-core-v1.js session-key'*) kind=session-key ;;
+  (*'j[process.env.FIELD]'*) kind=payload-field ;;
+  (*'Number.isInteger(n)'*) kind=config ;;
+  (*'j.hooks&&j.hooks[process.argv[1]]===false'*) kind=config ;;
+  (*worktree-keep-v1.js*) kind=module ;;
+  (*) kind=other ;;
+esac
+printf '%s\n' "\$kind" >> "$BUDGET_TRACE"
+exec "$REAL_NODE" "\$@"
+SHIM_EOF
+chmod +x "$BUDGET_SHIM/node"
+budget_count() { grep -cx -- "$1" "$BUDGET_TRACE" 2>/dev/null || true; }
+budget_total() { grep -c . "$BUDGET_TRACE" 2>/dev/null || true; }
+budget_line() {
+  printf 'node=%s principal=%s bind=%s verify=%s session-key=%s payload-anchor=%s payload-field=%s config=%s module=%s other=%s' \
+    "$(budget_total)" "$(budget_count principal)" "$(budget_count bind)" "$(budget_count verify)" "$(budget_count session-key)" \
+    "$(budget_count payload-anchor)" "$(budget_count payload-field)" "$(budget_count config)" "$(budget_count module)" "$(budget_count other)"
+}
+budget_hook() {
+  local hook="$1" event="$2" sid="$3" cwd="$4" source="${5:-startup}"
+  : > "$BUDGET_TRACE"
+  payload "$event" "$sid" "$cwd" "$source" \
+    | (unset ZENSU_CONFIG; CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$cwd" PATH="$BUDGET_SHIM:$PATH" bash "$hook")
+}
+budget_within() {
+  [ "$(budget_total)" -le "$1" ] && [ "$(budget_count module)" = 1 ] && [ "$(budget_count config)" = 0 ] \
+    && [ "$(budget_count session-key)" = 0 ] && [ "$(budget_count payload-field)" = 0 ] && [ "$(budget_count other)" = 0 ]
+}
+budget_refused() {
+  [ "$(budget_total)" -le "$1" ] && [ "$(budget_count module)" = 0 ] && [ "$(budget_count payload-anchor)" = 1 ] \
+    && [ "$(budget_count config)" = 0 ] && [ "$(budget_count session-key)" = 0 ] \
+    && [ "$(budget_count payload-field)" = 0 ] && [ "$(budget_count other)" = 0 ]
+}
+anchor_files() { ls "$1/.zensu/state" 2>/dev/null | grep -c '^worktree-anchor-' || true; }
+
+WTB="$(add_wt "$REPO" wt-budget claude/wt-budget)"
+SIDB="wtkeep-budget-$$"
+mint "$SIDB" "$WTB" || check "K26 precondition: session record minted for the budget worktree" FAIL
+budget_hook "$HOOK_START" SessionStart "$SIDB" "$WTB" startup >/dev/null 2>&1
+K27_LINE="$(budget_line)"
+{ budget_within 4 && [ "$(budget_count verify)" = 1 ] && [ "$(budget_count payload-anchor)" = 0 ] && [ -f "$WTB/.worktree-keep" ]; } \
+  && check "K27 a bound SessionStart with no config naming a key it reads starts at most four node children, verifies the root once, reads source through the principal check and still sets the marker ($K27_LINE)" PASS \
+  || check "K27 bound SessionStart process budget ($K27_LINE)" FAIL
+budget_hook "$HOOK_PROMPT" UserPromptSubmit "$SIDB" "$WTB" >/dev/null 2>&1
+K26_LINE="$(budget_line)"
+{ budget_within 4 && [ "$(budget_count verify)" = 1 ] && [ "$(budget_count principal)" = 1 ] && [ "$(budget_count bind)" = 1 ]; } \
+  && check "K26 a steady prompt with no config naming a key it reads starts at most four node children and verifies the project root once ($K26_LINE)" PASS \
+  || check "K26 steady prompt process budget ($K26_LINE)" FAIL
+git -C "$WTB" checkout -q -b claude/budget-taker
+K26B_CTX="$(budget_hook "$HOOK_PROMPT" UserPromptSubmit "$SIDB" "$WTB" 2>/dev/null | context_of)"
+K26B_LINE="$(budget_line)"
+case "$K26B_CTX" in
+  (*"claude/budget-taker"*"claude/wt-budget"*) K26B_SEEN=yes ;;
+  (*) K26B_SEEN=no ;;
+esac
+{ [ "$K26B_SEEN" = yes ] && budget_within 4 && [ "$(budget_count verify)" = 1 ]; } \
+  && check "K26b a drift prompt still discloses both branches within the same budget: at most four node children, one root verification ($K26B_LINE)" PASS \
+  || check "K26b drift prompt process budget ($K26B_LINE seen=$K26B_SEEN)" FAIL
+git -C "$WTB" checkout -q claude/wt-budget
+budget_hook "$HOOK_END" SessionEnd "$SIDB" "$WTB" >/dev/null 2>&1
+K28_LINE="$(budget_line)"
+{ budget_within 4 && [ "$(anchor_of "$WTB" "$SIDB" endedAt)" -gt 0 ] 2>/dev/null; } \
+  && check "K28 SessionEnd starts at most four node children with no separate payload-field read and no session-key child, and still ages the anchor ($K28_LINE)" PASS \
+  || check "K28 SessionEnd process budget ($K28_LINE endedAt=$(anchor_of "$WTB" "$SIDB" endedAt))" FAIL
+
+SIDU="wtkeep-budget-unminted-$$"
+budget_hook "$HOOK_START" SessionStart "$SIDU" "$WTB" startup >/dev/null 2>&1
+K27B_LINE="$(budget_line)"
+{ budget_within 4 && [ "$(budget_count verify)" = 0 ] && [ "$(budget_count payload-anchor)" = 1 ] && [ "$(anchor_of "$WTB" "$SIDU" branch)" = "claude/wt-budget" ]; } \
+  && check "K27b a SessionStart whose record does not exist yet reads the payload cwd and derives its key in one node child, stays within four, and anchors under the key the core derives ($K27B_LINE)" PASS \
+  || check "K27b unbound SessionStart process budget ($K27B_LINE branch=$(anchor_of "$WTB" "$SIDU" branch))" FAIL
+budget_hook "$HOOK_END" SessionEnd "$SIDU" "$WTB" >/dev/null 2>&1
+K28B_LINE="$(budget_line)"
+{ budget_within 4 && [ "$(anchor_of "$WTB" "$SIDU" endedAt)" -gt 0 ] 2>/dev/null; } \
+  && check "K28b the unbound session's SessionEnd ages its own anchor within the same budget ($K28B_LINE)" PASS \
+  || check "K28b unbound SessionEnd process budget ($K28B_LINE)" FAIL
+
+SIDN="wtkeep-budget-nosource-$$"
+mint "$SIDN" "$WTB" || check "K27c precondition: session record minted for the start without source" FAIL
+: > "$BUDGET_TRACE"
+K27C_OUT="$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",session_id:process.argv[1],cwd:process.argv[2],transcript_path:"/nonexistent"}))' "$SIDN" "$WTB" \
+  | (unset ZENSU_CONFIG; CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$WTB" PATH="$BUDGET_SHIM:$PATH" bash "$HOOK_START") 2>/dev/null)"
+K27C_LINE="$(budget_line)"
+{ [ -z "$K27C_OUT" ] && budget_within 4 && [ "$(budget_count verify)" = 1 ] && [ "$(anchor_of "$WTB" "$SIDN" branch)" = "claude/wt-budget" ]; } \
+  && check "K27c a SessionStart payload without a source field still runs as a fresh start: it prints nothing and anchors the current branch within the same budget ($K27C_LINE)" PASS \
+  || check "K27c SessionStart without source ($K27C_LINE branch=$(anchor_of "$WTB" "$SIDN" branch) stdout=${K27C_OUT:0:80})" FAIL
+
+SIDN_KEY="$(cd "$PLUGIN_DIR/hooks/lib" && node -e 'process.stdout.write(require("./session-control-core-v1.js").sessionKey(process.argv[1]))' "$SIDN")"
+K27D_BEFORE="$(anchor_of "$WTB" "$SIDN" endedAt)"
+budget_hook "$HOOK_END" SessionEnd "$SIDN_KEY" "$WTB" >/dev/null 2>&1
+K27D_LINE="$(budget_line)"
+K27D_AFTER="$(anchor_of "$WTB" "$SIDN" endedAt)"
+{ case "$SIDN_KEY" in (scv1_*) true ;; (*) false ;; esac && budget_refused 3 && [ "$K27D_BEFORE" = null ] && [ "$K27D_AFTER" = null ]; } \
+  && check "K27d a SessionEnd whose session_id is a derived Session Control key is refused by the payload reader: no module child, and the live anchor that key names keeps its open window ($K27D_LINE)" PASS \
+  || check "K27d derived session_id refusal ($K27D_LINE endedAt=$K27D_BEFORE->$K27D_AFTER)" FAIL
+
+SIDE="wtkeep-budget-linebreak-$$"
+K27E_BAD=""
+K27E_FILES="$(anchor_files "$WTB")"
+budget_hook "$HOOK_START" SessionStart "$SIDE"$'\n'"x" "$WTB" startup >/dev/null 2>&1
+budget_refused 3 || K27E_BAD="$K27E_BAD [session_id: $(budget_line)]"
+budget_hook "$HOOK_START" SessionStart "$SIDE" "$WTB"$'\n'"x" startup >/dev/null 2>&1
+budget_refused 3 || K27E_BAD="$K27E_BAD [cwd: $(budget_line)]"
+[ "$(anchor_files "$WTB")" = "$K27E_FILES" ] || K27E_BAD="$K27E_BAD [anchors: $K27E_FILES->$(anchor_files "$WTB")]"
+[ -z "$K27E_BAD" ] \
+  && check "K27e a payload session_id or cwd carrying a line break is refused by the payload reader: no module child and no new anchor" PASS \
+  || check "K27e line-break refusal:$K27E_BAD" FAIL
+
+K27F_PAYLOAD="$(payload SessionStart "$SIDB" "$WTB" startup)"
+K27F_OWN="$(cd "$PLUGIN_DIR/hooks/lib" && node -e 'process.stdout.write(require("./session-control-core-v1.js").sessionKey(process.argv[1]))' "$SIDB")"
+K27F_OTHER="$(cd "$PLUGIN_DIR/hooks/lib" && node -e 'process.stdout.write(require("./session-control-core-v1.js").sessionKey(process.argv[1]))' "$SIDB-other")"
+k27f_run() {
+  bash -c '
+    source "$1/hooks/lib/zensu-worktree-keep.sh"
+    zensu_bind_hook_session() { printf -v ZENSU_SESSION_KEY "%s" "$BOUND"; export ZENSU_SESSION_KEY; return 0; }
+    zensu_resolve_project_dir() { return 1; }
+    BOUND="$3"
+    zensu_worktree_keep_anchor "$2"
+    printf "%s|%s|%s" "$?" "$ZENSU_WK_ROOT" "$ZENSU_WK_SESSION_KEY"
+  ' _ "$PLUGIN_DIR" "$K27F_PAYLOAD" "$1" 2>/dev/null
+}
+K27F_MISMATCH="$(k27f_run "$K27F_OTHER")"
+K27F_MATCH="$(k27f_run "$K27F_OWN")"
+{ [ "${K27F_MISMATCH%%|*}" = 1 ] && [ "$K27F_MATCH" = "0|$WTB|$K27F_OWN" ]; } \
+  && check "K27f a bound key whose root failed verification must equal the key the payload reader derives: a differing one refuses, an equal one anchors at the payload cwd" PASS \
+  || check "K27f bound-key mismatch (mismatch=${K27F_MISMATCH%%|*} match=$K27F_MATCH)" FAIL
+
+GETTER_HOME="$SBOX/getter-home"
+GETTER_PROJ="$SBOX/getter-proj"
+mkdir -p "$GETTER_HOME/.zensu" "$GETTER_PROJ/.zensu"
+getter_run() {
+  local name="$1" home_cfg="$2" proj_cfg="$3" forced="${4:-}"
+  rm -f "$GETTER_HOME/.zensu/config.json" "$GETTER_PROJ/.zensu/config.json"
+  [ -z "$home_cfg" ] || printf '%s\n' "$home_cfg" > "$GETTER_HOME/.zensu/config.json"
+  [ -z "$proj_cfg" ] || printf '%s\n' "$proj_cfg" > "$GETTER_PROJ/.zensu/config.json"
+  : > "$BUDGET_TRACE"
+  if [ -n "$forced" ]; then
+    HOME="$GETTER_HOME" CLAUDE_PROJECT_DIR="$GETTER_PROJ" ZENSU_CONFIG="$forced" PATH="$BUDGET_SHIM:$PATH" \
+      bash -c 'source "$1"; "$2"' _ "$CONFIG_SH" "$name" 2>/dev/null
+  else
+    (unset ZENSU_CONFIG; HOME="$GETTER_HOME" CLAUDE_PROJECT_DIR="$GETTER_PROJ" PATH="$BUDGET_SHIM:$PATH" \
+      bash -c 'source "$1"; "$2"' _ "$CONFIG_SH" "$name" 2>/dev/null)
+  fi
+}
+K29_BAD=""
+G="zensu_worktree_keep_idle_hours"
+V="$(getter_run "$G" '' '')"; N="$(budget_total)"
+[ "$V" = 72 ] && [ "$N" = 0 ] || K29_BAD="$K29_BAD [no config: $V node=$N]"
+V="$(getter_run "$G" '{"hooks":{"worktreeKeep":true,"autoFixMaxRounds":3}}' '')"; N="$(budget_total)"
+[ "$V" = 72 ] && [ "$N" = 0 ] || K29_BAD="$K29_BAD [other keys: $V node=$N]"
+V="$(getter_run "$G" '' '' "$GETTER_HOME/.zensu/no-such.json")"; N="$(budget_total)"
+[ "$V" = 72 ] && [ "$N" = 1 ] || K29_BAD="$K29_BAD [node reader, no config: $V node=$N]"
+printf '%s\n' '{"hooks":{"worktreeKeep":true,"autoFixMaxRounds":3}}' > "$SBOX/getter-forced.json"
+V="$(getter_run "$G" '' '' "$SBOX/getter-forced.json")"; N="$(budget_total)"
+[ "$V" = 72 ] && [ "$N" = 1 ] || K29_BAD="$K29_BAD [node reader, other keys: $V node=$N]"
+V="$(getter_run "$G" '{"hooks":{"worktreeKeepIdleHours":100}}' '')"; N="$(budget_total)"
+[ "$V" = 100 ] && [ "$N" = 1 ] || K29_BAD="$K29_BAD [global key: $V node=$N]"
+V="$(getter_run "$G" '' '{"hooks":{"worktreeKeepIdleHours":100}}')"; N="$(budget_total)"
+[ "$V" = 100 ] && [ "$N" = 1 ] || K29_BAD="$K29_BAD [project key: $V node=$N]"
+V="$(getter_run "$G" '{"hooks":{"worktreeKeepIdle\u0048ours":100}}' '')"; N="$(budget_total)"
+[ "$V" = 100 ] && [ "$N" = 1 ] || K29_BAD="$K29_BAD [unicode-escaped key: $V node=$N]"
+V="$(getter_run "$G" '{"hooks":{"worktreeKeepIdleHours":0}}' '')"; N="$(budget_total)"
+[ "$V" = 72 ] && [ "$N" = 1 ] || K29_BAD="$K29_BAD [out of range: $V node=$N]"
+[ -z "$K29_BAD" ] \
+  && check "K29 zensu_worktree_keep_idle_hours answers 72 in shell when no config file names the key, as the node reader does, and still reads a configured, escaped or out-of-range value through node" PASS \
+  || check "K29 idle-hours getter pre-check:$K29_BAD" FAIL
+
+K30_ROWS="$(sed -n 's/^\([a-z_]*\)() *{ *_zensu_config_bounded_int \([A-Za-z]*\) \([0-9][0-9]*\) .*/\1 \3/p' "$CONFIG_SH")"
+K30_BAD=""; K30_N=0
+while read -r K30_NAME K30_DEFAULT; do
+  [ -n "$K30_NAME" ] || continue
+  K30_N=$((K30_N + 1))
+  V="$(getter_run "$K30_NAME" '' '')"; N="$(budget_total)"
+  [ "$V" = "$K30_DEFAULT" ] && [ "$N" = 0 ] || K30_BAD="$K30_BAD [$K30_NAME: $V node=$N]"
+  V="$(getter_run "$K30_NAME" '' '' "$GETTER_HOME/.zensu/no-such.json")"; N="$(budget_total)"
+  [ "$V" = "$K30_DEFAULT" ] && [ "$N" = 1 ] || K30_BAD="$K30_BAD [$K30_NAME node reader: $V node=$N]"
+done <<K30_EOF
+$K30_ROWS
+K30_EOF
+{ [ "$K30_N" -ge 6 ] && [ -z "$K30_BAD" ]; } \
+  && check "K30 every _zensu_config_bounded_int getter ($K30_N) answers its default without node when no config names its key, and the forced node reader answers the same" PASS \
+  || check "K30 bounded getters ($K30_N rows):$K30_BAD" FAIL
 unit_check_done "K3z every unit file the registry gives this suite was graded"
 finish

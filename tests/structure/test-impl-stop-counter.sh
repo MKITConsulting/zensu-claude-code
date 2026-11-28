@@ -1721,7 +1721,8 @@ C42A_G="$(printf '%s\n' "$C42_LADDER" | grep -n 'command -v gtimeout' | head -1 
   || check "C42a the ladder prefers timeout, so gtimeout is a fallback and not a replacement (timeout='$C42A_T' gtimeout='$C42A_G')" FAIL
 
 # --- C43: the free checks come before the node spawn ---------------------------
-# `zensu_impl_stop_nudge_after` spawns node. On a host with no git the feature can
+# `zensu_impl_stop_nudge_after` spawns node whenever its shell pre-check cannot rule the
+# key out. On a host with no git the feature can
 # never fire, so paying a process spawn first is a cost every armed-but-incomplete
 # chain carries at every turn end for nothing. Compare positions within the body.
 #

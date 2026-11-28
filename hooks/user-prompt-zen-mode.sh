@@ -36,7 +36,7 @@
 # The identity check itself exits 2, matching every other hook in this plugin.
 #
 # ZEN_REGISTRATION_TIMEOUT_SOURCE_BUILD = 2.1.260. The `"timeout": 30` on this
-# hook`s `hooks.json` registration is SIZED, not inherited from the 11 sibling entries
+# hook`s `hooks.json` registration is SIZED, not inherited from the 8 sibling entries
 # that carry 10: the hook runs as a worker under hooks/lib/zensu-prompt-deadline.sh,
 # whose deadline is 20 s at most, and the registration stays 10 s above that ceiling
 # so the supervisor can still print its fallback. Inside the worker
