@@ -18,7 +18,7 @@ command -v node >/dev/null 2>&1 || die 2 'node is not installed'
 work="$(mktemp -d "${TMPDIR:-/tmp}/gitlab-drift.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-curl -fsSL --max-time 60 -o "$work/release.json" "$RELEASES/permalink/latest" || die 1 'cannot read the newest glab release'
+gitlab_it_fetch 60 "$work/release.json" "$RELEASES/permalink/latest" || die 1 'cannot read the newest glab release'
 version="$(node -e '
   let tag = "";
   try {
@@ -29,9 +29,9 @@ version="$(node -e '
   if (!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(tag)) process.exit(1);
   process.stdout.write(tag.slice(1));
 ' "$work/release.json")" || die 1 'the newest glab release carries no vX.Y.Z tag'
-curl -fsSL --max-time 60 -o "$work/checksums.txt" "$ZENSU_GLAB_DOWNLOAD_BASE/v$version/downloads/checksums.txt" \
+gitlab_it_fetch 60 "$work/checksums.txt" "$ZENSU_GLAB_DOWNLOAD_BASE/v$version/downloads/checksums.txt" \
   || die 1 "cannot read checksums.txt of glab $version"
-curl -fsSL --max-time 60 -o "$work/tags.json" "$TAGS" || die 1 'cannot read the GitLab CE tag listing'
+gitlab_it_fetch 60 "$work/tags.json" "$TAGS" || die 1 'cannot read the GitLab CE tag listing'
 
 node - "$ZENSU_GITLAB_IT_VERSIONS" "$version" "$work/checksums.txt" "$work/tags.json" <<'NODE'
 const fs = require('fs');

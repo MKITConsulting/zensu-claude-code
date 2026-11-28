@@ -45,7 +45,7 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
   app-managed worktree carries the desktop-pool keep marker, still sits on its recorded branch
   and holds a nested repository that keeps the marker after the session ends; any reviewer
   spawn the host permission layer refused; any claim this session audited against a root that
-  is not the anchor; this session's recorded delivery route and zen-mode state; and an expired pending review.
+  is not the anchor; this session's recorded delivery route, lineage and zen-mode state; and an expired pending review.
 
 The only write is an explicit, user-confirmed cleanup of one expired `pending-review.json`;
 CAS workflow documents are never deleted.
@@ -422,7 +422,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   helper refuses to start `/zensu:verify-feature` until it reads the version from the package
   manifest. Relay the row and the pinned reinstall command it names.
 - **⚠️ playwright-cli: not found on PATH** → the user installs the version the browser consent
-  gate was measured against with the pinned `npm install -g @playwright/cli@0.1.24` command the
+  gate was measured against with the pinned `npm install -g @playwright/cli@0.1.25` command the
   row prints. `brew install playwright-cli` is unpinned: it installs whichever version Homebrew
   ships, which the run-config helper refuses unless it is the measured one. Never install it on
   their behalf.
@@ -850,8 +850,7 @@ whether browser verification is enforced, not only when a row is red.
   without asking. Green because it is disclosed, ordinary state — relay the value AND its
   source verbatim, and name both ways to change it: `/zensu:delivery-route` (`--build`,
   `--direct`, `--auto`) for the session, `hooks.defaultDeliveryRoute` for the project.
-  An inherited `build` is the parent's recorded choice, copied when this session began;
-  `--auto` releases it. With `direct`, code changes skip the review chain and the
+  With `direct`, code changes skip the review chain and the
   evidence audits this session; say so. A **half is off** parenthetical means one reader is
   off, so the route decides only the other half; for `build` the clause after it names which
   change still reaches `/zensu:build`.
@@ -870,6 +869,7 @@ whether browser verification is enforced, not only when a row is red.
   root could not be entered. **State not recognized:** the wrapper reported a word this
   report has no row for. Point at `/zensu:delivery-route --status` from the session for the
   hooks' own answer.
+- **linked session:** rows → read `references/linked-session.md` and follow it.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because

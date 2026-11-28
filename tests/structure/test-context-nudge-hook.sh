@@ -7,6 +7,7 @@ set -u
 # the context node, band-debounced per session, fail-open (never blocks the prompt).
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 HOOK="$PLUGIN_DIR/hooks/user-prompt-context-nudge.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 NO_CONFIG="$PLUGIN_DIR/.no-such-config-$$.json"
@@ -345,6 +346,9 @@ OUT28="$(env PAD28_A="$PAD28" PAD28_B="$PAD28" PAD28_C="$PAD28" CLAUDE_PLUGIN_RO
   && check "C28 a prompt in a payload over the exec size limit still gets the compaction nudge" PASS \
   || check "C28 oversized prompt (got '$OUT28')" FAIL
 rm -rf "$P28"
+
+unit_check "C29 the context-nudge eval graders' unit file passes" "$PLUGIN_DIR/tests/structure/context-nudge-assertions.test.js"
+unit_check_done "every unit file the registry gives this suite was graded"
 
 echo "----"
 echo "test-context-nudge-hook: $PASS PASS / $FAIL FAIL"

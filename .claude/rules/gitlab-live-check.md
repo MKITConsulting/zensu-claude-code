@@ -21,9 +21,10 @@ fast tier on every pull request.
 **What runs.** `run.sh` takes `run.lock` in the cache directory for the whole run, installs every
 glab version in `versions.v1.json`, starts the GitLab CE image pinned by digest, mints a root token
 inside the container with `gitlab-rails runner` and runs `test-vcs-gitlab-live.sh` once per glab
-version. `lib.sh` holds the defaults every script shares (cache, state, container name, label) and
-the one pin reader, `gitlab_it_pin`, which reads the file `ZENSU_GITLAB_IT_VERSIONS` names. The
-suite refuses with exit 2 when it is not configured; it never passes on a skip. It drives the
+version. `lib.sh` holds the defaults every script shares (cache, state, container name, label),
+the one pin reader, `gitlab_it_pin`, which reads the file `ZENSU_GITLAB_IT_VERSIONS` names, and the
+one fetcher, `gitlab_it_fetch`, through which `glab-install.sh` and `drift.sh` make every download.
+The suite refuses with exit 2 when it is not configured; it never passes on a skip. It drives the
 driver with explicit `--provider gitlab` and `--repo-id`, because the SSRF guard in
 `_zensu_vcs_probeable_host` rightly refuses loopback hosts, so provider detection stays covered by
 `test-vcs-detect.sh`. Every verb that reaches glab is driven: `--post-review`, `--fetch-threads`,
@@ -44,9 +45,11 @@ several GB of memory and minutes of boot, so it runs only where its signal pays 
   and drop the lane. The driver reads no file but `repo-conventions-v1.js`, which only
   `--conventions` loads and the live suite never calls; `W17` fails when that changes, and the
   pathspecs must then name the new file too;
-- nightly, the pinned lane plus the drift job below. A red scheduled run, live or drift, comments
-  on the open issue labelled `gitlab-live`, or opens one; the label, not the title, finds it,
-  because anyone can open an issue with a copied title;
+- nightly, the pinned lane plus the drift job below. The `notify` job runs after every scheduled
+  run and reads the results of `result`, `drift` and `drift-issue` through `env:`. A red run, live
+  or drift, comments on the open issue labelled `gitlab-live`, or opens one; a green run closes
+  that issue with a comment that links the run. The label, not the title, finds it, because
+  anyone can open an issue with a copied title;
 - both release stages, `prepare-gitlab-live` against the bundled release commit and
   `publish-gitlab-live` against the published SHA. `skip_test_gate` skips them like the suite
   shards, and `prepare` and `publish` accept a skipped gate only together with a skipped suite.
@@ -73,8 +76,8 @@ is drift. The `drift-issue` job, the second job with `issues: write`, opens the 
 `gitlab-live-drift` with the report's pin lines, rewrites it when its marker line
 `<!-- zensu-gitlab-drift … -->` changes, and closes it when the report is empty. It runs only
 after a successful drift job: a failed one hands on no report, and an empty report closes the
-issue. The guard runs `drift.sh` against fixtures and the compare and issue steps with a fake
-`gh` (`W33`-`W54`). The cost, accepted on purpose: a release that breaks the driver surfaces in
+issue. The guard runs `drift.sh` against fixtures and the compare, drift issue and `notify` steps
+with a fake `gh` (`W33`-`W60`). The cost, accepted on purpose: a release that breaks the driver surfaces in
 the pull request that pins it, not on the night it ships.
 
 **Known bugs are strict XFAIL with a signature.** `xeq` takes the fixed result and the result the
@@ -93,6 +96,28 @@ platform without a pin, and `gitlab-up.sh` starts only the pinned image; neither
 override, so a release is tried before pinning by pointing `ZENSU_GITLAB_IT_VERSIONS` at a copy of
 the pin file with the drift issue's lines. A dispatch takes `pinned` or a list of pinned
 versions only. A bump replaces the pin entry the drift report names and runs the matrix.
+
+**Downloads retry within a bound.** `gitlab_it_fetch` runs curl with `-f`, `--retry 3`,
+`--retry-all-errors`, `--retry-delay 5`, `--retry-max-time 120` and `--proto-redir =https`. Plain
+`--retry` counts only a timeout and HTTP 408, 429, 500, 502, 503 or 504 as transient, so the
+connection reset (curl exit 56) that once failed the publish gate needs `--retry-all-errors`. curl
+discards a partial download before the next attempt, and the sha256 pin check still guards what
+installs; `-f` keeps an HTTP error a failure once its retries are spent. No retry is scheduled once
+two minutes have passed since the first attempt began, so a `Retry-After` that reaches past that
+window fails at once instead of sleeping through the job timeout, and an archive download that
+stalls to its 600 s `--max-time` is not retried. `--proto-redir =https` keeps every redirect hop on
+HTTPS, because the checksums `drift.sh` reads become the next pin; the guard's `file://` fixtures
+are never redirected, so it does not touch them. `--no-progress-meter` replaces `-s`, so each retry
+leaves a warning in the job log. The polling loops and the token check in `gitlab-up.sh` and the
+suite's API calls keep plain curl: they poll already, pipe their output, or must not repeat a write.
+`W61` and `W62` record every curl call of `glab-install.sh` and `drift.sh` through a logging wrapper
+and compare the whole command line with only the output file and the URL masked, so they fail when
+a flag goes missing, an option is added anywhere, or either script calls curl itself. They pin the
+flags; no suite run provokes a retry. `.github/scripts/playwright-cli-drift.sh` carries a hand copy
+of these flags for its one npm registry fetch, with 60 s per attempt, which `PD24b` in
+`tests/structure/test-playwright-cli-drift.sh` pins. No check compares the two copies, so a change
+to the flags here re-decides that copy; its own reasons are in the release-signal paragraph of
+`.claude/rules/browser-consent-gate.md`.
 
 **Credentials and containers.** The token is written into the container as the `git` user through
 stdin, never through argv, and lives on the host only in the state directory (0700, files 0600).

@@ -139,7 +139,7 @@ test('the gate rides the Bash and PowerShell matcher and names two hook files th
   assert.deepEqual([...consent.CLI_BASENAMES], ['playwright-cli', 'playwright-cli.cmd', 'playwright-cli.exe', 'playwright-cli.ps1']);
   assert.equal(consent.RUN_CONFIG_NAME, 'playwright-cli.json');
   assert.equal(consent.RUN_OUTPUT_DIR_NAME, 'browser');
-  assert.equal(consent.PLAYWRIGHT_CLI_SOURCE_VERSION, '0.1.24');
+  assert.equal(consent.PLAYWRIGHT_CLI_SOURCE_VERSION, '0.1.25');
 });
 
 test('SESSION_RE admits only a lower-case zensu-verify name of bounded length', () => {
@@ -852,6 +852,10 @@ test('an unknown, denied or repeated flag is refused and the harmless flags pass
     ['find --max-results=3 login', 'max-results'], ['console --all', 'all'], ['requests --all', 'all']]) {
     assert.equal(denied(cli(rest)), `flag '--${flag}' ${REASONS.FLAG_DENIED}`, rest);
   }
+  for (const [rest, command] of [['attach --session-color=blue', 'attach'], ['attach --no-tab-group', 'attach'], ['detach --close-tabs', 'detach']]) {
+    assert.equal(denied(cli(rest)), `command '${command}' ${REASONS.COMMAND_DENIED}`, rest);
+  }
+  assert.deepEqual(consent.parseCliArgs(['detach', '--close-tabs', 'x']).args, { _: ['detach', 'x'], 'close-tabs': true });
   assert.equal(denied(cli('snapshot --depth=3 --depth=4')), "flag '--depth' is given more than once");
   assert.equal(denied(cli('open --config=/a.json --config=/b.json')), "flag '--config' is given more than once");
   assert.deepEqual(decide(cli('snapshot --json')), { verdict: 'none', plan: [] });

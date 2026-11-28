@@ -17,7 +17,8 @@ command -v node >/dev/null 2>&1 || die 2 'node is not installed'
 work="$(mktemp -d "${TMPDIR:-/tmp}/playwright-cli-drift.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-curl -fsSL --max-time 60 -H 'Accept: application/vnd.npm.install-v1+json' -o "$work/metadata.json" "$REGISTRY" \
+curl -fL --no-progress-meter --retry 3 --retry-all-errors --retry-delay 5 --retry-max-time 120 --proto-redir =https \
+  --max-time 60 -H 'Accept: application/vnd.npm.install-v1+json' -o "$work/metadata.json" "$REGISTRY" \
   || die 1 'cannot read the @playwright/cli registry metadata'
 
 node - "$ROOT" "$work/metadata.json" <<'NODE'

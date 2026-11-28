@@ -58,7 +58,8 @@ references name a PLM doc by its GitHub URL, because an installed companion carr
 copies define must be equal once full-line comments are removed and the command names are mapped
 back, except the reviewed allowlist inside the check, each entry with its reason: the
 write-anchor removal (`parseArgs`, `COMMAND_FLAGS`, `refuseForeignFlags`, `cmdShow`,
-`cmdTakeover`, `cmdHandoff`), the GATE-probe removal (`canonicalPair`, `whereAdviceLines`), the
+`cmdTakeover`, `cmdHandoff`, of which `parseArgs`, `COMMAND_FLAGS`, `refuseForeignFlags` and `cmdTakeover`
+also carry the companion's plan pass, `takeover --plan`, `.claude/rules/session-trail-plan-card.md`), the GATE-probe removal (`canonicalPair`, `whereAdviceLines`), the
 core removal (`worktreeKeepModules`, `cmdRelease`), `hostPath`, which throws so an importer can
 catch a missing `claude-path-v1.js`, and `main`, which resolves the roots inside its dispatch
 guard so that throw is reported like a handler's. An allowlisted name both copies hold equal
@@ -76,7 +77,12 @@ byte; the companion's is contract 2 with the prefix `/session-hub:session-trail 
 in `test-session-hub-receipt.sh`). PLM's receipt module runs behind a shell hook that exits 0 on
 every path; the companion's exec-form entry is total on its own: a lineage module that fails to
 load, a throwing home lookup or clock and any other throw end with exit 0, no output and no
-receipt, which three child-process cases in `session-hub-receipt-v1.test.js` prove. The suites
+receipt, which three child-process cases in `session-hub-receipt-v1.test.js` prove. The
+home-lookup and the lineage-module case pin `Date.now` in every child they spawn to a time read
+from a file the kernel just stamped, through the same `-r` preload: the entry lands a receipt and
+prunes with its own `Date.now()` in one call, so on the shifted clock of the scheduled pass the
+fresh receipt would read older than the seven-day retention and be removed. No test of the unit
+file is on `tests/profiles/clock-shift-allowlist.v1.json`. The suites
 grade the companion: `test-session-trail-{skill,lineage,verdict}.sh`, the unit files they drive
 and `test-session-hub-{plugin,receipt,usage-feed}.sh`. PLM's copy is graded for what the
 companion removed: the write-anchor checks (`W*`, `WC*`), the PLM census in
@@ -105,7 +111,7 @@ When the bind fails it sends the unbound variant instead, which names no reancho
 characters on every other prompt, pin it; N13 holds its command name, the hook's prefilter and
 the receipt entry's to the companion contract's `takeover.prefix`. The notice reaches only a
 prompt that carries the command: a linked session started from a brief, a takeover started
-through the Skill tool and a PLM older than this change get none. So the companion's briefs carry
+through the Skill tool and a PLM without this hook get none. So the companion's briefs carry
 the rule themselves (`plmGateCaution` in `trail.mjs`, the `Commits, when Zensu PLM is installed`
 line), `show` prints it as its `COMMITS` lines (`PLM_GATE_SHOW_LINES`), and
 `references/takeover.md` step 3 tells the model to read `hooks.bashWriteGate` rather than the
@@ -266,12 +272,8 @@ earlier in a `node:22-bookworm` container with no credentials and no `~/.claude`
 validations and `claude plugin tag --dry-run` ran without a login. That package requires Node 22,
 which is why these jobs set it up while the suites elsewhere run on Node 20.
 
-**Go-live order.** The `session-hub` entry ships in the catalog with this change (AC-001,
-AC-007, D2), so from the Zensu release that ships it until `session-hub--v1.0.0` is published,
-`claude plugin install session-hub@zensu` fails on a tag that does not exist. The order is:
-merge, release Zensu, then dispatch `Release Session Hub` with `mode: publish` right after.
-Open owner actions: that dispatch, and a tag ruleset for `refs/tags/session-hub--v*` and
-`refs/tags/v*` that admits only the release workflows.
+**Open owner action:** a tag ruleset for `refs/tags/session-hub--v*` and `refs/tags/v*` that
+admits only the release workflows.
 
 **Order of releases.** While both plugins ship the usage feed, both copies write
 `<session id>.json` under one rule, so PLM releases no later than the companion: an installed
@@ -279,8 +281,7 @@ PLM older than the companion writes by the older rule. `.github/scripts/session-
 enforces it in both `prepare-commit` and `publish-gate`: it takes the newest `vX.Y.Z` tag by
 version, ignoring pre-release tags, and refuses unless that tag carries `hooks/usage-feed.ts` and
 `hooks/usage-feed-contract.json` byte for byte as the companion's working tree and ships
-`hooks/user-prompt-session-hub-takeover-notice.sh`. H14 drives it on a scratch history. So the
-first companion release waits for the PLM release that ships this change. The order bounds
+`hooks/user-prompt-session-hub-takeover-notice.sh`. H14 drives it on a scratch history. The order bounds
 releases, not installs: a user who updates the companion and keeps an older PLM runs two writers
 by different rules until PLM is updated, and the last write wins. Both writers stay, because
 AC-006 keeps the schema and PLM's copy is frozen. The release that removes PLM's feed (P4) must

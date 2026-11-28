@@ -39,20 +39,24 @@ Execute these steps in order. The classification MUST be set first as all subseq
 
 Ask the user for the feature ID, then run `zensu security classify <feature-id>` with the relevant flags:
 
-- `--classification`: public | internal | confidential | restricted
+- `--classification`: public | internal | confidential | restricted; pass only a level that keeps or raises the recorded one, and a feature without one counts as `internal`
 - `--data-sensitivity`: none | pii | financial | health | credentials
 - `--auth-required` / `--auth-type`: jwt | api-key | oauth2 | none
 - `--input-validation`, `--rate-limited`, `--encryption-at-rest`, `--encryption-in-transit`, `--audit-logged` (booleans)
-- `--threat-model-status`: not-required | pending | completed
-- `--pentest-status`: not-required | pending | passed | failed
+- `--threat-model-status`: not-required | pending
+- `--pentest-status`: not-required | pending | failed
 
 **Every value you set is a claim the release gate trusts.** Pass a boolean (spelled
 `--<flag>=true` or `--<flag>=false`), `--threat-model-status` or `--pentest-status` only
 when a `file:line` you read in this session shows it, or when the user stated it
 explicitly, and name that evidence when you present the command. Leave every other flag
 out: the CLI sends only the flags you pass, so an omitted flag keeps the recorded value.
-No file in a repository proves a passed pentest or a completed threat model, so those two
-need the user's own statement.
+
+Lowering the classification, marking the threat model `completed` and marking a pentest
+`passed` are decisions for an admin signed in to the Zensu web app, never for this skill:
+Zensu refuses each of them from `zensu security classify` with a `400`. When the evidence
+or the user calls for one, run no command for it; name it as an open decision for an
+admin, with its evidence, and hand it on with the feature's browser link (Step 6).
 
 If the feature already has a classification, run `zensu security analyze <feature-id>` first to see the current state and ask if changes are needed.
 
@@ -104,19 +108,30 @@ For each recommended and implemented security test, run `zensu security add-test
 - `--last-run-status` (optional): passed | failed | skipped
 - `--owasp-id` (optional): OWASP Top 10 ID (e.g. A01:2021)
 
-### Step 6: Complete Security Review
+### Step 6: Record the Security Review
 
-The review status is the user's decision, never yours. Before `zensu security review`
-runs, present the findings of Steps 2–5 (score against the required threshold, unmet
+The review status is the user's decision, never yours. Before anything is recorded,
+present the findings of Steps 2–5 (score against the required threshold, unmet
 requirements, threat-model highlights, linked tests and their last run status) and ask
-with `AskUserQuestion` which status to record: `approved`, `conditional` (ask for the
-conditions) or `rejected`. Record exactly the answer; when the user declines, record
-nothing.
+with `AskUserQuestion` which outcome applies: `rejected`, `conditional` (ask for the
+conditions) or a clean review that finds nothing blocking. Record a review only for
+`rejected` or `conditional`, which reject the feature or ask for changes, and record
+exactly the answer; when the user declines, record nothing.
+
+A clean review records nothing. Approving a security review is a decision for an admin
+signed in to the Zensu web app: Zensu refuses `zensu security review --status approved`
+with a `400`, so never pass it. Present the findings instead, and hand the approval to an
+admin with the feature's browser link, together with every decision Step 1 left open.
+When `zensu auth status` reports `https://api.zensu.dev`, the link is
+`https://app.zensu.dev/products/<product-id>/features/<feature-id>?tab=security`, the
+feature's page in the hosted web app, opened on its Security tab; for another host, give
+the same path on that instance's web app. Take `<product-id>` from the feature lookup of the
+Prerequisites, or from `product_id` in `zensu features get <feature-id> --json`.
 
 The command takes:
 - `--reviewer` (required): `claude-code` when you did the analysis; the person's own
   identifier only when they say they reviewed it themselves
-- `--status` (required): the status the user chose
+- `--status` (required): `rejected` or `conditional`, the one the user chose
 - `--type`: `automated` with `--reviewer claude-code`; `manual` only for the person's own
   review and `external` only for an outside review the user names. The CLI defaults to
   `manual`, so always pass it.
@@ -162,7 +177,8 @@ Present a final summary:
 - Security score (before and after review)
 - Threat model highlights
 - Security tests linked
-- Review status (approved/rejected/conditional)
+- Review status (rejected, conditional, or waiting for an admin's approval)
+- Decisions left for an admin, with the feature's browser link
 - Release gate status (pass/fail)
 
 ## CLI Commands Used
@@ -174,6 +190,7 @@ Present a final summary:
 | `zensu security suggest-tests` | 3 | Get context for test suggestions |
 | `zensu security threat-model` | 4 | Get context for STRIDE model |
 | `zensu security add-test` | 5 | Link security tests |
-| `zensu security review` | 6 | Complete the review |
+| `zensu security review` | 6 | Record a rejected or conditional review |
+| `zensu features get` | 6 | Read the product id for the browser link |
 | `zensu security validate` | 7 | Check release gate |
 | `zensu security posture` | 7 | Product-wide security overview |

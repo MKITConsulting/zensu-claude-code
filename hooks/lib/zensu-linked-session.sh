@@ -37,9 +37,36 @@ zensu_linked_session_pending() {
   command -v node >/dev/null 2>&1
 }
 
+_zensu_linked_session_answer() {
+  local project_dir="$1" session_id="$2" budget="${3:-}" pid watchdog rc
+  if [ -z "$budget" ]; then
+    ZENSU_LINKED_SESSION_ID="$session_id" ZENSU_LINKED_PROJECT_ROOT="$project_dir" \
+      node "$_ZENSU_LINKED_SESSION_LIB_DIR/linked-session-v1.js" 2>/dev/null
+    return $?
+  fi
+  [ "$budget" -gt 0 ] || return 124
+  set -m 2>/dev/null
+  ZENSU_LINKED_SESSION_ID="$session_id" ZENSU_LINKED_PROJECT_ROOT="$project_dir" \
+    node "$_ZENSU_LINKED_SESSION_LIB_DIR/linked-session-v1.js" </dev/null 2>/dev/null &
+  pid=$!
+  (
+    set +m 2>/dev/null
+    sleep "$budget"
+    kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null
+  ) </dev/null >/dev/null 2>&1 &
+  watchdog=$!
+  set +m 2>/dev/null
+  wait "$pid" 2>/dev/null
+  rc=$?
+  kill -KILL -- "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null
+  wait "$watchdog" 2>/dev/null
+  [ "$rc" -eq 137 ] && return 124
+  return "$rc"
+}
+
 zensu_linked_session_resolve() {
-  local project_dir="${1:-}" session_key="${2:-}" session_id="${3:-}"
-  local state marker inherited answer kind parent_root parent_key repository turn
+  local project_dir="${1:-}" session_key="${2:-}" session_id="${3:-}" budget="${4:-}"
+  local state marker inherited answer rc kind parent_root parent_key repository turn
   [ -n "$project_dir" ] && [ -n "$session_key" ] || { echo "none"; return 0; }
   state="$(zensu_linked_session_state "$project_dir" "$session_key")"
   case "$state" in
@@ -51,8 +78,17 @@ zensu_linked_session_resolve() {
     echo "none"
     return 0
   fi
-  answer="$(ZENSU_LINKED_SESSION_ID="$session_id" ZENSU_LINKED_PROJECT_ROOT="$project_dir" \
-    node "$_ZENSU_LINKED_SESSION_LIB_DIR/linked-session-v1.js" 2>/dev/null)" || answer=""
+  case "$budget" in
+    (*[!0-9]*) budget=0 ;;
+  esac
+  [ "${#budget}" -le 6 ] || budget=0
+  answer="$(_zensu_linked_session_answer "$project_dir" "$session_id" "$budget")"
+  rc=$?
+  if [ "$rc" -eq 124 ]; then
+    echo "deferred"
+    return 0
+  fi
+  [ "$rc" -eq 0 ] || answer=""
   IFS=$'\t' read -r kind _ parent_root parent_key repository turn <<<"$answer"
   case "$kind" in
     (linked)

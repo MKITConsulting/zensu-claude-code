@@ -311,6 +311,12 @@ const preload = (source) => {
   fs.writeFileSync(file, source);
   return file;
 };
+const kernelNow = () => {
+  const probe = path.join(tmp(), 'probe');
+  fs.writeFileSync(probe, '');
+  return Math.floor(fs.statSync(probe).mtimeMs);
+};
+const kernelClock = () => `Date.now = () => ${kernelNow()};\n`;
 const entryRun = (entry, root, preloaded) => {
   const home = homeWith();
   const config = tmp();
@@ -323,8 +329,8 @@ const entryRun = (entry, root, preloaded) => {
 };
 
 test('the hook entry exits 0 with no output and lands nothing when the home lookup throws', () => {
-  assert.deepEqual(entryRun(HUB_ENTRY, HUB_ROOT), { status: 0, stdout: '', landed: true });
-  const homeless = preload("require('node:os').homedir = () => { throw new Error('no home directory'); };\n");
+  assert.deepEqual(entryRun(HUB_ENTRY, HUB_ROOT, preload(kernelClock())), { status: 0, stdout: '', landed: true });
+  const homeless = preload(`${kernelClock()}require('node:os').homedir = () => { throw new Error('no home directory'); };\n`);
   assert.deepEqual(entryRun(HUB_ENTRY, HUB_ROOT, homeless), { status: 0, stdout: '', landed: false });
 });
 
@@ -347,7 +353,7 @@ test('a missing lineage module leaves the entry silent with exit 0, while the sa
     return plugin;
   };
   const whole = copy(true);
-  assert.deepEqual(entryRun(path.join(whole, 'hooks', 'lib', 'session-hub-receipt-v1.mjs'), whole), { status: 0, stdout: '', landed: true });
+  assert.deepEqual(entryRun(path.join(whole, 'hooks', 'lib', 'session-hub-receipt-v1.mjs'), whole, preload(kernelClock())), { status: 0, stdout: '', landed: true });
   const partial = copy(false);
-  assert.deepEqual(entryRun(path.join(partial, 'hooks', 'lib', 'session-hub-receipt-v1.mjs'), partial), { status: 0, stdout: '', landed: false });
+  assert.deepEqual(entryRun(path.join(partial, 'hooks', 'lib', 'session-hub-receipt-v1.mjs'), partial, preload(kernelClock())), { status: 0, stdout: '', landed: false });
 });

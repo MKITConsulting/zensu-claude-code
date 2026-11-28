@@ -35,8 +35,8 @@ no `local` anywhere, and a verified pipeline. Nothing recorded plus a verified c
 `ask`, which only an interactive standalone chain may put to the user. A "repository" answer is
 written per clone into the plugin data directory, keyed by the git common directory, so every
 worktree sees it and no feature PR carries config noise. The question never writes the
-committed config. No `ZENSU_*=off` stem was added: the choice is a mode, not a gate escape, so
-`ESCAPE_STEMS` and the bypass-ledger roster stay unchanged.
+committed config. It has no `ZENSU_*=off` stem: the choice is a mode, not a gate escape, so
+`ESCAPE_STEMS` and the bypass-ledger roster do not list it.
 
 **Verified means the job ran, not that it passed, and the tree's version still runs it.** A
 workflow under `.github/workflows/` triggers on `pull_request`, the repository is not a fork, a job
@@ -55,7 +55,7 @@ host `repoIdentity` accepts), because gh otherwise answers from `GH_HOST` or fro
 is logged in to. Measured with gh 2.101.0: `GH_HOST=example.invalid gh api repos/cli/cli` failed
 with `error connecting to example.invalid`, and the same call with a trailing
 `--hostname github.com` answered from github.com. The flag follows the endpoint, so the stub's
-POSIX script still finds the endpoint at its old position; both stub variants parse the arguments
+POSIX script finds the endpoint right after `api`; both stub variants parse the arguments
 (`ghRequest`) and choose the host the way gh does, `--hostname`, else `GH_HOST`, else github.com,
 and answer only github.com.
 
@@ -72,7 +72,8 @@ any text and the ends trimmed the way GitHub trims an evaluated name (`iOS ${{ �
 a `jobs:` block written in flow form (`flowJobs`) run as any name, because the scan does not read
 those forms; an anchor alone (`test: &defaults` above the job's own lines) is no inline body, so
 that job keeps its name. The trim applies to the name before a shape adds its suffix, because trimming the
-composed shape let the pattern's `*` stand for a ` / ` the name never had. The overlap is a dynamic
+composed shape would let the pattern's `*` stand for a ` / ` the name never had.
+The overlap is a dynamic
 program over both wildcard sides, and two bounds keep it cheap, both overridable through `limits`
 like every other bound: a name longer than `LIMITS.maxNameChars` (1024, a judgement) counts as any
 text, and a check whose tables would exceed `LIMITS.maxMatchCells` (4 Mi cells, a judgement: about
@@ -91,15 +92,14 @@ every other version keeps its proofs, because the fact concerns this version alo
 2026-11-11 over completed pull-request runs, each group scanned against the workflow file at the
 run's head commit:
 
-| Repository, workflow | Groups | Matched before | Matched now |
-|---|---|---|---|
-| this repository, `ci.yml` (3 runs) | 6 | 6 | 6 |
-| `python/cpython`, `build.yml` (3 runs) | 96 | 26 | 96 |
-| `rust-lang/rust`, `ci.yml` (2 runs) | 26 | 4 | 26 |
+| Repository, workflow | Groups | Matched |
+|---|---|---|
+| this repository, `ci.yml` (3 runs) | 6 | 6 |
+| `python/cpython`, `build.yml` (3 runs) | 96 | 96 |
+| `rust-lang/rust`, `ci.yml` (2 runs) | 26 | 26 |
 
-The earlier matcher missed every reusable-workflow job (`<caller> / <callee>`), every block-scalar
-name and every name built wholly from `${{ }}`, so a strict check with it would have failed closed
-for most of CPython's test jobs.
+A matcher without the reusable-workflow shape (`<caller> / <callee>`), block-scalar names or names
+built wholly from `${{ }}` would fail a strict check closed for most of CPython's test jobs.
 
 **Every refresh has one deadline.** `LIMITS.refreshDeadlineMs` (60 s, a judgement: half of the Bash
 tool's default 120 s timeout, so `--tdd-begin` keeps the rest for its own work) bounds the whole
@@ -116,13 +116,15 @@ reads are only shown.
 **The cache keeps one proof per workflow version and job.** A proof is
 `cache/<key>.<blob>.<job>.json`: `<key>` is the first 40 hex digits of the sha256 of the
 repository and the workflow path, `<blob>` the sha256 of the workflow file's bytes in the working
-tree, `<job>` the first 16 hex digits of the sha256 of the job pattern the proof verified, and the
-entry shape and `CACHE_KEYS` are unchanged. The job is part of the name because a proof counts only
+tree, `<job>` the first 16 hex digits of the sha256 of the job pattern the proof verified, and an
+entry has the legacy slot's shape and `CACHE_KEYS`.
+The job is part of the name because a proof counts only
 for the job it verified, so two worktrees that bind different jobs to one workflow version would
-otherwise overwrite each other's proof. A read takes the newest matching proof by `verifiedAt`. One slot per repository and workflow let worktrees whose workflow files differ void
-each other: in a consuming repository one worktree's refresh overwrote the slot eleven minutes
-before another worktree's `--tdd-begin`, which froze that chain `local`, and its terminus reads
-the same cache. One file per version rather than one list per workflow, because each writer then
+otherwise overwrite each other's proof. A read takes the newest matching proof by `verifiedAt`.
+One slot per repository and workflow would let worktrees whose workflow files differ void
+each other: one worktree's refresh overwrites the slot, another worktree's `--tdd-begin` then
+freezes its chain `local`, and its terminus reads the same cache.
+One file per version rather than one list per workflow, because each writer then
 replaces only its own file atomically, and two refreshes cannot drop each other's proof in a
 read-modify-write. `--refresh` reuses the current version's proof while it is younger than 24
 hours and otherwise asks GitHub again. Every `gh` failure is transient: it keeps that proof for
@@ -139,32 +141,33 @@ void every other worktree's proof for another job. Without a requested job the d
 the one the refresh proposed, and that proposal depends on the version, because only a job the
 version runs is proposed; such a disproof therefore also removes this version's own proofs, of
 every job, so the version's later reads agree with the refresh, and never another version's proof
-of another job (`removeDisproved`). Without that removal, the `--tdd-begin` snapshot honoured a proof
-the Phase 0 refresh had just rejected. A version no proof covers, an edited workflow file
+of another job (`removeDisproved`). Without that removal, the `--tdd-begin` snapshot would honour a
+proof the Phase 0 refresh had just rejected. A version no proof covers, an edited workflow file
 included, is unverified, and its reason says that the tree differs from every verified version.
 
 **The legacy slot.** An older installation of the same lineage still reads and writes
 `cache/<key>.json`, and after an update sessions of both installations run side by side on one
 machine. A read falls back to that slot when it holds the current version; a write never touches
-it, so an older session sees only its own installation's writes, exactly as before. A proof a read
+it, so an older session sees only its own installation's writes. A proof a read
 SERVES from the slot is copied unchanged, `verifiedAt` included, to its own per-version file
 (`keepProof`), in the cache read, in the refresh shortcut and in the transient-failure fallback:
-otherwise a newer chain that began `ci` on the slot depended on it to its terminus, and an older
-session's refresh in another worktree rewrote it and voided that chain, the very case-1 voiding
-this change removes.
+otherwise a newer chain that began `ci` on the slot would depend on it to its terminus, and an
+older session's refresh in another worktree could rewrite it and void that chain, the voiding
+between worktrees that one file per version prevents.
 
 **A chain keeps the runner it began with, and says which.** The `--tdd-begin` success arm writes a
 snapshot. It reads the cache first, and when a recorded CI choice resolves unverified there, it
 resolves once more in refresh mode, with the Phase 0 semantics, before it records the runner. The
-network is allowed there once because the snapshot is what the terminus honours: in a consuming
-repository a session switched to a branch whose workflow file no proof covered thirteen seconds
-after its Phase 0 refresh, and the cache-only snapshot froze the chain `local` although Phase 0 had
-printed `ci`. The refresh costs nothing when the cache holds the version, the normal case right
+network is allowed there once because the snapshot is what the terminus honours: for a session
+that switches after its Phase 0 refresh to a branch whose workflow file no proof covers, a
+cache-only snapshot would freeze the chain `local` although Phase 0 printed `ci`.
+The refresh costs nothing when the cache holds the version, the normal case right
 after Phase 0, and a chain without a CI choice never asks. `--tdd-begin` prints the snapshot's line
 after `mode:` whenever a CI choice is recorded and no rank chose local, `full suite: ci | this chain began with the CI
 runner: …` or `full suite: local | <reason> | decided by: <rank> | this chain began with the local
-runner, …`, because a chain whose choice did not hold ran every phase in CI mode, as Phase 0 told
-it, and then met a terminus that demanded a local full suite. A local choice in any rank wins
+runner, …`, because a chain whose choice does not hold would otherwise run every phase in CI mode,
+as Phase 0 told it, and then meet a terminus that demands a local full suite.
+A local choice in any rank wins
 before the pipeline is read, so it prints no line, like a chain without a CI choice. ## Full Suite in CI in
 `skills/build/references/modes.md` names that line as the one that activates the CI deltas. The
 snapshot file is one per session key, so the previous chain's `ci` would otherwise stand for the
@@ -197,10 +200,11 @@ workflow too. Git's answer decides: a root git reports outside every work tree k
 any other git failure, a `safe.directory` refusal for example, answers unverified with git's
 message (`git could not place the project root in a work tree: …`, or `the chain's work tree` for
 the bound tree) instead of judging the project root as if it were the top. Reading the session's
-recorded project root instead judged a bound chain whose worktree lies below the anchor by a file
-its branch may not carry, at the per-version binding, at the begin refresh and at every cache read,
-and a branch switch in the anchor checkout in the middle of such a chain changed the version all of
-them read. The remote follows the same tree, because the chain's own branch decides its upstream.
+recorded project root instead would judge a bound chain whose worktree lies below the anchor by a
+file its branch may not carry, at the per-version binding, at the begin refresh and at every cache
+read, and a branch switch in the anchor checkout in the middle of such a chain would change the
+version all of them read.
+The remote follows the same tree, because the chain's own branch decides its upstream.
 
 **A session below the repository top also needs path filters that let its pull requests run the
 suite** (`pathFilterRefusal`). A pull request of such a session changes only files under its
@@ -240,7 +244,7 @@ never falls back to the anchor: `chainContract` answers unverified with `the cha
 could not be resolved: <cause>`, which a recorded CI choice turns into `local`, the fail-closed
 direction, and the policy line prints the cause as a segment of its own,
 `… could not be resolved | work tree: <cause> | decided by: …`, under its own display bound, so a
-long cause never pushes the rank out of the line. The clone record keeps keying on the git common
+long cause never pushes the rank out of the line. The clone record keys on the git common
 directory of the project
 root, which every worktree of the clone shares, and the snapshot keeps its `projectRoot` check, so
 no store and no key set moved. A delegated chain's Phase 0 refresh runs before `--tdd-begin` binds
@@ -416,10 +420,10 @@ still run their own test gate locally; conditions are not evaluated per chain; t
 - Proofs of a workflow that no session refreshes again are never pruned; each is about 600 bytes.
 - The post-review read of an Autopilot-bound chain starts one `zensu-log.sh --chain-work-tree
   --project-dir` process, with its own bind and workflow-document read, on every review completion
-  of such a chain, the background claim's included. It started 18 `node` processes, ten of them
-  project-root verifications; since the lookup subshell memoizes the root
-  (`.claude/rules/stop-latency.md`) it starts 10, measured on macOS bash 3.2.57 and Linux bash
-  5.2.15, and C33 holds that ceiling. It runs before the claim's last deadline check, so on a
+  of such a chain, the background claim's included. It starts 10 `node` processes, with the
+  project root memoized in the lookup subshell (`.claude/rules/stop-latency.md`), measured on
+  macOS bash 3.2.57 and Linux bash 5.2.15, and C33 holds that ceiling.
+  It runs before the claim's last deadline check, so on a
   slow host a background claim that it delays past its deadline defers to the next Stop or prompt
   with record and note kept, rather than being cut off after the ticket CAS; the cost is a later
   claim, never a lost one.

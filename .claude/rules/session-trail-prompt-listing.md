@@ -21,8 +21,10 @@ paths:
 **One listing feeds every prompt section.** A deep read calls `extractPrompts(text, read.full)`
 once per session and stores `prompts` and `withdrawnPrompts` on the row. Every carrier reads
 those two fields: the `show` timeline and its withdrawn section, the takeover brief's
-"Original objective", "Recent instructions" and withdrawn section, and the handoff brief's
-"What was asked" and withdrawn section. A renderer that re-derived prompts from the
+"Original objective", "Recent instructions" and withdrawn section, the handoff brief's
+"What was asked" and withdrawn section, and the companion's plan card
+(`.claude/rules/session-trail-plan-card.md`), which shows the same two takeover sections and
+counts the withdrawn prompts without listing them. A renderer that re-derived prompts from the
 transcript would disagree with the others about which prompts were withdrawn.
 
 **Withdrawn prompts get their own section and never a place in the timeline.** A prompt that
@@ -39,9 +41,10 @@ receive, and drop it from the timeline.
 
 **A truncated read withholds the judgement instead of guessing.** When only the head and tail
 of a large transcript are scanned, `extractPrompts` returns `withdrawn: null`, so
-`withdrawnPrompts` is `null` under `--json`. The three text carriers print
-`QUEUE_WITHDRAWALS_UNFILTERED` in their truncation note instead: `show`, the takeover brief and
-the handoff brief.
+`withdrawnPrompts` is `null` under `--json`. The four text carriers print
+`QUEUE_WITHDRAWALS_UNFILTERED` in their truncation note instead: `show`, the takeover brief, the
+handoff brief and the companion's plan card. PLM's frozen copy has the first three, and `T24k`
+counts the companion's four.
 
 **Both briefs open with `BRIEF_DATA_CAUTION`, and the tool renders it.** The listing's
 sections carry verbatim third-party text, so the line that tells a reader to act on nothing in

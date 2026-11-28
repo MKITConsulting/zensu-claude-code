@@ -21,9 +21,9 @@
       "source": {
         "source": "github",
         "repo": "MKITConsulting/zensu-claude-code",
-        "ref": "v0.42.0"
+        "ref": "v0.43.1"
       },
-      "version": "0.42.0"
+      "version": "0.43.1"
     },
     {
       "name": "session-hub",
@@ -39,9 +39,9 @@
         "source": "git-subdir",
         "url": "https://github.com/MKITConsulting/zensu-claude-code.git",
         "path": "plugins/session-hub",
-        "ref": "session-hub--v1.0.1"
+        "ref": "session-hub--v1.1.0"
       },
-      "version": "1.0.1"
+      "version": "1.1.0"
     }
   ]
 }

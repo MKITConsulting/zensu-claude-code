@@ -47,6 +47,11 @@
       "summary": "The shifted-clock preload and runner that the scheduled clock-shift pass uses."
     },
     {
+      "path": "tests/structure/context-nudge-assertions.test.js", "registered": 3,
+      "runs": [{ "driver": "tests/structure/test-context-nudge-hook.sh" }],
+      "summary": "The context-nudge eval graders: every assertion body compiled and a pinned pass and fail vector over the wrapper envelope."
+    },
+    {
       "path": "tests/structure/deferred-review-claim-cases.test.js", "registered": 11,
       "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
       "summary": "The deferred-review claim case table."
@@ -62,9 +67,9 @@
       "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, supersede proofs and their landing evidence, git-fault preservation, receipt freshness and the missing-session refusal."
     },
     {
-      "path": "tests/structure/evidence-report-v1.test.js", "registered": 84, "skips": {"win32": 4},
+      "path": "tests/structure/evidence-report-v1.test.js", "registered": 97, "skips": {"win32": 10},
       "runs": [{ "driver": "tests/structure/test-evidence-report.sh" }],
-      "summary": "Verify-feature evidence reports: ids, the strict manifest schema, the conformance corpus, deterministic rendering, containment, the secret screen and redaction, retention, the store placement, chain and matrix coverage, and the transport."
+      "summary": "Verify-feature evidence reports: ids, the strict manifest schema, the conformance corpus, deterministic rendering and its content security policy, containment, the secret screen and redaction, the PNG decoder, the tool lookup and the verified WebP transcode, retention, the store placement, chain and matrix coverage, and the transport."
     },
     {
       "path": "tests/structure/evidence-run-v1.test.js", "registered": 96, "skips": {"win32": 3},
@@ -108,7 +113,7 @@
       "summary": "The tool-call dispatcher: which checks run for each tool, the wrapper and body each check names, the failure policy, the exec-form registration, the host's aggregation order and the fast-path pre-checks."
     },
     {
-      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 41,
+      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 42,
       "guards": [
         "a detached linked session and everything below it is never listed",
         "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"
@@ -316,7 +321,7 @@
       "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer with its linear shell-flag scan, every refused indirection and the signed-in session rules."
     },
     {
-      "path": "tests/structure/verify-feature-transcript-check.test.js", "registered": 26,
+      "path": "tests/structure/verify-feature-transcript-check.test.js", "registered": 28,
       "runs": [{ "driver": "tests/structure/test-eval-harness-units.sh" }],
       "summary": "The verify-feature transcript assertion contract for plain playwright-cli calls on the zensu-verify session."
     },

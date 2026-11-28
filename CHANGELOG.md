@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-11-25
+
+### Added
+
+- **verify-feature**: Store verified lossless WebP in evidence reports and add the viewer policy (#680)
+
+### Changed
+
+- **clock-shift**: Put the retention and receipt tests on one clock (#684)
+- **rules**: Correct stale facts and remove review history (#668)
+- **changelog**: List #671 in the 0.43.0 section (#682)
+
+### Fixed
+
+- **evals**: Stop the live-eval graders from failing correct replies (#674)
+- **evals**: Let the verify-feature live eval pass on macOS 26 with promptfoo 0.121.20 (#675)
+- **doctor**: Make a linked session's desktop-store miss visible (#676)
+
+## [0.43.0] - 2026-11-25
+
+### Added
+
+- **ai-work**: Search the bound product's features before the capture scope question (#667)
+- **verify-feature**: Fence the browser at the network level and let service workers run (#669)
+- **edit-landing**: Accept a supersede proof for a claim a later step replaced (#665)
+
+### Changed
+
+- Close the red-run issue when a scheduled run is green again (#678)
+- **vcs**: Pin glab 1.133.0 and GitLab CE 19.6.1-ce.0 in the live tier (#677)
+- **vcs**: Pin the host of the review-markers fake gh (#666)
+- **verify-feature**: Specify the network-level browser fence (#641)
+
+### Fixed
+
+- **session-trail**: Release the old session before its remaining work (#671)
+- **verify-feature**: Measure the consent gate against playwright-cli 0.1.25 (#679)
+- **evals**: Close the remaining route short-line needle and README gaps (#672)
+- **session-trail**: Find Claude Desktop records in data folders of their own (#645)
+- **session-trail**: Name saved environments from every store a takeover reads (#657)
+- **evals**: Harden the route short-line probe and session-memory needle (#658)
+- **hooks**: Let a linked session inherit build from desktop stores of their own (#648)
+
 ### Upgrade notes
 
 - **`/zensu:verify-feature` fences its browser at the network level**: the browser now connects
@@ -31,6 +74,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release writes. One remedy covers every such case: start `/zensu:verify-feature` again in a
   session started or reloaded after the update, so that helper and gate come from one
   installation.
+- **verify-feature**: the browser consent gate is now measured against `playwright-cli`
+  0.1.25, and the run-config helper refuses to start a browser verification run on any other
+  version, 0.1.24 included. Upgrade with `npm install -g @playwright/cli@0.1.25`.
+  `brew install playwright-cli` is unpinned: the helper refuses it unless Homebrew ships
+  exactly that version. A session that was running when the plugin updated keeps its earlier
+  plugin root, whose helper still accepts only 0.1.24 and tells you to install 0.1.24 again; do
+  not follow it, but start a fresh session for `/zensu:verify-feature` after upgrading
+  `playwright-cli`.
 
 ## [0.42.0] - 2026-11-20
 

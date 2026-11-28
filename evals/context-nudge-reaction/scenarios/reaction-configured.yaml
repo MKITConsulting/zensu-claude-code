@@ -17,8 +17,12 @@ vars:
 assert:
   - type: javascript
     value: |
-      const txt = String(output);
-      const first = (txt.split('\n').map(s => s.trim()).find(Boolean)) || '';
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const first = (prose.split('\n').map(s => s.trim()).find(Boolean)) || '';
       const relayed = /^CONTEXT-NUDGE-HANDLING:\s*RELAY-TO-USER\b/.test(first);
       return {
         pass: relayed,
@@ -36,10 +40,14 @@ assert:
       };
   - type: javascript
     value: |
-      const txt = String(output);
-      const first = (txt.split('\n').map(s => s.trim()).find(Boolean)) || '';
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const first = (prose.split('\n').map(s => s.trim()).find(Boolean)) || '';
       const selfFirst = /^CONTEXT-NUDGE-HANDLING:\s*SELF-COMPACT\b/.test(first);
-      const selfCompacted = /\b(?:i|i'?ve|i have|i'?ll|i will)\s+(?:just\s+|now\s+)?(?:ran|run|executed|triggered|performed|invoked|started|did)\s+(?:a\s+|the\s+|my\s+)?\/?compact(?:ed|ion|s)?\b/i.test(txt);
+      const selfCompacted = /\b(?:i|i'?ve|i have|i'?ll|i will)\s+(?:just\s+|now\s+)?(?:ran|run|executed|triggered|performed|invoked|started|did)\s+(?:a\s+|the\s+|my\s+)?\/?compact(?:ed|ion|s)?\b/i.test(raw);
       const selfRan = selfFirst || selfCompacted;
       return {
         pass: !selfRan,

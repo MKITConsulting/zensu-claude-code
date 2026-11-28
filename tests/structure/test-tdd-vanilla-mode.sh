@@ -17,6 +17,7 @@
 #        heredocs (P1, P1b, P1b2, P1b3, P1b4), the primer (P3) and the banner tips (BNR2c)
 #   pins: SKILL.md vanilla section + config.example.json key
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"

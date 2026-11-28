@@ -921,11 +921,11 @@ trail_parity() {
     const fs = require("fs");
     const [plmFile, hubFile, extra] = process.argv.slice(1);
     const allowed = new Map([
-      ["parseArgs", "the --anchor flag of the write-anchor feature is gone"],
-      ["COMMAND_FLAGS", "the --anchor flag of the write-anchor feature is gone"],
-      ["refuseForeignFlags", "the --anchor flag of the write-anchor feature is gone"],
+      ["parseArgs", "the --anchor flag of the write-anchor feature is gone, and --plan, the flag of the takeover plan pass, belongs to the companion alone"],
+      ["COMMAND_FLAGS", "the --anchor flag of the write-anchor feature is gone, and --plan, the flag of the takeover plan pass, belongs to the companion alone"],
+      ["refuseForeignFlags", "the --anchor flag of the write-anchor feature is gone, and --plan, the flag of the takeover plan pass, belongs to the companion alone"],
       ["cmdShow", "show prints PLM_GATE_SHOW_LINES instead of the write-anchor and continuation lines, and its --json carries neither key"],
-      ["cmdTakeover", "the takeover brief carries plmGateCaution instead of writeAnchorCaution, and its --json carries neither writes nor continuation"],
+      ["cmdTakeover", "the takeover brief carries plmGateCaution instead of writeAnchorCaution, its --json carries neither writes nor continuation, and with --plan it refuses --force, records nothing and returns the plan card ahead of the edge write; it computes the diffs only for a run that prints them, renders the plan documents of the brief from the selection the card shares, and its --force refusal names the plan card beside the plan brief"],
       ["cmdHandoff", "the handoff brief carries plmGateCaution instead of writeAnchorCaution"],
       ["canonicalPair", "paths go through hostPath, because the GATE probe of bash-source-write-parse.js is gone"],
       ["whereAdviceLines", "the branch for an unloaded GATE probe is gone with the probe"],

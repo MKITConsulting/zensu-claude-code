@@ -386,7 +386,7 @@ adoption row). This is a census, and the rule is the search:
 - It cannot move a running session onto a new version: a session keeps its install
   directory until `/reload-plugins` runs in it.
 - It relaxes neither `runtimeLineageCompatible` nor `adoptableRecord`. A downgrade, a
-  non-sibling checkout, a foreign store and a moved schema are refused as before.
+  non-sibling checkout, a foreign store and a moved schema stay refused.
 - No bypass-ledger entry (adoption escapes no gate) and no record field (provenance is the
   `RUNTIME_ADOPTED` history entry).
 - The opt-out is a session-writable config key and is not ledgered.

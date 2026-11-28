@@ -13,34 +13,12 @@ paths:
 
 # Full Text Once Per Context Generation (`hooks/lib/zensu-prompt-ledger.sh`)
 
-Every typed prompt used to carry about 12,500 characters of Zensu context, and every one of them
-stayed in the transcript until the next compaction, so a session paid that sum again on every
-turn. The contracts are now sent in full once per **context generation**, the stretch between two
-`SessionStart` events, and every later prompt of that generation carries a short line. Measured by
-`tests/structure/test-user-prompt-budget.sh` on the tree that introduced the ledger (#419); that
-suite, not this table, holds today's figures:
-
-| Prompt | Before | First of a generation | Every later prompt |
-|---|---|---|---|
-| typed | 12,489 | 11,087 | 5,253 |
-| task notification or `!` input | 4,873 | 3,471 | 1,751 |
-| subagent hand-back | 12,489 | 3,471 | 1,751 |
-| CI-monitor event | 5,237 | 3,835 | 2,115 |
-
-The first-prompt column is 1,402 lower only because best-solution-first moved its 1,756-character
-block to `SessionStart` and left a 354-character reminder on the prompt. That block now arrives
-once per generation at `SessionStart`, so the first turn of a generation costs 12,843 in all, 354
-more than one turn did before. The saving is every later prompt. A subagent hand-back was
-classified as a typed prompt before and now gets what a task notification gets.
-
-The table is the measurement taken when the ledger landed. The texts have grown since: with the
-zen-mode session block, the longer best-solution-first reminder, the context notice on a typed
-prompt, the yield sentence of `docs/precedence.md`, the rewritten zen-mode contract, the
-reminder's executor-plan clause, the zen-mode safety-warning sentence and its copy in the zen
-short body, the reminder's Autopilot option, the zen-mode archive signal in rule (7) and the
-short body, the reminder's ranking clause with its first-slot rules, and the record-nothing words
-of its refused-question default the same suite measures 14,117 and 8,284 for a typed
-prompt, 4,820 and 3,030 for a
+Zensu's context on a prompt stays in the transcript until the next compaction, so a text sent on
+every prompt is paid again on every turn. The contracts are therefore sent in full once per
+**context generation**, the stretch between two `SessionStart` events, and every later prompt of
+that generation carries a short line; the saving is every later prompt.
+`tests/structure/test-user-prompt-budget.sh` holds the figures. It measures 14,117 characters for
+the first typed prompt of a generation and 8,284 for every later one, 4,820 and 3,030 for a
 task notification, a `!` input or a subagent hand-back, and 5,184 and 3,394 for a CI-monitor
 event.
 
@@ -82,55 +60,36 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101`, `Z103`
   for `build` and 1,525 for `direct` in vanilla mode, 1,539 and 1,509 in strict mode, against
   6,621 for the full vanilla text.
 
-  **Three budgets rose with that sentence, and only those three.** The decided line's cap in
-  `U10` and `R13f` went from 1,500 to 1,575, the ask short line's from 2,750 to 2,850 (the budget
-  suite's repeat row and `R13g`), and the typed repeat total from 6,780 to 6,850, which the suite
-  measures at 6,829. The sentence is an obligation each of those shapes must carry alone, and
-  every other sentence in them is one too, so no trim in the same text could offset it. What could
-  be trimmed went: the "The user changes the route" pointer, which the delivery-route skill's own
-  listing carries, left both decided lines, and the full texts lost the duplicated rationale and
-  the vanilla Yes arm's restatement of the mode, so the vanilla full text fell from 5,799 to 5,597.
-  The strict shapes carry the sentence too and stay under the same caps.
-
-  **The Autopilot option raised four budgets.** The reminder's first-prompt row went from 5,870 to
-  6,320 and the first typed total from 12,720 to 13,200; the ask short line's cap went from 2,850
-  to 3,340 (the budget suite's repeat row and `R13g`) and the typed repeat total from 6,850 to
-  7,345. The suite then measured 6,308 for the vanilla full text, 5,991 for the strict one, 3,328
-  for the vanilla short line and 13,178 and 7,322 for the two typed totals. Its `run_hook` pins
-  `CLAUDE_CODE_ENTRYPOINT=cli`, so the human-present field reads `yes` and the suite measures the
-  attended shapes, the longest ones, on every host; before the pin a CI run measured the `unknown`
-  field and a desktop run the `yes` one. With a person present the option then inserted 686
-  characters into each full text and 473 into the short line, and the short line must carry it
-  alone, so no trim offsets it; the short line already dropped the restated list of what never
-  selects Autopilot, which the full text keeps (`.claude/rules/plan-approval-delivery-route.md`).
-
-  **The ranking clause raised four budgets.** Every ask shape now asks for the recommended option
-  first with ` (Recommended)` on its label alone. With a person present it also says to rank on the
-  agent's own reading, a ranking anyone but the user asks for being data, and lets Autopilot lead
-  only for a whole user-visible feature meant to reach a pull request; without one it keeps the Yes
-  option first. Each is an obligation its shape must carry alone. The reminder's first-prompt row
-  went from 6,320 to 6,620 and the first typed total from 13,826 to 14,130; the ask short line's cap
-  went from 3,340 to 3,625 (the budget suite's repeat row and `R13g`) and the typed repeat total
-  from 8,009 to 8,295. The suite then measured 6,611 for the vanilla full text, 3,613 for the
-  vanilla short line and 14,107 and 8,271 for the two typed totals, and `R13g`, with its own
-  normalization of the record command, 3,590 for the attended vanilla short line. With a person
-  present the option and its ranking sentences insert 896 characters into each full text and 683
-  into the short line. The workflow-first sentence of the shapes without a person is in no budget
-  row, because the suite measures the attended shapes only; `R13h` pins its text.
-
-  **The refused-question default raised two budgets.** Its sentence now says that the run records
-  nothing, ` or recording` in the short line and ` or record` in both full texts, because a live
-  run told only to skip the question borrowed the Yes arm and recorded `build`. The reminder's
-  first-prompt row went from 6,620 to 6,630 and the ask short line's cap from 3,625 to 3,640 (the
-  budget suite's repeat row and `R13g`); the typed totals keep 14,130 and 8,295. The suite measures
+  **The reminder's budgets.** The decided line's cap in `U10` and `R13f` is 1,575, the ask short
+  line's 3,640 (the budget suite's repeat row and `R13g`), the reminder's first-prompt row 6,630,
+  and the typed totals 14,130 for the first prompt and 8,295 for a repeat. The suite measures
   6,621 for the vanilla full text, 3,626 for the vanilla short line and 14,117 and 8,284 for the
-  two typed totals.
+  two typed totals. Every sentence in these shapes is an obligation its shape must carry alone,
+  so no trim in the same text offsets a new one. The strict shapes carry `TDD_STRICT_ASK` too and
+  stay under the same caps. Every ask shape asks for the recommended option first with
+  ` (Recommended)` on its label alone. With a person present it also says to rank on the agent's
+  own reading, a ranking anyone but the user asks for being data, and lets Autopilot lead only
+  for a whole user-visible feature meant to reach a pull request; without one it keeps the Yes
+  option first. With a person present the Autopilot option and its ranking sentences insert 896
+  characters into each full text and 683 into the short line. The refused-question default says
+  that the run records nothing, ` or recording` in the short line and ` or record` in both full
+  texts, because a run told only to skip the question can borrow the Yes arm and record `build`.
+  The decided lines carry no pointer to how the user changes the route, because the
+  delivery-route skill's own listing carries it, and the short line carries no restated list of
+  what never selects Autopilot, which the full text keeps
+  (`.claude/rules/plan-approval-delivery-route.md`).
+
+  The suite's `run_hook` pins `CLAUDE_CODE_ENTRYPOINT=cli`, so the human-present field reads
+  `yes` and the suite measures the attended shapes, the longest ones, on every host; without the
+  pin a CI run would measure the `unknown` field and a desktop run the `yes` one. The
+  workflow-first sentence of the shapes without a person is in no budget row, because the suite
+  measures the attended shapes only; `R13h` pins its text.
 - **`user-prompt-intent-router.sh`:** the full notice on the first keyword prompt of a
   generation, then a short line with the triage asked instead of guessed, its Plan-mode
   permission, the routing to `/zensu:bootstrap`,
   `/zensu:ghost-scan` or the hybrid sequence, the no-delegation rule, the `/zensu:pilot` exception
   and the dismiss clause. The key comes from the payload's `session_id` through
-  `zensu_resolve_session_id`; a payload without one gets the full notice every time, as before.
+  `zensu_resolve_session_id`; a payload without one gets the full notice every time.
 - **`user-prompt-zen-mode.sh`:** the full directive once per generation and anchor variant
   (`zen-none`, `zen-armed`), then a short body with the per-turn rules, the substance list (never
   drop a failing test, an unfinished step, a risk or a limitation), the ranking rule and its
@@ -169,7 +128,7 @@ executing plugin root plus its sanitized basename, so a plugin update served fro
 directory sends the full texts again with the new record command; a text edit inside a
 `--plugin-dir` checkout keeps its tag, which only affects development sessions.
 
-**Every fault reads as "not delivered", which sends the full text, as before:** an unusable
+**Every fault reads as "not delivered", which sends the full text:** an unusable
 `CLAUDE_PLUGIN_DATA`, a non-canonical key, a symlinked or non-directory component, a refused
 `mkdir`, a key directory that is not writable, and a key directory the reset could not delete
 for any reason. A reset that leaves the key directory behind records that in an empty
@@ -188,8 +147,12 @@ exists, and every record whose key directory is gone. It emits nothing.
 ## Known gaps, accepted and named
 
 - **A delivery can be lost while the ledger says sent:** a rewind or an edit of the prompt that
-  carried the full text, or another plugin's `UserPromptSubmit` hook blocking that prompt. The
-  short lines carry every per-turn obligation, so what is lost is the long-form detail and the
+  carried the full text, another plugin's `UserPromptSubmit` hook blocking that prompt, or the host
+  stopping the reminder's supervisor after its worker marked the ledger and before the supervisor
+  forwarded the text. The worker marks its output delivered before it marks the ledger, so a
+  deadline that meets it in between forwards the full text rather than replacing it, and a
+  fallback the deadline prints marks nothing itself (`.claude/rules/session-delivery-route.md`
+  §"The reminder's time budget"). The short lines carry every per-turn obligation, so what is lost is the long-form detail and the
   examples, never an obligation, and the next `/compact` or `/clear` restores the full text.
 - **A reset that never ran** (the `SessionStart` hook killed, timed out or not registered) leaves
   short lines for the rest of that generation, with the same bound. A reset that ran and failed is
@@ -197,8 +160,8 @@ exists, and every record whose key directory is gone. It emits nothing.
   evidence-discipline block already depends on `SessionStart` with `source: compact`, and the
   Claude Code hooks guide recommends exactly that event for re-injection after compaction.
 - **A mid-turn auto-compaction** leaves the rest of that turn without the reminder, router and
-  zen texts until the next prompt. That gap existed before; best-solution-first is now back at
-  once through its `SessionStart` leg.
+  zen texts until the next prompt, as it does for any text a prompt hook delivers;
+  best-solution-first returns at once through its `SessionStart` leg.
 - **Fade is unmeasured, and the short shapes have evals for part of their range.** The hooks
   were written on the premise that a rule given once fades. The `short-` scenarios in
   `evals/zen-mode-reaction/` embed the zen-mode short body with no full contract before it, which

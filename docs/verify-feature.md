@@ -26,7 +26,7 @@ authorize the browser:
 The browser is driven by `playwright-cli`, which you install once:
 
 ```bash
-npm install -g @playwright/cli@0.1.24
+npm install -g @playwright/cli@0.1.25
 ```
 
 That is the version the browser consent gate was measured against, and the run-config helper
@@ -616,7 +616,7 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | the run-config helper stops with `the launch environment sets <variable>, …, so no run config is written` | the shell the helper runs in sets `PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK` or a `PLAYWRIGHT_MCP_*` variable, from the environment Claude Code started with or from a shell profile | unset it where it is set and start the run again |
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
-| PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.24` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |
+| PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.25` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |
 | PARTIAL before any browser call; reason starts `the browser consent gate is not ready (consent hook: …; consent recorder: …)` | the run-config helper checks readiness in the `--check-policy` preflight and again before it writes a run config: the hook's file is missing or `hooks/hooks.json` does not register it on a matcher that covers both `Bash` and `PowerShell` (`unregistered`), or the helper could not determine its registration (`unknown`) | run `/zensu:doctor`, whose `verify-feature` row names the cause, and reinstall the plugin; do not start `/zensu:verify-feature` until that row clears |
 | PARTIAL before any browser call; reason says `so no run config is written; install the measured version with …` | the `@playwright/cli` package manifest of the `playwright-cli` on `PATH` does not declare the measured version: it names another version or another package, the helper could not judge it, or there is no manifest at all. The manifest in the `node_modules/@playwright/cli` directory beside the `playwright-cli` found on `PATH` is read first, so a wrapper script in a directory that holds one naming the measured version is accepted. Any other wrapper script outside the package reads as no manifest, whose reason says the binary resolves to no such manifest — unless a `package.json` sits in the directory of its resolved path or one of the three above it, which then answers as another package or as one the helper cannot judge. A version the binary prints about itself is never accepted | run the install command the reason names; for a wrapper script, also put the directory npm installs `playwright-cli` into first on `PATH`, ahead of the wrapper — the reason says so only when the wrapper resolves to no manifest, and the `PATH` order has to change either way |
 | PARTIAL before any browser call; reason names `an empty PATH entry` or `the relative PATH entry` | an empty `PATH` entry (a leading or trailing `:`, or `::`) or a relative one such as `node_modules/.bin` comes before, or holds, the `playwright-cli` found on `PATH`; the shell reads it against each call's working directory, so a gated call could run another binary than the one measured | remove that entry from `PATH`, or move it behind the directory that holds `playwright-cli` |
@@ -765,6 +765,23 @@ the run sends it nowhere ([the evidence report spec](verify-feature-evidence-rep
   As a backstop a text that matches a secret pattern is refused and local paths are replaced
   before anything is stored, but nothing scans a screenshot or finds personal data in free text,
   so a signed-in run uses the dedicated test account with synthetic data of section 6.
+- **How a screenshot is stored.** As captured, or as a lossless WebP when libwebp's `cwebp` and
+  `dwebp` are installed and the report found that the WebP decodes to the captured pixels. A
+  screenshot it could not verify stays a PNG, and the line the add prints names the reason.
+  `evidence.report.webp` set to `off` keeps every PNG, and on Windows every screenshot stays a
+  PNG ([Evidence Reports](configuration.md#evidence-reports)).
+- **When a report stays PNG although libwebp is installed** and no line names a reason, one of
+  four things holds: `evidence.report.webp` is `off`, the run is on Windows, no absolute `PATH`
+  entry of the shell that runs the verb holds `cwebp`, or the pair found there was not accepted.
+  The first `PATH` entry that holds `cwebp` decides: `dwebp` has to sit beside it, and both have
+  to lie outside the project, in a place that not everyone may write or replace through a
+  directory above it.
+- **What the page can do.** `index.html` carries no script and, when this release or a later one
+  rendered it, a Content-Security-Policy that allows only images and the page's own style sheet.
+  Opened from disk in Chrome, Safari or Firefox it sent no request to a network when it was
+  measured. The policy still lets an image from another local file load and does not keep a link
+  from being followed, and Firefox does not apply it to files on your disk
+  ([the evidence report spec](verify-feature-evidence-report-spec.md), section 6.6).
 - **Its verdict is the run's verdict.** The report refuses a verdict its own records contradict,
   and the run then renders the verdict the refusal names, unless it only lacked the row of a
   criterion it passed, which it writes first; the report and the chat state the same verdict. A

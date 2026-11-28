@@ -297,6 +297,231 @@ L3O_OUT="$(node -e '
 [ "$L3O_OUT" = same ] \
   && check "L3o the resolver's macOS store candidates equal the probes of session-trail's lineage --diagnose in the same order once the other platforms' defaults are left out, in four layouts: named stores with a trailing separator and a named copy of the default store beside lower-case, upper-case and non-UUID profile folders; a padded ZENSU_CCD_STORE with a trailing separator that stays alone beside a named store; a blank ZENSU_CCD_STORE that names no store beside blank, padded and repeated named entries; and a home without a Session Hub profiles folder" PASS \
   || check "L3o store parity with session-trail ($L3O_OUT)" FAIL
+L3P_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { pathToFileURL } = require("url");
+  const m = require(process.argv[1]);
+  const [hub, plm] = process.argv.slice(2);
+  const parent = "local_aaaaaaaa-1111-4111-8111-111111111111";
+  const self = "local_bbbbbbbb-2222-4222-8222-222222222222";
+  const sibling = "local_cccccccc-3333-4333-8333-333333333333";
+  const marks = [true, false, "true", 1, null, undefined];
+  const sources = [sibling, parent, self, "local_x", sibling.toUpperCase(), 3, null, [sibling], undefined];
+  const compare = (copy) => {
+    const differ = [];
+    let forks = 0;
+    for (const mark of marks) {
+      for (const source of sources) {
+        const spawnedFrom = { sessionId: parent, sideSession: true };
+        if (mark !== undefined) spawnedFrom.userFork = mark;
+        const record = { sessionId: self, spawnedFrom };
+        if (source !== undefined) record.forkedFromSessionId = source;
+        const expected = m.isUserFork(record, spawnedFrom, parent);
+        if (expected) forks += 1;
+        if ((copy.linkedKind(spawnedFrom, record) === "fork") !== expected) differ.push(JSON.stringify(mark) + "/" + JSON.stringify(source));
+      }
+    }
+    return { differ, forks };
+  };
+  (async () => {
+    const results = [];
+    for (const file of [hub, plm]) results.push(compare(await import(pathToFileURL(file).href)));
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "fork-parity-"));
+    try {
+      const planted = path.join(scratch, "linked-sessions-v1.mjs");
+      const source = fs.readFileSync(hub, "utf8");
+      const needle = " && source !== runIdOf(from.sessionId)";
+      fs.writeFileSync(planted, source.split(needle).join(""));
+      const control = source.includes(needle) ? compare(await import(pathToFileURL(planted).href)) : null;
+      const same = results.every((result) => result.differ.length === 0 && result.forks === 14);
+      const bites = control !== null && control.differ.length > 0;
+      process.stdout.write(same && bites ? "same" : "differ " + JSON.stringify({ results, control: control && control.differ.length }));
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  })().catch((error) => process.stdout.write("failed " + error.message));
+' "$RESOLVER" "$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/linked-sessions-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" 2>/dev/null)"
+[ "$L3P_OUT" = same ] \
+  && check "L3p the resolver's isUserFork and both copies of session-trail's linkedKind classify the same 54 desktop records alike, userFork true, false, the string true, 1, null and absent crossed with a sibling, the parent, the session itself, a malformed, an upper-case, a numeric, a null, a one-element-array and an absent fork source, 14 of them as forks, and a planted copy without the parent exclusion disagrees" PASS \
+  || check "L3p fork parity with session-trail ($L3P_OUT)" FAIL
+L3Q_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const m = require(process.argv[1]);
+  const core = require(process.argv[2]);
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-detail-")));
+  try {
+    const account = "11111111-1111-4111-8111-111111111111";
+    const organization = "22222222-2222-4222-8222-222222222222";
+    const childHost = "local_33333333-3333-4333-8333-333333333333";
+    const parentHost = "local_44444444-4444-4444-8444-444444444444";
+    const childCli = "55555555-5555-4555-8555-555555555555";
+    const parentCli = "66666666-6666-4666-8666-666666666666";
+    const support = path.join(scratch, "Library", "Application Support");
+    const defaultStore = path.join(support, "Claude", "claude-code-sessions");
+    const profiles = path.join(support, "Zensu Session Hub", "Claude-Profile");
+    const profileStore = (name) => path.join(profiles, name, "claude-code-sessions");
+    const empty = profileStore("aaaaaaaa-1111-4111-8111-111111111111");
+    const holder = profileStore("bbbbbbbb-2222-4222-8222-222222222222");
+    const shared = profileStore("dddddddd-4444-4444-8444-444444444444");
+    const alias = path.join(scratch, "alias", "claude-code-sessions");
+    const bare = path.join(scratch, "bare");
+    const desk = (store) => path.join(store, account, organization);
+    for (const store of [defaultStore, holder, shared]) fs.mkdirSync(desk(store), { recursive: true });
+    for (const store of [empty, profileStore("CCCCCCCC-3333-4333-8333-333333333333"), profileStore("notes")]) fs.mkdirSync(store, { recursive: true });
+    fs.mkdirSync(bare);
+    fs.symlinkSync(path.join(support, "Claude"), path.join(scratch, "alias"));
+    fs.chmodSync(shared, 0o775);
+    const write = (host, cli, parent) => {
+      const record = { sessionId: host, cliSessionId: cli };
+      if (parent) record.spawnedFrom = { sessionId: parent };
+      fs.writeFileSync(path.join(desk(holder), host + ".json"), JSON.stringify(record));
+    };
+    write(childHost, childCli, parentHost);
+    write(parentHost, parentCli, null);
+    const records = path.join(scratch, "records");
+    const root = path.join(scratch, "root");
+    fs.mkdirSync(records);
+    fs.mkdirSync(root);
+    fs.writeFileSync(path.join(records, core.sessionKey(parentCli) + ".json"), JSON.stringify({ schema: core.SCHEMA, schema_version: core.SCHEMA_VERSION, host: "claude", session_id_hash: core.sessionIdHash(parentCli), project_root: root }));
+    const labels = new Map([[alias, "alias"], [defaultStore, "default"], [empty, "aaaa"], [holder, "bbbb"], [shared, "dddd"],
+      [path.join(scratch, ".config", "Claude", "claude-code-sessions"), "linux-default"],
+      [path.join(bare, "Library", "Application Support", "Claude", "claude-code-sessions"), "bare-default"]]);
+    const label = (store) => (store ? labels.get(store) || "other" : "-");
+    const show = (platform, extra) => {
+      const env = Object.assign({ HOME: scratch, CLAUDE_CODE_HOST_SESSION_ID: childHost, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization }, extra || {});
+      const v = m.resolveLinkedSession({ env, platform, sessionId: childCli, pluginData: scratch, detail: true, deps: { recordsDirectory: () => records } });
+      const stores = v.stores.map((s) => [label(s.store), s.source, s.state, s.cause || (s.sameAs ? label(s.sameAs) : "")].filter(Boolean).join(":"));
+      return [v.kind, v.reason, label(v.ownStore), v.parentSession === parentHost ? "parent" : "-", stores.join(",")].join(" ");
+    };
+    const out = [];
+    out.push(show("darwin", { ZENSU_CCD_EXTRA_STORES: alias }));
+    out.push(show("darwin", { ZENSU_CCD_STORE: holder, ZENSU_CCD_EXTRA_STORES: alias }));
+    out.push(show("linux", { ZENSU_CCD_EXTRA_STORES: alias }));
+    fs.rmSync(path.join(desk(holder), childHost + ".json"));
+    out.push(show("darwin"));
+    write(childHost, childCli, parentHost);
+    out.push(show("darwin", { HOME: bare }));
+    const getuid = process.getuid;
+    process.getuid = () => getuid.call(process) + 1;
+    try {
+      out.push(show("darwin"));
+    } finally {
+      process.getuid = getuid;
+    }
+    process.stdout.write(out.join("\n"));
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+' "$RESOLVER" "$CORE" 2>/dev/null)"
+L3Q_WANT="$(printf '%s\n' \
+  'linked resolved bbbb parent alias:named:no-record,default:default:same-folder:alias,aaaa:hub-profile:no-folder,bbbb:hub-profile:holds-record,dddd:hub-profile:refused:shared-write' \
+  'linked resolved bbbb parent bbbb:override:holds-record' \
+  'unresolved own-record-missing - - alias:named:no-record,linux-default:default:no-folder' \
+  'unresolved own-record-missing - - default:default:no-record,aaaa:hub-profile:no-folder,bbbb:hub-profile:no-record,dddd:hub-profile:refused:shared-write' \
+  'none no-session-store - - bare-default:default:no-folder' \
+  'none no-session-store - - default:default:refused:foreign-owner,aaaa:hub-profile:refused:foreign-owner,bbbb:hub-profile:refused:foreign-owner,dddd:hub-profile:refused:foreign-owner')"
+[ "$L3Q_OUT" = "$L3Q_WANT" ] \
+  && check "L3q the detail mode lists every store candidate in order with its source and state: a named store that reaches the default store's folder, the default store as the same folder, a Session Hub profile without this account's folder, the profile that holds the record and a group-writable profile; upper-case and non-UUID profile folders are no candidates; ZENSU_CCD_STORE stays the only store; Linux probes no profile; a record in no store answers own-record-missing; a home without stores answers no-session-store; and with every folder owned by another account every store is refused" PASS \
+  || check "L3q detail states ($(printf '%s' "$L3Q_OUT" | tr '\n' ';'))" FAIL
+L3R_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { execFileSync } = require("child_process");
+  const m = require(process.argv[1]);
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-race-")));
+  try {
+    const account = "11111111-1111-4111-8111-111111111111";
+    const organization = "22222222-2222-4222-8222-222222222222";
+    const host = "local_33333333-3333-4333-8333-333333333333";
+    const parentHost = "local_44444444-4444-4444-8444-444444444444";
+    const cli = "55555555-5555-4555-8555-555555555555";
+    const store = path.join(scratch, "store");
+    const desk = path.join(store, account, organization);
+    fs.mkdirSync(desk, { recursive: true });
+    const own = path.join(desk, host + ".json");
+    fs.writeFileSync(own, JSON.stringify({ sessionId: host, cliSessionId: cli, spawnedFrom: { sessionId: parentHost } }));
+    const env = { HOME: scratch, CLAUDE_CODE_HOST_SESSION_ID: host, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization, ZENSU_CCD_STORE: store };
+    const out = [];
+    const realLstat = fs.lstatSync;
+    let seen = 0;
+    fs.lstatSync = (target, ...rest) => {
+      if (target === own) {
+        seen += 1;
+        if (seen > 1) {
+          const gone = new Error("vanished");
+          gone.code = "ENOENT";
+          throw gone;
+        }
+      }
+      return realLstat(target, ...rest);
+    };
+    try {
+      const v = m.resolveLinkedSession({ env, sessionId: cli, pluginData: scratch });
+      out.push(v.kind + "/" + v.reason + "/" + seen);
+    } finally {
+      fs.lstatSync = realLstat;
+    }
+    const plain = m.resolveLinkedSession({ env, sessionId: cli, pluginData: scratch, projectRoot: scratch });
+    const detailed = m.resolveLinkedSession({ env, sessionId: cli, pluginData: scratch, projectRoot: scratch, detail: true });
+    out.push(Object.keys(plain).sort().join(","));
+    out.push(String(m.renderVerdict(plain) === m.renderVerdict(detailed)));
+    out.push(String(Object.isFrozen(detailed) && Object.isFrozen(detailed.stores) && detailed.stores.every((entry) => Object.isFrozen(entry))));
+    out.push(String(JSON.stringify(detailed.stores.map((entry) => entry.store)) === JSON.stringify(m.storeCandidates(process.platform, env))));
+    const cliLine = execFileSync(process.execPath, [process.argv[1]], { env: Object.assign({ PATH: process.env.PATH, ZENSU_LINKED_SESSION_ID: cli, ZENSU_LINKED_PROJECT_ROOT: scratch, CLAUDE_PLUGIN_DATA: scratch }, env), encoding: "utf8" });
+    out.push(String(cliLine === m.renderVerdict(plain) + "\n"));
+    fs.rmSync(own);
+    out.push(m.resolveLinkedSession({ env, sessionId: cli, pluginData: scratch }).reason);
+    process.stdout.write(out.join("\n"));
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+' "$RESOLVER" 2>/dev/null)"
+L3R_WANT="$(printf '%s\n' 'unresolved/own-record-unreadable/2' 'kind,parentKey,parentRoot,reason,repository,turn' true true true true own-record-missing)"
+[ "$L3R_OUT" = "$L3R_WANT" ] \
+  && check "L3r an own record that vanishes between the existence check and the read answers own-record-unreadable while a record in no store keeps own-record-missing, and the detail mode leaves the hook answer alone: the plain verdict keeps its six fields, renders the same line as the detailed one and as the module's own command line, and the detailed verdict lists exactly the store candidates, frozen" PASS \
+  || check "L3r race remap and unchanged hook answer ($(printf '%s' "$L3R_OUT" | tr '\n' ';'))" FAIL
+L3S_SCAN='
+  const fs = require("fs");
+  const path = require("path");
+  const dir = process.argv[1];
+  const readers = ["user-prompt-tdd-reminder.sh", "plan-approved-delegate.sh", "zensu-doctor.sh", "zensu-doctor-report.js", "linked-session-v1.js", "zensu-linked-session.sh"];
+  const names = ["CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_ACCOUNT_UUID", "CLAUDE_CODE_ORGANIZATION_UUID"];
+  let scanned = 0;
+  const bad = [];
+  for (const file of fs.readdirSync(dir).filter((name) => /^test-.*\.sh$/.test(name)).sort()) {
+    const text = fs.readFileSync(path.join(dir, file), "utf8").replace(/\\\r?\n/g, " ");
+    if (!readers.some((reader) => text.includes(reader))) continue;
+    scanned += 1;
+    const unsets = text.split(/\r?\n/).filter((line) => /^unset[ \t]/.test(line)).join(" ");
+    const missing = names.filter((name) => !new RegExp("[ \\t]" + name + "(?=[ \\t]|$)").test(unsets));
+    if (missing.length) bad.push(file + ":" + missing.join(","));
+  }
+  process.stdout.write(scanned + " " + (bad.length ? bad.join(" ") : "none"));
+'
+L3S_REAL="$(node -e "$L3S_SCAN" "$PLUGIN_DIR/tests/structure" 2>/dev/null)"
+L3S_TREE="$(mktemp -d 2>/dev/null)"
+L3S_PLANTED=""
+if [ -n "$L3S_TREE" ] && [ -d "$L3S_TREE" ]; then
+  printf '%s\n' '#!/bin/bash' 'bash "$P/hooks/lib/zensu-doctor.sh"' > "$L3S_TREE/test-a.sh"
+  printf '%s\n' '#!/bin/bash' 'unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID' 'bash "$P/hooks/user-prompt-tdd-reminder.sh"' > "$L3S_TREE/test-b.sh"
+  printf '%s\n' '#!/bin/bash' 'unset CLAUDE_CODE_HOST_SESSION_ID \' '  CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID' 'node "$P/hooks/lib/linked-session-v1.js"' > "$L3S_TREE/test-c.sh"
+  printf '%s\n' '#!/bin/bash' 'scrub() {' '  unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID' '}' 'bash "$P/hooks/plan-approved-delegate.sh"' > "$L3S_TREE/test-d.sh"
+  printf '%s\n' '#!/bin/bash' 'unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID' '# unset CLAUDE_CODE_ORGANIZATION_UUID' 'node "$P/hooks/lib/zensu-doctor-report.js"' > "$L3S_TREE/test-e.sh"
+  printf '%s\n' '#!/bin/bash' 'echo nothing to see' > "$L3S_TREE/test-f.sh"
+  L3S_PLANTED="$(node -e "$L3S_SCAN" "$L3S_TREE" 2>/dev/null)"
+  rm -rf "$L3S_TREE"
+fi
+L3S_PLANTED_WANT="5 test-a.sh:CLAUDE_CODE_HOST_SESSION_ID,CLAUDE_CODE_ACCOUNT_UUID,CLAUDE_CODE_ORGANIZATION_UUID test-d.sh:CLAUDE_CODE_HOST_SESSION_ID,CLAUDE_CODE_ACCOUNT_UUID,CLAUDE_CODE_ORGANIZATION_UUID test-e.sh:CLAUDE_CODE_ORGANIZATION_UUID"
+if [ "${L3S_REAL% *}" -ge 30 ] 2>/dev/null && [ "${L3S_REAL#* }" = none ] && [ "$L3S_PLANTED" = "$L3S_PLANTED_WANT" ]; then
+  check "L3s every structure suite that names a lineage reader (both ask-hooks, the doctor wrapper and renderer, the resolver and its shell library) unsets CLAUDE_CODE_HOST_SESSION_ID, CLAUDE_CODE_ACCOUNT_UUID and CLAUDE_CODE_ORGANIZATION_UUID at top level, so no developer's Claude Desktop identity reaches them, and the scan refuses a missing, an indented and a partial unset in a planted tree ($L3S_REAL)" PASS
+else
+  check "L3s desktop identity scrub (real='$L3S_REAL' planted='$L3S_PLANTED')" FAIL
+fi
 L3F_INNER='
   const cp = require("child_process");
   const fs = require("fs");
@@ -740,14 +965,19 @@ register() {
 }
 desk_record() {
   "$REAL_NODE" -e '
-    const [file, host, cli, parent, turns] = process.argv.slice(1);
+    const [file, host, cli, parent, turns, fork, source] = process.argv.slice(1);
     const record = { sessionId: host, title: "fixture" };
     if (cli) record.cliSessionId = cli;
     if (parent) record.spawnedFrom = { sessionId: parent, taskId: "task_fixture", title: "fixture", sideSession: false, name: "fixture" };
+    if (parent && fork) {
+      record.forkedFromSessionId = source ? JSON.parse(source) : parent;
+      record.spawnedFrom.sideSession = true;
+      record.spawnedFrom.userFork = JSON.parse(fork);
+    }
     if (turns === "null") record.completedTurns = null;
     else if (turns) record.completedTurns = Number(turns);
     require("fs").writeFileSync(file, JSON.stringify(record));
-  ' "$DESK/$1.json" "$1" "$2" "$3" "${4:-}"
+  ' "$DESK/$1.json" "$1" "$2" "$3" "${4:-}" "${5:-}" "${6:-}"
 }
 session() {
   next_id; CLI="$ID"; HOST="local_$ID"
@@ -804,6 +1034,11 @@ case "$LEAD" in
   (*"brief another session wrote"*"not the user's own text"*"'/zensu:build'"*"'no tdd'"*"decides nothing"*)
     check "L5 the lead says the prompt is another session's brief and that a route preference in it decides nothing in either direction" PASS ;;
   (*) check "L5 lead wording ($LEAD)" FAIL ;;
+esac
+case "$LEAD" in
+  (*"ask the route question only when it reads ask and this request changes executable code"*"name any route the brief asked for"*)
+    check "L76 the lead asks the route question only while the field reads ask and the request changes executable code, and still asks to name the route the brief asked for" PASS ;;
+  (*) check "L76 lead route-question condition ($LEAD)" FAIL ;;
 esac
 
 echo "== AC-001, AC-004, AC-005, AC-006: a linked session inherits build =="
@@ -1333,5 +1568,874 @@ UNNAMED_OUT="$(remind "$WT" "$NX_CLI" "$NX_HOST" "add a function to foo.js")"
   && [ "$(linked_state "$WT" "$NX_CLI")" = unresolved ]; } \
   && check "L47 a linked session whose records sit only in a store ZENSU_CCD_EXTRA_STORES names, after an entry that names no store, inherits build, while the same layout without the variable stays unresolved and inherits nothing" PASS \
   || check "L47 named store (field='$(last_field "$NAMED_OUT")' inherited=$(inherited_state "$WT" "$NC_CLI") linked=$(linked_state "$WT" "$NC_CLI") unnamed='$(last_field "$UNNAMED_OUT")' unnamed-inherited=$(inherited_state "$WT" "$NX_CLI") unnamed-linked=$(linked_state "$WT" "$NX_CLI"))" FAIL
+echo "== FR-007 census: a fork the user starts or continues is linked, but never the brief turn =="
+session "$WT" "$P_HOST" --no-record; UF_CLI="$CLI"; UF_HOST="$HOST"
+desk_record "$UF_HOST" "$UF_CLI" "$P_HOST" "" true
+UF_LINE="$(CLAUDE_CODE_HOST_SESSION_ID="$UF_HOST" CLAUDE_CODE_ACCOUNT_UUID="$ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" \
+  ZENSU_LINKED_SESSION_ID="$UF_CLI" ZENSU_LINKED_PROJECT_ROOT="$WT" "$REAL_NODE" "$RESOLVER" 2>/dev/null)"
+UF_OUT="$(remind "$WT" "$UF_CLI" "$UF_HOST" "no tdd: add a parser to foo.js")"
+{ [ "$(printf '%s' "$UF_LINE" | cut -f1)" = linked ] && [ "$(printf '%s' "$UF_LINE" | cut -f6)" = fork ]; } \
+  && check "L73 the resolver answers a record whose spawnedFrom.userFork is true as linked, with the turn fork rather than first" PASS \
+  || check "L73 user-fork verdict ($(printf '%s' "$UF_LINE" | tr '\t' ' '))" FAIL
+{ [ "$(last_field "$UF_OUT")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$UF_CLI")" = build ] \
+  && [ "$(linked_state "$WT" "$UF_CLI")" = linked ] && [ "$(lead_count "$UF_OUT")" = 0 ]; } \
+  && check "L74 a fork the user starts inherits build on its first prompt and carries no brief note, so its own words keep their rank" PASS \
+  || check "L74 user fork (field='$(last_field "$UF_OUT")' inherited=$(inherited_state "$WT" "$UF_CLI") linked=$(linked_state "$WT" "$UF_CLI") lead=$(lead_count "$UF_OUT"))" FAIL
+L75_BAD=""
+for fork in false '"true"' 1 null; do
+  session "$WT" "$P_HOST" --no-record; NF_CLI="$CLI"; NF_HOST="$HOST"
+  desk_record "$NF_HOST" "$NF_CLI" "$P_HOST" "" "$fork"
+  NF_OUT="$(remind "$WT" "$NF_CLI" "$NF_HOST" "add a function to foo.js")"
+  { opens_with_lead "$NF_OUT" && [ "$(lead_count "$NF_OUT")" = 1 ]; } || L75_BAD="$L75_BAD [userFork=$fork lead=$(lead_count "$NF_OUT")]"
+done
+[ -z "$L75_BAD" ] \
+  && check "L75 a spawnedFrom.userFork other than true (false, a string, a number, null) keeps the first-turn brief note while the record names its own parent as the fork source" PASS \
+  || check "L75 non-true userFork:$L75_BAD" FAIL
+session "$WT" "$P_HOST" --no-record; CF_CLI="$CLI"; CF_HOST="$HOST"
+next_id; CF_SOURCE="local_$ID"
+desk_record "$CF_HOST" "$CF_CLI" "$P_HOST" "" false "\"$CF_SOURCE\""
+CF_LINE="$(CLAUDE_CODE_HOST_SESSION_ID="$CF_HOST" CLAUDE_CODE_ACCOUNT_UUID="$ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" \
+  ZENSU_LINKED_SESSION_ID="$CF_CLI" ZENSU_LINKED_PROJECT_ROOT="$WT" "$REAL_NODE" "$RESOLVER" 2>/dev/null)"
+CF_OUT="$(remind "$WT" "$CF_CLI" "$CF_HOST" "no tdd: add a parser to foo.js")"
+{ [ "$(printf '%s' "$CF_LINE" | cut -f1)" = linked ] && [ "$(printf '%s' "$CF_LINE" | cut -f6)" = fork ] \
+  && [ "$(last_field "$CF_OUT")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$CF_CLI")" = build ] \
+  && [ "$(lead_count "$CF_OUT")" = 0 ]; } \
+  && check "L77 a fork the user continues, whose forkedFromSessionId names a session other than its parent, is linked with the turn fork, inherits build and carries no brief note" PASS \
+  || check "L77 continued fork (line='$(printf '%s' "$CF_LINE" | tr '\t' ' ')' field='$(last_field "$CF_OUT")' inherited=$(inherited_state "$WT" "$CF_CLI") lead=$(lead_count "$CF_OUT"))" FAIL
+L78_BAD=""
+for source in self '"local_x"' 1 null; do
+  session "$WT" "$P_HOST" --no-record; NS_CLI="$CLI"; NS_HOST="$HOST"
+  if [ "$source" = self ]; then src="\"$NS_HOST\""; else src="$source"; fi
+  desk_record "$NS_HOST" "$NS_CLI" "$P_HOST" "" false "$src"
+  NS_OUT="$(remind "$WT" "$NS_CLI" "$NS_HOST" "add a function to foo.js")"
+  { opens_with_lead "$NS_OUT" && [ "$(lead_count "$NS_OUT")" = 1 ]; } || L78_BAD="$L78_BAD [source=$source lead=$(lead_count "$NS_OUT")]"
+done
+[ -z "$L78_BAD" ] \
+  && check "L78 a forkedFromSessionId that names the session itself, is malformed, is a number or is null keeps the first-turn brief note while userFork is not true" PASS \
+  || check "L78 not a fork source:$L78_BAD" FAIL
+
+echo "== The /zensu:doctor linked session row =="
+linked_row() {
+  local cli="$1" host="$2" cached="$3" home="$4" binding="${5:-bound}"
+  ( cd "$PLUGIN_DIR/hooks/lib" && env HOME="$home" ZDOC_BINDING="$binding" ZDOC_SESSION_KEY="$(key_of "$cli")" \
+      ZDOC_SESSION_PROJECT_ROOT="$WT" ZDOC_LINKED_SESSION="$cached" ZDOC_INHERITED_ROUTE="${ROW_INHERITED:-none}" \
+      ZDOC_DELIVERY_ROUTE="${ROW_ROUTE:-ask}" CLAUDE_CODE_SESSION_ID="${ROW_SESSION_ID-$cli}" CLAUDE_CODE_HOST_SESSION_ID="$host" \
+      CLAUDE_CODE_ACCOUNT_UUID="${ROW_ACCT:-$ACCT}" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" \
+      CLAUDE_PLUGIN_DATA="${ROW_PLUGIN_DATA:-$CLAUDE_PLUGIN_DATA}" NODE_OPTIONS="${ROW_NODE_OPTIONS:-${NODE_OPTIONS:-}}" \
+      ZENSU_CONFIG="$CFG_DEFAULT" "$REAL_NODE" ./zensu-doctor-report.js 2>/dev/null ) \
+    | grep -F 'linked session:' || true
+}
+row_has() {
+  local row="$1" glyph="$2" phrase
+  shift 2
+  [ "$(printf '%s\n' "$row" | grep -c 'linked session:')" = 1 ] || return 1
+  printf '%s' "$row" | grep -qF "$glyph" || return 1
+  for phrase in "$@"; do
+    printf '%s' "$row" | grep -qF -- "$phrase" || return 1
+  done
+}
+session "$REPO" ""; DP_CLI="$CLI"; DP_HOST="$HOST"
+session "$WT" "$DP_HOST"; DR_CLI="$CLI"; DR_HOST="$HOST"
+DR_ROW="$(linked_row "$DR_CLI" "$DR_HOST" absent "$HOME")"
+DN_ROW="$(linked_row "$DR_CLI" "$DR_HOST" none "$HOME")"
+DU_ROW="$(linked_row "$DR_CLI" "$DR_HOST" unresolved "$HOME")"
+row_has "$DR_ROW" '✅' "started from $DP_HOST, whose project root ($REPO) is in the same repository" \
+    "so the hooks inherit that session's build route if it has recorded one by the time they settle this lineage" \
+    "both desktop records are in $STORE" \
+  && row_has "$DN_ROW" '⚠️' "started from $DP_HOST, whose project root ($REPO) is in the same repository" \
+    'keeps that answer, so it inherits nothing' '/zensu:delivery-route --build records the workflow route for this session' \
+  && row_has "$DU_ROW" '✅' 'look once more on a later one' \
+  && check "L48 a resolved linked session renders a green row naming its parent, the parent's project root in a parenthetical of its own, the shared repository and the store, a cached none turns it into a warning that the session keeps that answer and names /zensu:delivery-route --build, and a cached unresolved says the hooks look once more" PASS \
+  || check "L48 resolved row (fresh='$DR_ROW' cached-none='$DN_ROW' cached-unresolved='$DU_ROW')" FAIL
+session "$WT" ""; DL_CLI="$CLI"; DL_HOST="$HOST"
+DL_ROW="$(linked_row "$DL_CLI" "$DL_HOST" absent "$HOME")"
+session "$WT" "$DP_HOST" --no-record; DM_CLI="$CLI"; DM_HOST="$HOST"
+DM_ROW="$(linked_row "$DM_CLI" "$DM_HOST" none "$HOME")"
+DS_ROW="$(linked_row "$DM_CLI" "$DM_HOST" none "$T/home-without-store")"
+DMA_ROW="$(linked_row "$DM_CLI" "$DM_HOST" absent "$HOME")"
+DZ_ROW="$(export ZENSU_CCD_STORE="relative/store"; linked_row "$DM_CLI" "$DM_HOST" absent "$HOME")"
+DY_ROW="$(linked_row "$DM_CLI" "$DM_HOST" absent "")"
+KEPT_NONE='settled its lineage as none on an earlier prompt and keeps that answer'
+REACH='helps only a session whose lineage is still open when the change reaches its hooks'
+row_has "$DL_ROW" '✅' 'not started from another session' "own desktop record is in $STORE" \
+  && row_has "$DM_ROW" '⚠️' "$DM_HOST" '(own-record-missing)' 'Searched: ' "$STORE (no record of this session)" \
+    'ZENSU_CCD_EXTRA_STORES' 'ZENSU_CCD_STORE replaces every other store' "$REACH" "$KEPT_NONE" \
+  && row_has "$DS_ROW" '⚠️' '(no-session-store)' 'no folder for this account and organization' 'ZENSU_CCD_EXTRA_STORES' "$KEPT_NONE" \
+  && row_has "$DMA_ROW" '⚠️' '(own-record-missing)' 'the hooks have not settled this lineage yet' \
+  && ! printf '%s' "$DMA_ROW" | grep -qF "$KEPT_NONE" \
+  && row_has "$DZ_ROW" '⚠️' 'there is no desktop session store to search (no-session-store)' \
+    'ZENSU_CCD_STORE names no absolute path, and while it is set no other store is searched' \
+    'Point ZENSU_CCD_STORE at the claude-code-sessions directory that holds this session' "$REACH" \
+  && ! printf '%s' "$DZ_ROW" | grep -qF 'Searched: ' && ! printf '%s' "$DZ_ROW" | grep -qF 'APPDATA' \
+  && row_has "$DY_ROW" '⚠️' 'there is no desktop session store to search (no-session-store)' \
+    "ZENSU_CCD_EXTRA_STORES names no absolute path and the platform's data directory is unknown" \
+    'APPDATA or LOCALAPPDATA on Windows' 'ZENSU_CCD_STORE replaces every other store' \
+  && check "L49 a session not started from another one renders green, and a store miss renders a warning that names the miss reason, every store searched with its state and the ZENSU_CCD_EXTRA_STORES remedy, for a store without the record and for a home without any store; with a cached none the row adds that this session keeps that answer and the remedy says it helps only an open lineage, with no cached answer it says the hooks have not settled yet, and with no store at all it names the one cause that holds: an override that names no absolute path, or neither a named store nor a known data directory" PASS \
+  || check "L49 not-linked and miss rows (not-linked='$DL_ROW' missing='$DM_ROW' missing-unsettled='$DMA_ROW' no-store='$DS_ROW' override-relative='$DZ_ROW' no-home='$DY_ROW')" FAIL
+AMB_STORE="$T/ambiguous-store"
+mkdir -p "$AMB_STORE/$ACCT/$ORG"
+cp "$DESK/$DR_HOST.json" "$AMB_STORE/$ACCT/$ORG/$DR_HOST.json"
+DA_ROW="$(export ZENSU_CCD_EXTRA_STORES="$AMB_STORE"; linked_row "$DR_CLI" "$DR_HOST" linked "$HOME")"
+rm -f "$AMB_STORE/$ACCT/$ORG/$DR_HOST.json"
+DF_ROW="$(export ZENSU_CCD_STORE="$T/forged : store"; linked_row "$DM_CLI" "$DM_HOST" none "$HOME")"
+DH_ROW="$(linked_row "$DR_CLI" "" absent "$HOME")"
+DB_ROW="$(linked_row "$DR_CLI" "$DR_HOST" absent "$HOME" unbound)"
+row_has "$DA_ROW" '⚠️' '(own-record-ambiguous)' "$AMB_STORE (holds this session's record)" "$STORE (holds this session's record)" \
+    'resolved its lineage as linked on an earlier prompt and keeps that answer' \
+  && row_has "$DF_ROW" '⚠️' '(no-session-store)' '\u003a store' \
+  && ! printf '%s' "$DF_ROW" | grep -qF 'forged : store' \
+  && printf '%s' "$DF_ROW" | grep -qF 'ZENSU_CCD_STORE is set, so it is the only store searched and ZENSU_CCD_EXTRA_STORES is not read' \
+  && ! printf '%s' "$DF_ROW" | grep -qF 'name that folder' \
+  && [ -z "$DH_ROW" ] && [ -z "$DB_ROW" ] \
+  && check "L50 a record two stores hold renders an ambiguity warning naming both stores and the linked answer the session keeps, a store path that spells a label-value pair is folded, an override in force is named as the only store with the remedy to point it elsewhere or unset it instead of the ZENSU_CCD_EXTRA_STORES remedy, and no row renders without CLAUDE_CODE_HOST_SESSION_ID or a bound session" PASS \
+  || check "L50 ambiguous, folded and withheld rows (ambiguous='$DA_ROW' folded='$DF_ROW' no-host='$DH_ROW' unbound='$DB_ROW')" FAIL
+if [ "$PLATFORM" != darwin ]; then
+  check "L51 the row names Session Hub profile stores by their profile folder (the profile path is the macOS one)" SKIP
+else
+  HUB_ROW="$(linked_row "$HC_CLI" "$HC_HOST" linked "$HOME")"
+  HUB_STORE="$HOME/Library/Application Support/Zensu Session Hub/Claude-Profile/cccccccc-3333-4333-8333-333333333333/claude-code-sessions"
+  row_has "$HUB_ROW" '✅' "started from $HP_HOST, whose project root ($REPO) is in the same repository" "both desktop records are in $HUB_STORE" \
+    && row_has "$DM_ROW" '⚠️' 'Session Hub profile cccccccc-3333-4333-8333-333333333333 (no record of this session)' \
+      "the Session Hub profiles live under $HOME/Library/Application Support/Zensu Session Hub/Claude-Profile" \
+    && check "L51 a session whose records sit in a Session Hub profile store renders that store, and a store miss names each profile by its folder" PASS \
+    || check "L51 profile rows (resolved='$HUB_ROW' missing='$DM_ROW')" FAIL
+fi
+session "$WT" "$DP_HOST" --no-record; DW_CLI="$CLI"; DW_HOST="$HOST"
+remind "$WT" "$DW_CLI" "$DW_HOST" "add a function to foo.js" >/dev/null
+DW_CACHED="$(linked_state "$WT" "$DW_CLI")"
+desk_record "$DW_HOST" "$DW_CLI" "$DP_HOST"
+DW_ROW="$(HOME="$HOME" CLAUDE_CODE_SESSION_ID="$DW_CLI" CLAUDE_PROJECT_DIR="$WT" CLAUDE_CODE_HOST_SESSION_ID="$DW_HOST" \
+  CLAUDE_CODE_ACCOUNT_UUID="$ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" ZENSU_CONFIG="$CFG_DEFAULT" bash "$DOCTOR" 2>/dev/null \
+  | grep -F 'linked session:' || true)"
+CW_ROW="$(HOME="$HOME" CLAUDE_CODE_SESSION_ID="$C_CLI" CLAUDE_PROJECT_DIR="$WT" CLAUDE_CODE_HOST_SESSION_ID="$C_HOST" \
+  CLAUDE_CODE_ACCOUNT_UUID="$ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" ZENSU_CONFIG="$CFG_DEFAULT" bash "$DOCTOR" 2>/dev/null \
+  | grep -F 'linked session:' || true)"
+[ "$DW_CACHED" = unresolved ] \
+  && row_has "$DW_ROW" '✅' "started from $DP_HOST, whose project root ($REPO) is in the same repository" 'look once more on a later one' \
+  && [ "$(inherited_state "$WT" "$C_CLI")" = build ] \
+  && row_has "$CW_ROW" '✅' "started from $P_HOST, whose project root ($REPO) is in the same repository" \
+    'and this session inherited the build route that session had recorded' \
+  && check "L52 the real /zensu:doctor wrapper binds the session, reads its cached lineage answer and its inherited route through the shared marker readers and renders the live row beside them: an unsettled answer says the hooks look once more, and a session that inherited build says so" PASS \
+  || check "L52 wrapper row (cached=$DW_CACHED row='$DW_ROW' inherited=$(inherited_state "$WT" "$C_CLI") inheriting-row='$CW_ROW')" FAIL
+ARM_BAD=""
+arm() {
+  local label="$1" row="$2" glyph="$3"
+  shift 3
+  row_has "$row" "$glyph" "$@" || ARM_BAD="$ARM_BAD [$label: '$row']"
+}
+arm_lacks() {
+  printf '%s' "$2" | grep -qF -- "$3" && ARM_BAD="$ARM_BAD [$1 names '$3': '$2']"
+  return 0
+}
+NH_ROW="$(linked_row "$DR_CLI" "local_NOT-A-UUID" absent "$HOME")"
+arm malformed-host "$NH_ROW" '⚠️' 'linked session: not checked — CLAUDE_CODE_HOST_SESSION_ID is not in the form' \
+  'a missing check rather than an all-clear'
+NA_ROW="$(ROW_ACCT=not-a-uuid; linked_row "$DR_CLI" "$DR_HOST" absent "$HOME")"
+arm malformed-account "$NA_ROW" '⚠️' 'CLAUDE_CODE_ACCOUNT_UUID or CLAUDE_CODE_ORGANIZATION_UUID is missing or not a UUID'
+NI_ROW="$(ROW_SESSION_ID=; linked_row "$DR_CLI" "$DR_HOST" absent "$HOME")"
+arm no-session-id "$NI_ROW" '⚠️' 'no CLAUDE_CODE_SESSION_ID reached this report'
+session "$WT" "$DP_HOST" --no-record; UR_CLI="$CLI"; UR_HOST="$HOST"
+printf '%s' 'not a JSON object' > "$DESK/$UR_HOST.json"
+UR_ROW="$(linked_row "$UR_CLI" "$UR_HOST" absent "$HOME")"
+arm unreadable "$UR_ROW" '⚠️' "own desktop record in $STORE could not be read" '(own-record-unreadable)'
+session "$WT" "$DP_HOST"; RF_CLI="$CLI"; RF_HOST="$HOST"
+chmod 664 "$DESK/$RF_HOST.json"
+RF_ROW="$(linked_row "$RF_CLI" "$RF_HOST" absent "$HOME")"
+arm refused "$RF_ROW" '⚠️' "own desktop record in $STORE was refused" '(own-record-refused)'
+session "$WT" "$DP_HOST" --no-record; MM_CLI="$CLI"; MM_HOST="$HOST"
+next_id
+desk_record "local_$ID" "$MM_CLI" "$DP_HOST"
+mv "$DESK/local_$ID.json" "$DESK/$MM_HOST.json"
+MM_ROW="$(linked_row "$MM_CLI" "$MM_HOST" absent "$HOME")"
+arm mismatch "$MM_ROW" '⚠️' '(own-record-mismatch)'
+session "$WT" "$DP_HOST" --no-record; CM_CLI="$CLI"; CM_HOST="$HOST"
+desk_record "$CM_HOST" "$(printf '%08x-0000-4000-8000-%012x' 4092 4092)" "$DP_HOST"
+CM_ROW="$(linked_row "$CM_CLI" "$CM_HOST" absent "$HOME")"
+arm cli-mismatch "$CM_ROW" '⚠️' '(cli-session-mismatch)'
+session "$WT" "local_NOT-A-UUID"; MP_CLI="$CLI"; MP_HOST="$HOST"
+MP_ROW="$(linked_row "$MP_CLI" "$MP_HOST" absent "$HOME")"
+arm malformed-parent "$MP_ROW" '⚠️' '(malformed-parent)'
+ABSENT_PARENT="local_$(printf '%08x-0000-4000-8000-%012x' 4091 4091)"
+session "$WT" "$ABSENT_PARENT"; PR_CLI="$CLI"; PR_HOST="$HOST"
+PR_ROW="$(linked_row "$PR_CLI" "$PR_HOST" absent "$HOME")"
+arm parent-record "$PR_ROW" '⚠️' "started from $ABSENT_PARENT, whose desktop record is not readable beside this session's own" \
+  '(parent-record-unavailable)'
+session "$WT" "$NOUUID_PARENT"; PU_CLI="$CLI"; PU_HOST="$HOST"
+PU_ROW="$(linked_row "$PU_CLI" "$PU_HOST" absent "$HOME")"
+arm parent-session "$PU_ROW" '⚠️' '(parent-session-unknown)'
+RU_ROW="$(ROW_PLUGIN_DATA="$T/no-such-plugin-data"; linked_row "$DR_CLI" "$DR_HOST" absent "$HOME")"
+arm records "$RU_ROW" '⚠️' '(records-unavailable)' 'a missing check rather than an all-clear'
+session "$WT" "$UNREGISTERED_PARENT"; PX_CLI="$CLI"; PX_HOST="$HOST"
+PX_ROW="$(linked_row "$PX_CLI" "$PX_HOST" absent "$HOME")"
+arm parent-context "$PX_ROW" '✅' '(parent-context-unavailable)'
+session "$WT" "$GONE_PARENT"; PG_CLI="$CLI"; PG_HOST="$HOST"
+PG_ROW="$(linked_row "$PG_CLI" "$PG_HOST" absent "$HOME")"
+arm parent-root "$PG_ROW" '✅' '(parent-root-unavailable)'
+session "$FOREIGN" ""; FP_HOST="$HOST"
+session "$WT" "$FP_HOST"; FC_CLI="$CLI"; FC_HOST="$HOST"
+FC_ROW="$(linked_row "$FC_CLI" "$FC_HOST" absent "$HOME")"
+arm foreign "$FC_ROW" '✅' "started from $FP_HOST, whose project root ($FOREIGN) is in another repository, and a route is never inherited across repositories, so a resolution made now inherits nothing"
+session "$NOGIT" ""; UG_PARENT="$HOST"
+session "$WT" "$UG_PARENT"; UG_CLI="$CLI"; UG_HOST="$HOST"
+UG_ROW="$(linked_row "$UG_CLI" "$UG_HOST" absent "$HOME")"
+arm unknown-repository "$UG_ROW" '⚠️' "started from $UG_PARENT, whose project root ($NOGIT) could not be compared with this session's" \
+  'a missing check rather than an all-clear'
+[ -z "$ARM_BAD" ] \
+  && check "L53 every resolver answer renders its own row: the three not-checked arms, an unreadable, refused, mismatching or cli-mismatching own record, a malformed parent, a parent record that is missing or names no session, unreadable Session Control records, a parent context or root that is gone, a parent in another repository, and a repository comparison that could not be made, which is a missing check" PASS \
+  || check "L53 resolver answers:$ARM_BAD" FAIL
+
+ARM_BAD=""
+RS="$T/refusal-stores"
+mkdir -p "$RS/shared/$ACCT/$ORG" "$RS/account/$ACCT/$ORG" "$RS/organization/$ACCT/$ORG" "$RS/target"
+chmod 775 "$RS/shared" "$RS/account/$ACCT" "$RS/organization/$ACCT/$ORG"
+: > "$RS/file"
+ln -s "$RS/target" "$RS/link"
+ln -s "$(dirname "$STORE")" "$T/store-alias"
+RS_ROW="$(export ZENSU_CCD_EXTRA_STORES="$RS/shared:$RS/account:$RS/organization:$RS/link:$RS/file:$T/store-alias/claude-code-sessions"; linked_row "$DM_CLI" "$DM_HOST" absent "$HOME")"
+arm store-states "$RS_ROW" '⚠️' '(own-record-missing)' \
+  "$RS/shared (refused: the store folder is writable by group or others)" \
+  "$RS/account (refused: its folder for this account is writable by group or others)" \
+  "$RS/organization (refused: its folder for this organization is writable by group or others)" \
+  "$RS/link (refused: the store folder is a symbolic link)" \
+  "$RS/file (refused: the store folder is not a directory)" \
+  "$T/store-alias/claude-code-sessions (no record of this session)" \
+  "$STORE (the same folder as an earlier store)"
+STUB="$T/getuid-stub.js"
+printf '%s\n' 'const getuid = process.getuid; process.getuid = () => getuid.call(process) + 1;' > "$STUB"
+FO_ROW="$(ROW_NODE_OPTIONS="--require=$STUB"; linked_row "$DM_CLI" "$DM_HOST" absent "$HOME")"
+arm foreign-owner "$FO_ROW" '⚠️' "$STORE (refused: the store folder is owned by another account)"
+if [ "$(id -u)" = 0 ]; then
+  UI_NOTE=" (the uninspectable folder is not checked as root, which may read any folder)"
+else
+  UI_NOTE=""
+  mkdir -p "$RS/locked/store"
+  chmod 000 "$RS/locked"
+  UI_ROW="$(export ZENSU_CCD_EXTRA_STORES="$RS/locked/store"; linked_row "$DM_CLI" "$DM_HOST" absent "$HOME")"
+  chmod 755 "$RS/locked"
+  arm uninspectable "$UI_ROW" '⚠️' "$RS/locked/store (refused: the store folder could not be inspected)"
+fi
+[ -z "$ARM_BAD" ] \
+  && check "L54 every store state and refusal cause renders its own text, a refused account or organization folder is named as that folder instead of as its store, and a store that reaches an earlier store's folder is named as the same folder$UI_NOTE" PASS \
+  || check "L54 store states:$ARM_BAD" FAIL
+
+ARM_BAD=""
+IB_ROW="$(ROW_INHERITED=build; linked_row "$DR_CLI" "$DR_HOST" linked "$HOME")"
+arm inherited-build "$IB_ROW" '✅' 'and this session inherited the build route that session had recorded'
+IN_ROW="$(ROW_INHERITED=none; linked_row "$DR_CLI" "$DR_HOST" linked "$HOME")"
+arm inherited-none "$IN_ROW" '✅' \
+  'but nothing was inherited when this session settled its lineage, and a route that session records later does not reach this one'
+IU_ROW="$(ROW_INHERITED=unjudged; linked_row "$DR_CLI" "$DR_HOST" linked "$HOME")"
+arm inherited-unread "$IU_ROW" '⚠️' 'but whether this session inherited a route could not be read' 'a missing check rather than an all-clear'
+CJ_ROW="$(linked_row "$DR_CLI" "$DR_HOST" unjudged "$HOME")"
+arm cached-unread "$CJ_ROW" '⚠️' 'the answer the hooks kept for this session could not be read' 'a missing check rather than an all-clear'
+UL_ROW="$(linked_row "$UR_CLI" "$UR_HOST" linked "$HOME")"
+arm unreadable-kept-linked "$UL_ROW" '⚠️' '(own-record-unreadable)' 'resolved its lineage as linked on an earlier prompt and keeps that answer'
+arm_lacks unreadable-kept-linked "$UL_ROW" 'look once more'
+UN_ROW="$(linked_row "$UR_CLI" "$UR_HOST" none "$HOME")"
+arm unreadable-kept-none "$UN_ROW" '⚠️' '(own-record-unreadable)' "$KEPT_NONE" \
+  '/zensu:delivery-route --build records the workflow route for this session'
+arm_lacks unreadable-kept-none "$UN_ROW" 'look once more'
+UU_ROW="$(linked_row "$UR_CLI" "$UR_HOST" unresolved "$HOME")"
+arm unreadable-unsettled "$UU_ROW" '⚠️' '(own-record-unreadable)' 'look once more on a later one'
+UA_ROW="$UR_ROW"
+arm unreadable-unanswered "$UA_ROW" '⚠️' 'the hooks have not settled this lineage yet'
+KEPT_LINKED='resolved its lineage as linked on an earlier prompt and keeps that answer'
+STRAY_BUILD='the hooks also kept an inherited build route for this session although they kept no linked lineage answer'
+GB_ROW="$(ROW_INHERITED=build; linked_row "$PG_CLI" "$PG_HOST" linked "$HOME")"
+arm gone-root-kept-build "$GB_ROW" '✅' '(parent-root-unavailable), so a resolution made now inherits nothing' \
+  "$KEPT_LINKED, and with it the build route it inherited from its parent then"
+arm_lacks gone-root-kept-build "$GB_ROW" '⚠️'
+GN_ROW="$(linked_row "$PG_CLI" "$PG_HOST" linked "$HOME")"
+arm gone-root-kept-none "$GN_ROW" '✅' "$KEPT_LINKED, and nothing was inherited then"
+GU_ROW="$(ROW_INHERITED=unjudged; linked_row "$PG_CLI" "$PG_HOST" linked "$HOME")"
+arm gone-root-kept-unread "$GU_ROW" '⚠️' "$KEPT_LINKED, but whether it inherited a route then could not be read" \
+  'a missing check rather than an all-clear'
+AB_ROW="$(ROW_INHERITED=build; linked_row "$PR_CLI" "$PR_HOST" linked "$HOME")"
+arm absent-parent-kept-build "$AB_ROW" '⚠️' '(parent-record-unavailable), so a resolution made now inherits nothing' \
+  "$KEPT_LINKED, and with it the build route it inherited from its parent then"
+AU_ROW="$(ROW_INHERITED=unjudged; linked_row "$PR_CLI" "$PR_HOST" linked "$HOME")"
+arm absent-parent-kept-unread "$AU_ROW" '⚠️' "$KEPT_LINKED, but whether it inherited a route then could not be read"
+INHERITED_FIELD='build (inherited from parent session)'
+OWN_FIELD='build (session marker)'
+CONFIG_FIELD='direct (hooks.defaultDeliveryRoute)'
+SET_ASIDE="$STRAY_BUILD, and this session's own marker sets it aside"
+SB_ROW="$(ROW_INHERITED=build; ROW_ROUTE="$INHERITED_FIELD"; linked_row "$DR_CLI" "$DR_HOST" none "$HOME")"
+arm stray-build-kept-none "$SB_ROW" '⚠️' 'keeps that answer, while a session started from now on resolves its parent' \
+  "$STRAY_BUILD, and the delivery route follows it"
+arm_lacks stray-build-kept-none "$SB_ROW" 'so it inherits nothing'
+arm_lacks stray-build-kept-none "$SB_ROW" '/zensu:delivery-route --build records'
+SA_ROW="$(ROW_INHERITED=build; ROW_ROUTE="$INHERITED_FIELD"; linked_row "$UR_CLI" "$UR_HOST" absent "$HOME")"
+arm stray-build-unsettled "$SA_ROW" '⚠️' 'the hooks have not settled this lineage yet' "$STRAY_BUILD, and the delivery route follows it"
+SR_ROW="$(ROW_INHERITED=build; linked_row "$DR_CLI" "$DR_HOST" none "$HOME")"
+arm released-stray-build "$SR_ROW" '⚠️' 'keeps that answer, so it inherits nothing' \
+  '/zensu:delivery-route --build records the workflow route for this session' "$SET_ASIDE"
+arm_lacks released-stray-build "$SR_ROW" 'the delivery route follows it'
+SO_ROW="$(ROW_INHERITED=build; ROW_ROUTE="$OWN_FIELD"; linked_row "$DR_CLI" "$DR_HOST" absent "$HOME")"
+arm own-route-stray-build "$SO_ROW" '✅' "$SET_ASIDE"
+arm_lacks own-route-stray-build "$SO_ROW" '⚠️'
+OM_ROW="$(ROW_ROUTE="$OWN_FIELD"; linked_row "$DR_CLI" "$DR_HOST" none "$HOME")"
+arm own-route-kept-none "$OM_ROW" '✅' \
+  "keeps that answer, so it inherits nothing, while a session started from now on resolves its parent; the route this session has, $OWN_FIELD, decides instead"
+arm_lacks own-route-kept-none "$OM_ROW" '⚠️'
+arm_lacks own-route-kept-none "$OM_ROW" '/zensu:delivery-route --build records'
+OD_ROW="$(ROW_ROUTE="$CONFIG_FIELD"; linked_row "$DR_CLI" "$DR_HOST" none "$HOME")"
+arm config-route-kept-none "$OD_ROW" '✅' "the route this session has, $CONFIG_FIELD, decides instead"
+arm_lacks config-route-kept-none "$OD_ROW" '⚠️'
+OS_ROW="$(ROW_ROUTE="$OWN_FIELD"; linked_row "$DM_CLI" "$DM_HOST" none "$HOME")"
+arm own-route-kept-none-miss "$OS_ROW" '⚠️' '(own-record-missing)' \
+  "$KEPT_NONE, so it inherits nothing; the route this session has, $OWN_FIELD, decides instead"
+arm_lacks own-route-kept-none-miss "$OS_ROW" '/zensu:delivery-route --build records'
+NX_ROW="$(ROW_INHERITED=unjudged; linked_row "$PG_CLI" "$PG_HOST" none "$HOME")"
+arm kept-none-unread "$NX_ROW" '⚠️' "$KEPT_NONE" 'whether the hooks kept an inherited route for this session could not be read'
+arm_lacks kept-none-unread "$NX_ROW" 'so it inherits nothing'
+[ -z "$ARM_BAD" ] \
+  && check "L55 a resolved lineage states what the hooks kept: the build route it inherited, that nothing was inherited, or that the inherited route could not be read; a kept linked beside any other live answer, a gone parent root or an absent parent record among them, states the route it inherited then, or that nothing was inherited, or a missing check; a build route kept without a linked answer is a warning only while the delivery route follows it, and green with 'sets it aside' once the session's own marker outranks or releases it; a kept none is green and names the session's own route instead of the remedy once the delivery route comes from the session marker or hooks.defaultDeliveryRoute; an answer or snapshot the hooks kept that could not be read is a missing check; and an unreadable own record promises another look only while the hooks have not kept an answer" PASS \
+  || check "L55 kept answers:$ARM_BAD" FAIL
+
+PAREN_WT="$T/paren) Note. forged"
+PAREN_FOREIGN="$T/foreign) Note. forged"
+UNDELIMITABLE='whose project root (not rendered — the recorded value carries a parenthesis this row cannot delimit)'
+if git_q -C "$REPO" worktree add -b paren "$PAREN_WT" && mkdir -p "$PAREN_FOREIGN" \
+  && git_q -C "$PAREN_FOREIGN" init && git_q -C "$PAREN_FOREIGN" commit --allow-empty -m init \
+  && session "$PAREN_WT" "" && PS_PARENT="$HOST" && session "$PAREN_FOREIGN" "" && PF_PARENT="$HOST" \
+  && session "$WT" "$PS_PARENT" && PS_CLI="$CLI" && PS_HOST="$HOST" \
+  && session "$WT" "$PF_PARENT" && PF_CLI="$CLI" && PF_HOST="$HOST"; then
+  PS_ROW="$(linked_row "$PS_CLI" "$PS_HOST" absent "$HOME")"
+  PF_ROW="$(linked_row "$PF_CLI" "$PF_HOST" absent "$HOME")"
+  { row_has "$PS_ROW" '✅' "started from $PS_PARENT, $UNDELIMITABLE is in the same repository" \
+    && row_has "$PF_ROW" '✅' "started from $PF_PARENT, $UNDELIMITABLE is in another repository" \
+    && ! printf '%s\n%s' "$PS_ROW" "$PF_ROW" | grep -qF 'Note. forged'; } \
+    && check "L56 a parent project root that carries a parenthesis is withheld with a reason in both the same-repository and the other-repository row, so it can never close the row's own parenthetical" PASS \
+    || check "L56 parenthesized parent root (same='$PS_ROW' foreign='$PF_ROW')" FAIL
+else
+  check "L56 the parenthesized parent fixtures (a worktree and a repository whose path carries a parenthesis) could be built" FAIL
+fi
+
+L57_OUT="$("$REAL_NODE" -e '
+  const fs = require("fs");
+  const m = require(process.argv[1]);
+  const src = fs.readFileSync(process.argv[2], "utf8");
+  const body = (name) => {
+    const start = src.indexOf("\nfunction " + name + "(");
+    if (start === -1) return "";
+    const next = src.indexOf("\nfunction ", start + 1);
+    return src.slice(start, next === -1 ? src.length : next);
+  };
+  const text = body("linkedSessionText");
+  const states = body("linkedStoreState");
+  const folders = body("linkedFolderSubject");
+  const missing = [];
+  for (const key of Object.keys(m.REASONS)) if (!text.includes("case R." + key + ":")) missing.push("reason:" + key);
+  for (const key of Object.keys(m.STORE_STATES)) if (!states.includes("S." + key)) missing.push("state:" + key);
+  for (const key of Object.keys(m.STORE_FOLDERS)) if (!folders.includes("F." + key)) missing.push("folder:" + key);
+  process.stdout.write(missing.sort().join(" "));
+' "$RESOLVER" "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" 2>&1)"
+[ "$L57_OUT" = "reason:NO_HOST_SESSION reason:RESOLVER_FAILED" ] \
+  && check "L57 the doctor row has an arm for every reason the resolver can answer it, every store state and every store folder, keyed on the resolver's exported constants; the only reasons without one are no-host-session, for which no row renders, and resolver-failed, which only the module's command line answers" PASS \
+  || check "L57 reasons, states and folders without a row text ($L57_OUT)" FAIL
+
+LINKED_REF="$PLUGIN_DIR/skills/doctor/references/linked-session.md"
+LINKED_ROWS="$(printf '%s\n' "$DR_ROW" "$DN_ROW" "$DU_ROW" "$DL_ROW" "$DM_ROW" "$DMA_ROW" "$DS_ROW" "$DZ_ROW" "$DY_ROW" "$DA_ROW" "$DF_ROW" \
+  "$NH_ROW" "$NA_ROW" "$NI_ROW" "$UR_ROW" "$RF_ROW" "$MM_ROW" "$CM_ROW" "$MP_ROW" "$PR_ROW" "$PU_ROW" "$RU_ROW" "$PX_ROW" \
+  "$PG_ROW" "$FC_ROW" "$UG_ROW" "$RS_ROW" "$FO_ROW" "$IB_ROW" "$IN_ROW" "$IU_ROW" "$CJ_ROW" "$UL_ROW" "$UN_ROW" "$UU_ROW" \
+  "$GB_ROW" "$GN_ROW" "$GU_ROW" "$AB_ROW" "$AU_ROW" "$SB_ROW" "$SA_ROW" "$NX_ROW" \
+  "$SR_ROW" "$SO_ROW" "$OM_ROW" "$OD_ROW" "$OS_ROW")"
+L58_BAD=""
+for phrase in 'linked session: started from' 'whose project root' 'is in the same repository' 'is in another repository' \
+  'could not be compared with this session' 'keeps that answer' 'look once more on a later one' \
+  'the hooks have not settled this lineage yet' 'inherited the build route that session had recorded' \
+  'nothing was inherited when this session settled its lineage' 'whether this session inherited a route could not be read' \
+  'the answer the hooks kept for this session could not be read' \
+  '/zensu:delivery-route --build records the workflow route for this session' \
+  'resolved its lineage as linked on an earlier prompt' 'settled its lineage as none on an earlier prompt' \
+  'linked session: not started from another session' 'linked session: not checked —' 'a missing check rather than an all-clear' \
+  '(own-record-missing)' '(no-session-store)' '(own-record-ambiguous)' '(own-record-unreadable)' '(own-record-refused)' \
+  '(own-record-mismatch)' '(cli-session-mismatch)' '(malformed-parent)' '(parent-record-unavailable)' \
+  '(parent-session-unknown)' '(records-unavailable)' '(parent-context-unavailable)' '(parent-root-unavailable)' \
+  'there is no desktop session store to search' 'ZENSU_CCD_STORE names no absolute path' \
+  "the platform's data directory is unknown" 'no folder for this account and organization' 'no record of this session' \
+  "holds this session's record" 'the same folder as an earlier store' 'refused: the store folder' \
+  'its folder for this account' 'its folder for this organization' 'is writable by group or others' 'is a symbolic link' \
+  'is not a directory' 'is owned by another account' 'ZENSU_CCD_EXTRA_STORES' 'ZENSU_CCD_STORE replaces every other store' \
+  'ZENSU_CCD_STORE is set, so it is the only store searched' 'helps only a session whose lineage is still open' \
+  'a resolution made now inherits nothing' 'a resolution made now cannot inherit' \
+  'a route is never inherited across repositories' 'whether a resolution made now inherits its build route was not checked' \
+  'and with it the build route it inherited from its parent then' 'and nothing was inherited then' \
+  'but whether it inherited a route then could not be read' \
+  'the hooks also kept an inherited build route for this session although they kept no linked lineage answer' \
+  'whether the hooks kept an inherited route for this session could not be read' \
+  'the route this session has,' ', decides instead' "this session's own marker sets it aside"; do
+  printf '%s' "$LINKED_ROWS" | grep -qF -- "$phrase" || L58_BAD="$L58_BAD [not emitted: $phrase]"
+  grep -qF -- "$phrase" "$LINKED_REF" 2>/dev/null || L58_BAD="$L58_BAD [not documented: $phrase]"
+done
+grep -qF 'could not be inspected' "$LINKED_REF" 2>/dev/null || L58_BAD="$L58_BAD [not documented: could not be inspected]"
+grep -qF 'references/linked-session.md' "$PLUGIN_DIR/skills/doctor/SKILL.md" || L58_BAD="$L58_BAD [no pointer in SKILL.md]"
+[ -z "$L58_BAD" ] \
+  && check "L58 every linked session row phrase is both emitted and documented in the doctor skill's reference, which SKILL.md names" PASS \
+  || check "L58 linked session row documentation:$L58_BAD" FAIL
+
+echo "== Budget: the reminder prints its route field within its deadline =="
+DEADLINE_LIB="$PLUGIN_DIR/hooks/lib/zensu-prompt-deadline.sh"
+BSHIM="$T/budget-shim"; BTRACE="$T/budget-trace.log"; BPIDS="$T/budget-hung.pids"
+mkdir -p "$BSHIM"
+cat > "$BSHIM/node" <<SHIM_EOF
+#!/bin/bash
+case "\$*" in
+  (*'core.readContext({ recordsDir, sessionId: key })'*) kind=verify ;;
+  (*linked-session-v1.js*) kind=resolver ;;
+  (*ZENSU_DIRECTIVE_PLACEHOLDERS*) kind=substitute ;;
+  (*classifyPreToolPayload*) kind=principal ;;
+  (*'j.hooks.defaultDeliveryRoute'*) kind=config ;;
+  (*) kind=other ;;
+esac
+printf '%s\n' "\$kind" >> "$BTRACE"
+if [ -n "\${ZT_HANG:-}" ] && [ "\$kind" = "\$ZT_HANG" ]; then
+  printf '%s\n' "\$\$" >> "$BPIDS"
+  exec sleep "\${ZT_HANG_FOR:-120}"
+fi
+exec "$REAL_NODE" "\$@"
+SHIM_EOF
+chmod +x "$BSHIM/node"
+budget_count() { grep -cx "$1" "$BTRACE" 2>/dev/null || true; }
+budget_hook() {
+  local root="$1" cli="$2" host="$3" prompt="$4" hang="${5:-}" deadline="${6:-}" config="${7:-$CFG_DEFAULT}" entry="${8:-cli}"
+  prompt_json "$cli" "$prompt" | HOME="$HOOK_HOME" CLAUDE_PROJECT_DIR="$root" CLAUDE_CODE_HOST_SESSION_ID="$host" \
+    CLAUDE_CODE_ACCOUNT_UUID="$HOOK_ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" ZENSU_CONFIG="$config" \
+    CLAUDE_CODE_ENTRYPOINT="$entry" ZT_HANG="$hang" ZENSU_PROMPT_DEADLINE_SECONDS="$deadline" PATH="$BSHIM:$PATH" bash "$REMINDER" 2>/dev/null
+}
+hung_alive() {
+  local pid tries alive=0
+  [ -s "$BPIDS" ] || { echo 0; return; }
+  while IFS= read -r pid; do
+    tries=0
+    while [ "$tries" -lt 30 ] && ps -p "$pid" -o command= 2>/dev/null | grep -qF 'sleep 120'; do
+      sleep 0.1
+      tries=$((tries + 1))
+    done
+    ps -p "$pid" -o command= 2>/dev/null | grep -qF 'sleep 120' && alive=$((alive + 1))
+  done < "$BPIDS"
+  echo "$alive"
+}
+
+session "$WT" "$P_HOST"; BP_CLI="$CLI"; BP_HOST="$HOST"
+: > "$BTRACE"
+BP_OUT="$(budget_hook "$WT" "$BP_CLI" "$BP_HOST" "add a function to foo.js" | ctx)"
+BP_ALL="$(grep -c . "$BTRACE" 2>/dev/null || true)"; BP_VERIFY="$(budget_count verify)"; BP_RESOLVER="$(budget_count resolver)"
+{ [ "$(last_field "$BP_OUT")" = "$INHERITED" ] && opens_with_lead "$BP_OUT" \
+  && [ "$BP_VERIFY" = 1 ] && [ "$BP_RESOLVER" = 1 ] && [ "${BP_ALL:-99}" -le 9 ]; } \
+  && check "L59 a linked first prompt verifies the project root once and starts at most nine node children, and still inherits with the brief note (node=$BP_ALL)" PASS \
+  || check "L59 process budget (node=$BP_ALL verify=$BP_VERIFY resolver=$BP_RESOLVER field='$(last_field "$BP_OUT")')" FAIL
+
+session "$WT" "$P_HOST"; BH_CLI="$CLI"; BH_HOST="$HOST"
+: > "$BTRACE"; : > "$BPIDS"
+BH_START=$SECONDS
+BH_OUT="$(budget_hook "$WT" "$BH_CLI" "$BH_HOST" "add a function to foo.js" resolver 12 | ctx)"
+BH_TOOK=$((SECONDS - BH_START))
+BH_ALIVE="$(hung_alive)"
+{ [ "$(last_field "$BH_OUT")" = "$ASK" ] && printf '%s' "$BH_OUT" | grep -qF 'AskUserQuestion' \
+  && ! printf '%s' "$BH_OUT" | grep -qF 'shortened' && [ "$(lead_count "$BH_OUT")" = 0 ] \
+  && [ "$(budget_count resolver)" = 1 ] && [ ! -e "$(linked_marker "$WT" "$BH_CLI")" ] \
+  && [ "$(inherited_state "$WT" "$BH_CLI")" = none ] && [ "$BH_TOOK" -le 20 ] && [ "$BH_ALIVE" = 0 ]; } \
+  && check "L60 a resolver that does not answer within the lineage budget is stopped, the full reminder takes its field from the ordinary ladder, and no lineage answer is cached (${BH_TOOK}s)" PASS \
+  || check "L60 hung resolver (field='$(last_field "$BH_OUT")' took=${BH_TOOK}s alive=$BH_ALIVE marker=$([ -e "$(linked_marker "$WT" "$BH_CLI")" ] && echo present || echo absent))" FAIL
+session "$WT" "$P_HOST"; BO_CLI="$CLI"; BO_HOST="$HOST"
+route "$BO_CLI" "$WT" --direct >/dev/null
+session "$WT" "$P_HOST"; BG_CLI="$CLI"; BG_HOST="$HOST"
+: > "$BTRACE"; : > "$BPIDS"
+BO_OUT="$(budget_hook "$WT" "$BO_CLI" "$BO_HOST" "add a function to foo.js" resolver 12 | ctx)"
+BG_OUT="$(budget_hook "$WT" "$BG_CLI" "$BG_HOST" "add a function to foo.js" resolver 12 "$CFG_TDD" | ctx)"
+BO_ALIVE="$(hung_alive)"
+{ [ "$(last_field "$BO_OUT")" = "ZENSU DELIVERY ROUTE: direct (session marker)" ] \
+  && [ "$(last_field "$BG_OUT")" = "ZENSU DELIVERY ROUTE: build (hooks.defaultDeliveryRoute)" ] \
+  && [ "$(budget_count resolver)" = 2 ] && [ "$BO_ALIVE" = 0 ] \
+  && [ ! -e "$(linked_marker "$WT" "$BO_CLI")" ] && [ ! -e "$(linked_marker "$WT" "$BG_CLI")" ] \
+  && [ "$(inherited_state "$WT" "$BO_CLI")" = none ] && [ "$(inherited_state "$WT" "$BG_CLI")" = none ]; } \
+  && check "L60b under a deferred lineage the session's own marker and the configured default still decide the field" PASS \
+  || check "L60b ladder under deferral (own='$(last_field "$BO_OUT")' config='$(last_field "$BG_OUT")' resolver=$(budget_count resolver) alive=$BO_ALIVE)" FAIL
+: > "$BTRACE"
+BH_NEXT="$(budget_hook "$WT" "$BH_CLI" "$BH_HOST" "add a function to foo.js" | ctx)"
+{ [ "$(last_field "$BH_NEXT")" = "$INHERITED" ] && [ "$(linked_state "$WT" "$BH_CLI")" = linked ] \
+  && [ "$(budget_count resolver)" = 1 ]; } \
+  && check "L61 the next prompt after a deferred lineage resolves it again and inherits build" PASS \
+  || check "L61 retry after deferral (field='$(last_field "$BH_NEXT")' linked=$(linked_state "$WT" "$BH_CLI"))" FAIL
+session "$WT" "$P_HOST"; BZ_CLI="$CLI"; BZ_HOST="$HOST"
+: > "$BTRACE"
+BZ_ANSWER="$(CLAUDE_CODE_HOST_SESSION_ID="$BZ_HOST" CLAUDE_CODE_ACCOUNT_UUID="$HOOK_ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" \
+  PATH="$BSHIM:$PATH" bash -c 'source "$0"; source "$1"; zensu_linked_session_resolve "$2" "$3" "$4" 0' \
+  "$CONFIG_LIB" "$LINKED_LIB" "$WT" "$(key_of "$BZ_CLI")" "$BZ_CLI" 2>/dev/null)"
+{ [ "$BZ_ANSWER" = deferred ] && [ "$(budget_count resolver)" = 0 ] && [ ! -e "$(linked_marker "$WT" "$BZ_CLI")" ]; } \
+  && check "L61b a spent lineage budget answers deferred without starting the resolver or writing a marker" PASS \
+  || check "L61b zero budget (answer='$BZ_ANSWER' resolver=$(budget_count resolver))" FAIL
+
+FB_DIR="$T/fallback"; mkdir -p "$FB_DIR"
+fb_run() {
+  local name="$1" start=$SECONDS
+  shift
+  budget_hook "$@" > "$FB_DIR/$name.raw"
+  printf '%s\n' "$((SECONDS - start))" > "$FB_DIR/$name.took"
+}
+fb_ctx() { ctx < "$FB_DIR/$1.raw"; }
+fb_took() { cat "$FB_DIR/$1.took" 2>/dev/null || echo 99; }
+fb_has() { printf '%s' "$1" | grep -qF -- "$2"; }
+ledger_entries() { ls -A "$CLAUDE_PLUGIN_DATA/prompt-ledger/v1/$(key_of "$1")" 2>/dev/null | grep -c '^tdd-'; }
+SKILL_FALLBACK="$(bash -c 'source "$0"; printf "%s" "${ZENSU_DELIVERY_ROUTE_SKILL_FALLBACK:-}"' "$DIRECTIVE_LIB" 2>/dev/null)"
+SKILL_RENDERED="$(CLAUDE_PLUGIN_DATA= bash -c 'source "$0"; zensu_delivery_route_record_command' "$DIRECTIVE_LIB" 2>/dev/null)"
+fb_record_hit() {
+  local needle
+  for needle in 'zensu-delivery-route.sh' '__ZENSU_ROUTE_COMMAND__' ' --build' "$SKILL_FALLBACK"; do
+    fb_has "$1" "$needle" && { printf '%s' "$needle"; return 0; }
+  done
+  return 1
+}
+FB_PROMPT="add a function to foo.js"
+FB_CI_EVENT='<ci-monitor-event>CI failed on the pull request.</ci-monitor-event>'
+session "$WT" "$P_HOST"; FT_CLI="$CLI"
+session "$WT" "$P_HOST"; FU_CLI="$CLI"
+session "$WT" "$P_HOST"; FD_CLI="$CLI"
+route "$FD_CLI" "$WT" --build >/dev/null
+session "$WT" "$P_HOST"; FL_CLI="$CLI"; FL_HOST="$HOST"
+session "$WT" "$P_HOST"; FC_CLI="$CLI"
+session "$WT" "$P_HOST"; FR_CLI="$CLI"
+session "$WT" "$P_HOST"; FS_CLI="$CLI"
+: > "$BPIDS"
+fb_run typed "$WT" "$FT_CLI" "" "$FB_PROMPT" substitute 20 &
+fb_run unread "$WT" "$FU_CLI" "" "$FB_PROMPT" config 20 "$CFG_DEFAULT" sdk-ts &
+fb_run decided "$WT" "$FD_CLI" "" "$FB_PROMPT" substitute 20 &
+fb_run brief "$WT" "$FL_CLI" "$FL_HOST" "$FB_PROMPT" substitute 20 &
+fb_run ci "$WT" "$FC_CLI" "" "$FB_CI_EVENT" substitute 20 "$CFG_TDD" &
+fb_run ciunread "$WT" "$FR_CLI" "" "$FB_CI_EVENT" config 20 &
+fb_run silent "$WT" "$FS_CLI" "" "$FB_PROMPT" principal 20 &
+wait
+FB_ALIVE="$(hung_alive)"
+FB_TYPED="$(fb_ctx typed)"
+{ [ "$(last_field "$FB_TYPED")" = "$ASK" ] && fb_has "$FB_TYPED" 'shortened because this hook did not finish within its 20s budget' \
+  && fb_has "$FB_TYPED" 'ZENSU HUMAN PRESENT: yes' && fb_has "$FB_TYPED" 'Rank on your own reading of the request' \
+  && fb_has "$FB_TYPED" 'offers no /zensu:autopilot, so never run it from this reminder' && fb_has "$FB_TYPED" 'TDD-MODE: strict' \
+  && fb_has "$FB_TYPED" 'never states a preference' && fb_has "$FB_TYPED" "The user's own instructions outrank this advice" \
+  && ! fb_has "$FB_TYPED" 'was not read' && ! fb_has "$FB_TYPED" 'No person is confirmed present' \
+  && [ -n "$SKILL_FALLBACK" ] && [ "$SKILL_RENDERED" = "$SKILL_FALLBACK" ] && ! fb_record_hit "$FB_TYPED" >/dev/null \
+  && fb_has "$BH_OUT" 'zensu-delivery-route.sh' && fb_has "$BH_OUT" ' --build' \
+  && [ "$(ledger_entries "$FT_CLI")" = 0 ] && [ "$(ledger_entries "$BH_CLI")" -ge 1 ] \
+  && [ "$(fb_took typed)" -le 32 ] && [ "$FB_ALIVE" = 0 ]; } \
+  && check "L62 a reminder whose work outlives the deadline after reading the route still prints the ask field, the human-present field and the ask safeguards, names neither the route record command, its placeholder, its --build argument nor the skill sentence the directive library renders in its place, and marks no prompt ledger, while the full reminder of L60 names the command with --build and marks the ledger, and no hung child of the seven fallback runs survives ($(fb_took typed)s)" PASS \
+  || check "L62 deadline fallback (field='$(last_field "$FB_TYPED")' took=$(fb_took typed)s alive=$FB_ALIVE record='$(fb_record_hit "$FB_TYPED")' skill=$([ -n "$SKILL_FALLBACK" ] && [ "$SKILL_RENDERED" = "$SKILL_FALLBACK" ] && echo read || echo unread) ledger=$(ledger_entries "$FT_CLI")/$(ledger_entries "$BH_CLI") ctx='${FB_TYPED:0:80}')" FAIL
+FB_UNREAD="$(fb_ctx unread)"
+{ [ "$(last_field "$FB_UNREAD")" = "$ASK" ] && fb_has "$FB_UNREAD" "The session's delivery route was not read" \
+  && fb_has "$FB_UNREAD" 'ZENSU HUMAN PRESENT: unknown' && fb_has "$FB_UNREAD" 'No person is confirmed present, so the Yes option comes first' \
+  && ! fb_has "$FB_UNREAD" 'Rank on your own reading' && fb_has "$FB_UNREAD" 'offers no /zensu:autopilot' \
+  && [ "$(fb_took unread)" -le 32 ]; } \
+  && check "L62b a deadline before the route was read says so, and without a confirmed person the fallback puts the workflow first" PASS \
+  || check "L62b unread route fallback (field='$(last_field "$FB_UNREAD")' took=$(fb_took unread)s ctx='${FB_UNREAD:0:80}')" FAIL
+FB_DECIDED="$(fb_ctx decided)"
+{ [ "$(last_field "$FB_DECIDED")" = "ZENSU DELIVERY ROUTE: build (session marker)" ] \
+  && fb_has "$FB_DECIDED" 'shortened because this hook' && fb_has "$FB_DECIDED" 'route decided by the field below' \
+  && ! fb_has "$FB_DECIDED" 'ZENSU HUMAN PRESENT' && ! fb_has "$FB_DECIDED" 'AskUserQuestion' \
+  && [ "$(fb_took decided)" -le 32 ]; } \
+  && check "L62c a deadline after the worker read a decided route prints that route's decided line with the real field" PASS \
+  || check "L62c decided fallback (field='$(last_field "$FB_DECIDED")' took=$(fb_took decided)s ctx='${FB_DECIDED:0:80}')" FAIL
+FB_BRIEF="$(fb_ctx brief)"
+{ opens_with_lead "$FB_BRIEF" && [ "$(lead_count "$FB_BRIEF")" = 1 ] && [ "$(last_field "$FB_BRIEF")" = "$INHERITED" ] \
+  && fb_has "$FB_BRIEF" 'shortened because this hook' && [ "$(linked_state "$WT" "$FL_CLI")" = linked ] \
+  && [ "$(fb_took brief)" -le 32 ]; } \
+  && check "L62d a deadline after a linked session's brief was recognized keeps the brief note and the inherited field" PASS \
+  || check "L62d brief fallback (lead=$(lead_count "$FB_BRIEF") field='$(last_field "$FB_BRIEF")' linked=$(linked_state "$WT" "$FL_CLI") took=$(fb_took brief)s)" FAIL
+FB_CI="$(fb_ctx ci)"
+{ [ "$(last_field "$FB_CI")" = "ZENSU DELIVERY ROUTE: build (hooks.defaultDeliveryRoute)" ] && fb_has "$FB_CI" 'CI-monitor event' \
+  && ! fb_has "$FB_CI" 'was not read' && ! fb_has "$FB_CI" 'AskUserQuestion' && [ "$(fb_took ci)" -le 32 ]; } \
+  && check "L63 a CI-monitor event whose work outlives the deadline gets the CI note with the field the worker read, never the ask-first text" PASS \
+  || check "L63 CI deadline fallback (field='$(last_field "$FB_CI")' took=$(fb_took ci)s ctx='${FB_CI:0:60}')" FAIL
+FB_CIU="$(fb_ctx ciunread)"
+{ [ "$(last_field "$FB_CIU")" = "$ASK" ] && fb_has "$FB_CIU" 'CI-monitor event' && fb_has "$FB_CIU" 'the delivery route was not read' \
+  && fb_has "$FB_CIU" 'run the Zensu workflow (the Skill tool with skill zensu:build' && ! fb_has "$FB_CIU" 'AskUserQuestion' \
+  && [ "$(fb_took ciunread)" -le 32 ]; } \
+  && check "L63b a CI-monitor event whose route was not read gets the ask field and the sentence that a code change runs the Zensu workflow" PASS \
+  || check "L63b unread CI fallback (field='$(last_field "$FB_CIU")' took=$(fb_took ciunread)s ctx='${FB_CIU:0:60}')" FAIL
+{ [ ! -s "$FB_DIR/silent.raw" ] && [ "$(fb_took silent)" -le 32 ]; } \
+  && check "L64 a prompt the reminder has not classified by the deadline gets no output at all ($(fb_took silent)s)" PASS \
+  || check "L64 unclassified prompt (took=$(fb_took silent)s raw='$(head -c 60 "$FB_DIR/silent.raw" 2>/dev/null)')" FAIL
+
+B_REG="$(node -e '
+  const { registeredHooks } = require(process.argv[1]);
+  const manifest = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
+  const hit = (registeredHooks(manifest, "UserPromptSubmit") || []).find(({ command }) => /user-prompt-tdd-reminder\.sh/.test(command || ""));
+  process.stdout.write(hit && Number.isInteger(hit.timeout) ? String(hit.timeout) : "none");
+' "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" "$PLUGIN_DIR/hooks/hooks.json" 2>/dev/null)"
+B_CLAMP="$(for v in unset '' 1 0 007 015 99 abc 1234567; do
+  if [ "$v" = unset ]; then bash -c 'source "$0"; zensu_prompt_deadline_seconds' "$DEADLINE_LIB"
+  else ZENSU_PROMPT_DEADLINE_SECONDS="$v" bash -c 'source "$0"; zensu_prompt_deadline_seconds' "$DEADLINE_LIB"; fi
+done 2>/dev/null | tr '\n' ' ')"
+B_MAX="$(bash -c 'source "$0"; printf "%s" "$ZENSU_PROMPT_DEADLINE_MAX_SECONDS"' "$DEADLINE_LIB" 2>/dev/null)"
+{ [ "$B_CLAMP" = "20 20 10 10 10 15 20 20 20 " ] && [ -n "$B_MAX" ] && [ "$B_REG" != none ] && [ "$B_REG" -ge $((B_MAX + 10)) ]; } \
+  && check "L65 the deadline defaults to 20s and clamps to 10-20s, and the reminder's host timeout (${B_REG}s) is at least the ceiling plus 10s" PASS \
+  || check "L65 deadline bounds (clamp='$B_CLAMP' max=$B_MAX registration=$B_REG)" FAIL
+
+
+echo "== Budget: the deadline library supervises a worker =="
+PD="$T/prompt-deadline"; mkdir -p "$PD/mark" "$PD/tmp" "$PD/shim"
+PD_REAL_SLEEP="$(command -v sleep)"
+PD_SLACK=3
+cat > "$PD/shim/sleep" <<SHIM_EOF
+#!/bin/bash
+printf '%s\n' "\$\$" > "\${MARK_DIR:-$PD/mark}/sleep.\$1"
+printf '%s\n' "\$PPID" > "\${MARK_DIR:-$PD/mark}/parent.\$1"
+exec "$PD_REAL_SLEEP" "\$@"
+SHIM_EOF
+chmod +x "$PD/shim/sleep"
+cat > "$PD/driver.sh" <<'EOF'
+#!/bin/bash
+set -u
+source "$1"
+zensu_prompt_deadline_seconds() { printf '%s\n' "$DRIVER_DEADLINE"; }
+pd_fallback() {
+  printf 'FALLBACK kind=%s deadline=%s route=%s multi=%s long=%s bad=%s\n' "$1" "$2" "$(zensu_prompt_recorded route)" \
+    "$(zensu_prompt_recorded multi)" "$(zensu_prompt_recorded long)" "$(zensu_prompt_recorded Bad)"
+}
+zensu_prompt_supervise "$2" "$3" pd_fallback
+EOF
+cat > "$PD/worker-hang.sh" <<'EOF'
+#!/bin/bash
+[ "${1:-}" = "--zensu-prompt-worker" ] || exit 97
+source "$PD_LIB"
+zensu_prompt_worker_enter "$@"
+printf '%s\n' "$$" >"$MARK_DIR/worker.pid"
+sleep 600 &
+printf '%s\n' "$!" >"$MARK_DIR/grandchild.pid"
+[ -n "${PD_KIND:-}" ] && zensu_prompt_classified "$PD_KIND"
+[ -n "${PD_RAW_KIND:-}" ] && printf '%s\n' "$PD_RAW_KIND" >"$3/classified"
+zensu_prompt_record route 'build (session marker)'
+zensu_prompt_record multi "$(printf 'a\nb')"
+zensu_prompt_record long "$(printf '%0300d' 0)"
+zensu_prompt_record Bad refused
+printf 'partial stdout'
+printf 'partial stderr\n' >&2
+sleep 600
+EOF
+cat > "$PD/worker-delivered.sh" <<'EOF'
+#!/bin/bash
+[ "${1:-}" = "--zensu-prompt-worker" ] || exit 97
+source "$PD_LIB"
+zensu_prompt_worker_enter "$@"
+zensu_prompt_classified prompt
+printf '{"delivered":true}\n'
+zensu_prompt_delivered
+sleep 600
+EOF
+cat > "$PD/worker-fast.sh" <<'EOF'
+#!/bin/bash
+[ "${1:-}" = "--zensu-prompt-worker" ] || exit 97
+source "$PD_LIB"
+zensu_prompt_worker_enter "$@"
+cat >"$MARK_DIR/stdin.copy"
+seen() {
+  local i=0
+  while [ "$i" -le "$PD_SLACK" ]; do
+    [ -s "$MARK_DIR/sleep.$((PD_WATCH - i))" ] && return 0
+    i=$((i + 1))
+  done
+  return 1
+}
+tries=0
+while ! seen && [ "$tries" -lt 100 ]; do
+  sleep 0.1
+  tries=$((tries + 1))
+done
+printf 'fast stdout'
+printf 'fast stderr\n' >&2
+exit 2
+EOF
+cat > "$PD/worker-lineage.sh" <<'EOF'
+#!/bin/bash
+[ "${1:-}" = "--zensu-prompt-worker" ] || exit 97
+source "$PD_LIB"
+zensu_prompt_worker_enter "$@"
+printf '%s\n' "$$" >"$MARK_DIR/worker.pid"
+source "$PD_CONFIG_LIB"
+source "$PD_LINKED_LIB"
+answer="$(zensu_linked_session_resolve "$PD_ROOT" "$PD_KEY" "$PD_CLI" "$PD_BUDGET")"
+printf '%s\n' "$answer" >"$MARK_DIR/answer"
+sleep 600
+EOF
+pd_drive() {
+  TMPDIR="$PD/tmp" DRIVER_DEADLINE="$1" MARK_DIR="$PD/mark" PD_LIB="$DEADLINE_LIB" PD_KIND="${4:-}" PD_RAW_KIND="${5:-}" \
+    PD_WATCH="$1" PD_SLACK="$PD_SLACK" PATH="$PD/shim:$PATH" bash "$PD/driver.sh" "$DEADLINE_LIB" "$2" "$3"
+}
+pd_alive() { kill -0 "$(cat "$PD/mark/$1.pid" 2>/dev/null)" 2>/dev/null && echo yes || echo no; }
+pd_watchdog() {
+  local i=0
+  while [ "$i" -le "$PD_SLACK" ]; do
+    cat "$PD/mark/sleep.$(($1 - i))" 2>/dev/null && return 0
+    i=$((i + 1))
+  done
+  return 1
+}
+pd_watchdog_state() {
+  local pid
+  pid="$(pd_watchdog "$1")"
+  if [ -z "$pid" ]; then echo never
+  elif kill -0 "$pid" 2>/dev/null; then echo alive
+  else echo gone
+  fi
+}
+pd_tmp_left() { ls -A "$PD/tmp" | wc -l | tr -d ' '; }
+pd_wait_for() {
+  local tries=0
+  while [ ! -s "$1" ] && [ "$tries" -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done
+  [ -s "$1" ]
+}
+
+rm -f "$PD/mark/"*.pid
+PD_T0=$SECONDS
+pd_drive 2 "$PD/worker-hang.sh" '{"p":1}' prompt >"$PD/d.out" 2>"$PD/d.err"; PD_RC=$?
+PD_TOOK=$((SECONDS - PD_T0))
+{ [ "$PD_RC" = 0 ] && [ "$(cat "$PD/d.out")" = "FALLBACK kind=prompt deadline=2 route=build (session marker) multi= long= bad=" ] \
+  && [ ! -s "$PD/d.err" ] && [ "$PD_TOOK" -le 12 ] && [ "$(pd_alive worker)" = no ] && [ "$(pd_alive grandchild)" = no ] \
+  && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L66 a classified worker past the deadline is stopped with its process group, its partial output is dropped, and the fallback gets the kind, the deadline and only the single-line facts it may read (${PD_TOOK}s)" PASS \
+  || check "L66 hung classified worker (rc=$PD_RC out='$(cat "$PD/d.out")' worker=$(pd_alive worker) grandchild=$(pd_alive grandchild) tmp=$(pd_tmp_left))" FAIL
+
+PD_NAMES="$(LC_ALL=en_US.UTF-8 bash -c '
+  shopt -u globasciiranges 2>/dev/null
+  source "$1" >/dev/null 2>&1 || exit 9
+  for name in prompt ok-1 "$4" Bad "$2" bad_name "$3" 1abc -abc a/b .. a.b "" "$5"; do
+    if _zensu_prompt_name_ok "$name"; then printf a; else printf r; fi
+  done
+  case B in ([a-z]) printf :collating ;; (*) printf :ascii ;; esac
+' _ "$DEADLINE_LIB" "$(printf '\303\251')" "$(printf '%033d' 0 | tr 0 a)" "$(printf '%032d' 0 | tr 0 a)" "a$(printf '\303\251')" 2>/dev/null)"
+PD_SCREEN="$(bash -c 'source "$1" >/dev/null 2>&1 && declare -f _zensu_prompt_name_ok' _ "$DEADLINE_LIB" 2>/dev/null)"
+PD_RANGES=unread
+case "$PD_SCREEN" in
+  (*'[abcdefghijklmnopqrstuvwxyz]'*)
+    case "$PD_SCREEN" in (*'[!abcdefghijklmnopqrstuvwxyz0123456789-]'*) PD_RANGES=no ;; esac ;;
+esac
+printf '%s' "$PD_SCREEN" | grep -qE '[[:alnum:]]-[[:alnum:]]' && PD_RANGES=yes
+case "$PD_RANGES:$PD_NAMES" in
+  (no:aaarrrrrrrrrrr:collating)
+    check "L66b the name screen spells both of its character classes out with no bracket range, accepts a 32-character name and refuses upper-case, accented, underscored, over-long, leading-digit, leading-hyphen, slash, dot, empty and accented-tail names, here also under a locale whose bracket ranges collate" PASS ;;
+  (no:aaarrrrrrrrrrr:ascii)
+    check "L66b the name screen spells both of its character classes out with no bracket range and accepts and refuses the same names; bracket ranges did not collate under en_US.UTF-8 in this shell, so only the parse check could tell a range from a spelled-out class here" PASS ;;
+  (*)
+    check "L66b name screen (ranges=$PD_RANGES got '$PD_NAMES', want aaarrrrrrrrrrr)" FAIL ;;
+esac
+
+rm -f "$PD/mark/"*.pid
+pd_drive 2 "$PD/worker-hang.sh" '{}' '' 'Not A Kind' >"$PD/d.out" 2>"$PD/d.err"; PD_RC=$?
+{ [ "$PD_RC" = 0 ] && [ ! -s "$PD/d.out" ] && [ ! -s "$PD/d.err" ] && [ "$(pd_alive grandchild)" = no ] && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L67 a classified file that does not hold a kind the library accepts gets no fallback" PASS \
+  || check "L67 refused kind (rc=$PD_RC out='$(cat "$PD/d.out")' grandchild=$(pd_alive grandchild) tmp=$(pd_tmp_left))" FAIL
+
+pd_drive 2 "$PD/worker-delivered.sh" '{}' >"$PD/d.out" 2>"$PD/d.err"; PD_RC=$?
+{ [ "$PD_RC" = 0 ] && [ "$(cat "$PD/d.out")" = '{"delivered":true}' ] && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L68 a worker that marked its output delivered before the deadline is forwarded with exit 0, never replaced by the fallback" PASS \
+  || check "L68 delivered worker (rc=$PD_RC out='$(cat "$PD/d.out")' tmp=$(pd_tmp_left))" FAIL
+
+PD_PAYLOAD='{"hook_event_name":"UserPromptSubmit","prompt":"tab	and \"quote\" and trailing spaces  "}'
+rm -f "$PD/mark/"sleep.*
+pd_drive 4271 "$PD/worker-fast.sh" "$PD_PAYLOAD" >"$PD/d.out" 2>"$PD/d.err"; PD_RC=$?
+sleep 1
+{ [ "$PD_RC" = 2 ] && [ "$(cat "$PD/d.out")" = "fast stdout" ] && [ "$(cat "$PD/d.err")" = "fast stderr" ] \
+  && [ "$(cat "$PD/mark/stdin.copy")" = "$PD_PAYLOAD" ] && [ "$(pd_watchdog_state 4271)" = gone ] && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L69 a worker that finishes in time has stdin, stdout, stderr and its exit code passed through, and the watchdog recorded while it ran is gone afterwards, with no private directory left behind" PASS \
+  || check "L69 pass-through (rc=$PD_RC out='$(cat "$PD/d.out")' err='$(cat "$PD/d.err")' watchdog=$(pd_watchdog_state 4271) tmp=$(pd_tmp_left))" FAIL
+
+rm -f "$PD/mark/"*.pid
+PD_T0=$SECONDS
+TMPDIR="$PD/tmp" DRIVER_DEADLINE=4 MARK_DIR="$PD/mark" PD_LIB="$DEADLINE_LIB" PD_KIND=prompt \
+  bash "$PD/driver.sh" "$DEADLINE_LIB" "$PD/worker-hang.sh" '{}' >/dev/null 2>&1 &
+PD_DRIVER=$!
+pd_wait_for "$PD/mark/grandchild.pid"
+kill -KILL "$PD_DRIVER" 2>/dev/null
+wait "$PD_DRIVER" 2>/dev/null
+PD_GONE=no
+kill -0 "$PD_DRIVER" 2>/dev/null || PD_GONE=yes
+PD_BEFORE="$(pd_alive worker)"
+while [ $((SECONDS - PD_T0)) -lt 8 ]; do sleep 1; done
+{ [ "$PD_GONE" = yes ] && [ "$PD_BEFORE" = yes ] && [ "$(pd_alive worker)" = no ] && [ "$(pd_alive grandchild)" = no ] \
+  && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L70 a supervisor killed by SIGKILL still has its worker group stopped at the deadline and its private directory removed, by the watchdog it left behind" PASS \
+  || check "L70 orphaned worker (supervisor gone=$PD_GONE worker before=$PD_BEFORE after=$(pd_alive worker) grandchild=$(pd_alive grandchild) tmp=$(pd_tmp_left))" FAIL
+
+rm -f "$PD/mark/"*.pid "$PD/mark/"sleep.*
+TMPDIR="$PD/tmp" DRIVER_DEADLINE=37 MARK_DIR="$PD/mark" PD_LIB="$DEADLINE_LIB" PD_KIND=prompt PATH="$PD/shim:$PATH" \
+  bash "$PD/driver.sh" "$DEADLINE_LIB" "$PD/worker-hang.sh" '{}' >"$PD/d.out" 2>&1 &
+PD_DRIVER=$!
+pd_wait_for "$PD/mark/grandchild.pid"
+PD_TRIES=0
+while [ "$(pd_watchdog_state 37)" = never ] && [ "$PD_TRIES" -lt 100 ]; do sleep 0.1; PD_TRIES=$((PD_TRIES + 1)); done
+PD_WATCH_BEFORE="$(pd_watchdog_state 37)"
+kill -TERM "$PD_DRIVER" 2>/dev/null
+wait "$PD_DRIVER"
+PD_RC=$?
+sleep 1
+{ [ "$PD_RC" = 143 ] && [ ! -s "$PD/d.out" ] && [ "$(pd_alive worker)" = no ] && [ "$(pd_alive grandchild)" = no ] \
+  && [ "$PD_WATCH_BEFORE" = alive ] && [ "$(pd_watchdog_state 37)" = gone ] && [ "$(pd_tmp_left)" = 0 ]; } \
+  && check "L71 SIGTERM to the supervisor stops the worker group and the watchdog that was sleeping at once, prints nothing and exits 143" PASS \
+  || check "L71 SIGTERM (rc=$PD_RC worker=$(pd_alive worker) grandchild=$(pd_alive grandchild) watchdog=$PD_WATCH_BEFORE/$(pd_watchdog_state 37) tmp=$(pd_tmp_left))" FAIL
+
+PD_LINEAGE_BUDGET=10
+pd_lineage() {
+  local dir="$PD/lineage-$1" cli="$2" host="$3" hang="$4"
+  TMPDIR="$PD/tmp" DRIVER_DEADLINE=3 MARK_DIR="$dir" PD_LIB="$DEADLINE_LIB" PD_CONFIG_LIB="$CONFIG_LIB" \
+    PD_LINKED_LIB="$LINKED_LIB" PD_ROOT="$WT" PD_KEY="$(key_of "$cli")" PD_CLI="$cli" PD_BUDGET="$PD_LINEAGE_BUDGET" \
+    CLAUDE_CODE_HOST_SESSION_ID="$host" CLAUDE_CODE_ACCOUNT_UUID="$HOOK_ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" \
+    ZT_HANG=resolver ZT_HANG_FOR="$hang" PATH="$PD/shim:$BSHIM:$PATH" \
+    bash "$PD/driver.sh" "$DEADLINE_LIB" "$PD/worker-lineage.sh" '{}' >"$dir/driver.out" 2>&1
+}
+pd_mark() { cat "$PD/lineage-$1/$2" 2>/dev/null; }
+pd_pgid() { [ -n "$1" ] && ps -o pgid= -p "$1" 2>/dev/null | tr -d ' '; }
+pd_up() {
+  [ -n "$1" ] && kill -0 "$1" 2>/dev/null || { echo down; return; }
+  case "$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')" in
+    (Z*) echo down ;;
+    (*) echo up ;;
+  esac
+}
+pd_down_within() {
+  local tries=0
+  while [ "$tries" -lt "$2" ] && [ "$(pd_up "$1")" = up ]; do sleep 0.1; tries=$((tries + 1)); done
+  pd_up "$1"
+}
+pd_reap() { [ -n "$1" ] && ps -p "$1" -o command= 2>/dev/null | grep -qF -- "$2" && kill -KILL "$1" 2>/dev/null; }
+mkdir -p "$PD/lineage-hung" "$PD/lineage-answer"
+session "$WT" "$P_HOST"; LH_CLI="$CLI"; LH_HOST="$HOST"
+session "$WT" "$P_HOST"; LA_CLI="$CLI"; LA_HOST="$HOST"
+PD_L0=$SECONDS
+pd_lineage hung "$LH_CLI" "$LH_HOST" 120 &
+LH_DRIVER=$!
+pd_lineage answer "$LA_CLI" "$LA_HOST" 5 &
+LA_DRIVER=$!
+PD_TRIES=0
+while [ "$PD_TRIES" -lt 100 ] && { [ ! -s "$PD/lineage-hung/parent.$PD_LINEAGE_BUDGET" ] || [ ! -s "$PD/lineage-hung/sleep.120" ] \
+  || [ ! -s "$PD/lineage-answer/parent.$PD_LINEAGE_BUDGET" ] || [ ! -s "$PD/lineage-answer/sleep.5" ]; }; do
+  sleep 0.1; PD_TRIES=$((PD_TRIES + 1))
+done
+PD_R=$SECONDS
+LH_WORKER="$(pd_mark hung worker.pid)"; LH_RESOLVER="$(pd_mark hung sleep.120)"
+LH_SLEEP="$(pd_mark hung "sleep.$PD_LINEAGE_BUDGET")"; LH_WATCH="$(pd_mark hung "parent.$PD_LINEAGE_BUDGET")"
+LA_WORKER="$(pd_mark answer worker.pid)"; LA_RESOLVER="$(pd_mark answer sleep.5)"
+LA_SLEEP="$(pd_mark answer "sleep.$PD_LINEAGE_BUDGET")"; LA_WATCH="$(pd_mark answer "parent.$PD_LINEAGE_BUDGET")"
+wait "$LH_DRIVER"; LH_RC=$?
+wait "$LA_DRIVER"; LA_RC=$?
+LH_GROUPS="$(pd_pgid "$LH_RESOLVER")/$(pd_pgid "$LH_WATCH")"
+LA_GROUPS="$(pd_pgid "$LA_RESOLVER")/$(pd_pgid "$LA_WATCH")"
+LH_A="$(pd_up "$LH_WORKER") $(pd_up "$LH_RESOLVER") $(pd_up "$LH_SLEEP") $(pd_up "$LH_WATCH")"
+LA_A="$(pd_up "$LA_WORKER") $(pd_up "$LA_RESOLVER") $(pd_up "$LA_SLEEP") $(pd_up "$LA_WATCH")"
+while [ $((SECONDS - PD_R)) -lt 7 ]; do sleep 0.5; done
+LA_B="$(pd_down_within "$LA_RESOLVER" 10) $(pd_up "$LA_SLEEP") $(pd_up "$LA_WATCH")"
+while [ $((SECONDS - PD_R)) -lt 12 ]; do sleep 0.5; done
+LH_C="$(pd_down_within "$LH_RESOLVER" 30) $(pd_down_within "$LH_SLEEP" 30) $(pd_down_within "$LH_WATCH" 30)"
+LA_C="$(pd_down_within "$LA_SLEEP" 30) $(pd_down_within "$LA_WATCH" 30)"
+PD_LTOOK=$((SECONDS - PD_L0))
+{ [ "$LH_RC" = 0 ] && [ -n "$LH_WORKER" ] && [ -n "$LH_RESOLVER" ] && [ -n "$LH_SLEEP" ] && [ -n "$LH_WATCH" ] \
+  && [ "$LH_GROUPS" = "$LH_RESOLVER/$LH_WATCH" ] && [ "$LH_A" = "down up up up" ] && [ "$LH_C" = "down down down" ] \
+  && [ ! -e "$PD/lineage-hung/answer" ] && [ ! -e "$(linked_marker "$WT" "$LH_CLI")" ]; } \
+  && check "L72 a deadline during a lineage read stops the worker's group but neither the resolver nor its watchdog, each the leader of a process group of its own, and the watchdog still stops a hung resolver at the lineage budget and then exits, with no lineage answer cached (both lineage cases ${PD_LTOOK}s)" PASS \
+  || check "L72 deadline during a hung lineage read (rc=$LH_RC groups=$LH_GROUPS want $LH_RESOLVER/$LH_WATCH after-deadline='$LH_A' after-budget='$LH_C' answered=$([ -e "$PD/lineage-hung/answer" ] && echo yes || echo no))" FAIL
+{ [ "$LA_RC" = 0 ] && [ -n "$LA_WORKER" ] && [ -n "$LA_RESOLVER" ] && [ -n "$LA_SLEEP" ] && [ -n "$LA_WATCH" ] \
+  && [ "$LA_GROUPS" = "$LA_RESOLVER/$LA_WATCH" ] && [ "$LA_A" = "down up up up" ] && [ "$LA_B" = "down up up" ] \
+  && [ "$LA_C" = "down down" ] && [ ! -e "$PD/lineage-answer/answer" ] && [ ! -e "$(linked_marker "$WT" "$LA_CLI")" ]; } \
+  && check "L72b a resolver that answers after the deadline exits on its own while its orphaned watchdog sleeps out the lineage budget and then exits, and the answer is cached nowhere" PASS \
+  || check "L72b deadline before a lineage answer (rc=$LA_RC groups=$LA_GROUPS want $LA_RESOLVER/$LA_WATCH after-deadline='$LA_A' after-answer='$LA_B' after-budget='$LA_C' answered=$([ -e "$PD/lineage-answer/answer" ] && echo yes || echo no))" FAIL
+[ "$LH_C" = "down down down" ] || { pd_reap "$LH_RESOLVER" sleep; pd_reap "$LH_SLEEP" sleep; pd_reap "$LH_WATCH" worker-lineage.sh; }
+[ "$LA_C" = "down down" ] || { pd_reap "$LA_RESOLVER" sleep; pd_reap "$LA_SLEEP" sleep; pd_reap "$LA_WATCH" worker-lineage.sh; }
 
 finish
