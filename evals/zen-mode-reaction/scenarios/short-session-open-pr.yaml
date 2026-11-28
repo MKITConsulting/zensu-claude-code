@@ -28,7 +28,9 @@ assert:
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const first = lines[0] || '';
       const names = /\b(?:yes|PR)\b|#42|\b(?:pull request|review|merge|approv|wait|open)/i.test(first);
-      const wrong = /\b(?:nothing(?: is)? left|nothing remains|all done|nothing to do)\b/i.test(first);
+      const scoped = /^\s+(?:to\s+(?:push|commit|stage)\b|(?:to\s+do\s+)?(?:for\s+me|on\s+my\s+(?:side|end|part)|from\s+me)\b)/i;
+      const wrong = [...first.matchAll(/\b(?:nothing(?: is)? left|nothing remains|all done|nothing to do)\b/gi)]
+        .some((m) => !scoped.test(first.slice(m.index + m[0].length)));
       const ok = names && !wrong;
       return {
         pass: ok,
@@ -45,13 +47,14 @@ assert:
         .join('\n').trim() || raw;
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      const opener = (l) => /^(?:[-*•]|\d+[.)])\s+(?:\*\*)?(?:started\b|(?:session\s+)?(?:goal|purpose|aim|focus)\b|you\s+started\s+(?:this|the)\s+session\b|(?:this|the)\s+session\s+(?:began|started|is\s+for)\b)/i.test(l);
       let end = -1;
       lines.forEach((l, i) => { if (bullet(l)) end = i; });
       let start = end;
       while (start > 0 && bullet(lines[start - 1])) start -= 1;
       const stop = end < 0 ? lines.length - 1 : start;
       let goal = -1;
-      lines.forEach((l, i) => { if (i > 0 && i < stop && !bullet(l) && /password/i.test(l) && /(?:reset|link|e-?mail)/i.test(l)) goal = i; });
+      lines.forEach((l, i) => { if (i > 0 && (i < stop ? !bullet(l) : (i === start && opener(l))) && /password/i.test(l) && /(?:reset|link|e-?mail)/i.test(l)) goal = i; });
       const ok = goal > 0;
       return {
         pass: ok,

@@ -6,6 +6,7 @@ providers:
       working_dir: ./test-projects/live-app
       init_git: true
       require_disposable_environment: true
+      allow_unsandboxed_chrome: true
 
 prompts:
   - id: verify-feature-spec

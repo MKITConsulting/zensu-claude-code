@@ -10,7 +10,7 @@ paths:
 
 # Relaxable Bind Failures (`hooks/lib/claude-hook-session-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 A failed bind to the immutable Session Control record denies, with exactly **two**
 documented exceptions. Both mean no workflow document is reachable, so relaxing waives
@@ -52,9 +52,9 @@ properties are easy to get wrong and cost the whole feature:
   both markers. `/zensu:doctor` runs through Bash, so it is reachable only
   if EVERY one of them allows. The recognizer reads the Bash spelling only, so a PowerShell call in
   a bind failure gets the named deny; the doctor and adoption commands stay reachable through the
-  Bash tool, which is what `/zensu:doctor` uses. Both the `.*` gate and the secret-scan gate were missed in
-  turn while the single-gate test stayed green and the feature silently did not work.
-  `tests/structure/test-orphaned-project-root.sh` O21a therefore enumerates the Bash
+  Bash tool, which is what `/zensu:doctor` uses. A single-gate test stays green while one
+  missed gate makes the feature silently not work, so
+  `tests/structure/test-orphaned-project-root.sh` O21a enumerates the Bash
   matcher from `hooks.json` and asserts every hook on it allows, so a hook added later is
   covered without editing the test.
 - **Mutating tools stay denied on purpose.** `pre-edit-tdd-reminder.sh` relaxes neither
@@ -72,19 +72,19 @@ properties are easy to get wrong and cost the whole feature:
   directory exists, and only a global or `ZENSU_CONFIG` opt-in reaches the no-anchor deny. Opted in, `pre-bash-source-write-gate.sh`
   runs the parser's `BSWG_MODE=targets` pass, which resolves write operands without an
   anchor, and denies only commands that actually write, or a PowerShell command it cannot
-  prove read-only. Denying unconditionally there once
-  put the diagnostic back behind the defect it reports, and the healthy-anchor test fixtures
-  hid it; `O29`/`O29a` pin both the deleted-root and unset-anchor shapes with the gate
+  prove read-only. Denying unconditionally there would
+  put the diagnostic back behind the defect it reports, and healthy-anchor test fixtures
+  cannot show it; `O29`/`O29a` pin both the deleted-root and unset-anchor shapes with the gate
   opted in.
 
 **A vanished LIVE `cwd` is NOT a third member, and it must not become one.** Both states
 above are failures of the BIND. A PreToolUse `cwd` that no longer names a real directory —
 a worktree removed while the session was still inside it, with the recorded project root
-intact — leaves the bind whole. `reviewer-capability-v1.js` used to canonicalize that `cwd`
-inside `revalidateSessionContext`, so every tool call of a perfectly bound session — the two
-recognized commands aside, and those only off win32 — was denied with the generic `immutable context revalidation
+intact — leaves the bind whole. Canonicalizing that `cwd` inside `revalidateSessionContext`
+for every principal would deny every tool call of a perfectly bound session — the two
+recognized commands aside, and those only off win32 — with the generic `immutable context revalidation
 failed: PreToolUse cwd does not exist`, and neither relaxation above could reach it, because
-both key on the bind and the bind had not failed. It now
+both key on the bind and the bind has not failed. `reviewer-capability-v1.js` therefore
 canonicalizes the `cwd` only in the three branches whose path rules consume it —
 `reviewer-readonly-v1`, `zensu-plm-readonly-v1` and `host-profile-v1`, which deny through
 `unusableWorkingDirectoryReason` — while `main-v1` returns before any path rule and
@@ -97,11 +97,10 @@ and every bind-failure deny still win for the main thread. `pathResolutionProfil
 the branch ladder below it to pick the profile name, so a new principal branch lands in both.
 A branch placed ABOVE the resolution that reads `trusted.toolCwd` gets `undefined`, and
 `path.resolve` throws a `TypeError` into that branch's own catch — fail-closed, but unnamed.
-Measured before the change: driving every `PreToolUse` registration in `hooks/hooks.json`
-with a vanished `cwd` showed the capability gate as the ONLY hook that denied.
-`tests/structure/test-vanished-session-cwd.sh` pins the verdict matrix and re-derives that
-cross-hook comparison, so a later hook that starts canonicalizing the `cwd` fails there
-rather than wedging sessions in the field. Operator accounts: the `cwd` sentence in
+`tests/structure/test-vanished-session-cwd.sh` pins the verdict matrix and drives every
+`PreToolUse` registration in `hooks/hooks.json` with a vanished `cwd`, so a later hook that
+starts canonicalizing the `cwd` fails there rather than wedging sessions in the field.
+Operator accounts: the `cwd` sentence in
 `docs/session-control.md` §"Claude Code Workflows" and `docs/gates.md` §"Vanished Working
 Directory". **Version: `patch`** — it lifts an existing deny for two principals and rewords
 it for three; no schema field, strict key set, hook, matcher, config key or attestation
@@ -128,7 +127,7 @@ assert a workflow document that is gone.
 `zensu_session_incompatible_runtime` and `zensu_session_pruned_plugin_root`
 belong to this roster only because every gate that consults the two above must decide what
 to do about them too — and the answer is the same everywhere: keep denying. The pruned
-predicate matches two states as well, since `readOrphanedPrunedContext` joined the ladder, and
+predicate matches two states as well, because `readOrphanedPrunedContext` is on its ladder, and
 each stays unrelaxed for the matching reason given for the lineage predicate below. The lineage predicate matches TWO states, and they are unrelaxed for
 DIFFERENT reasons: with the recorded project root still present a workflow document is
 reachable, so relaxing would waive a live guarantee rather than a dead one; with that root
@@ -176,7 +175,7 @@ sidecar beside the immutable record, surfaced by `/zensu:doctor`) is still missi
 `resolvePrunedPluginRoot` each make one `readContextLadder` call with a rung list of their own:
 strict and orphaned-project-root for the lineage predicate; strict, pruned-plugin-root and
 orphaned-and-pruned for the pruned one. Each answers `null` for every reader it does not name.
-Those lists are the reads each predicate made before the walker existed, and a rung added to
+Those lists are the reads each predicate makes, and a rung added to
 either costs a record read or a runtime-digest walk in the states that reach it, so the walker
 paragraph of `.claude/rules/session-adoption.md` decides before one is added.
 

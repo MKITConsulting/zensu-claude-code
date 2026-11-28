@@ -99,16 +99,15 @@ without a seed `vacuous:1/1/0/1`, so each missing entry point trips the guard on
 registered in `tests/structure/deferred-review-claim-cases.test.js`. `C2f-reuse`, `C7-reuse`,
 `C7-identity` and `L3` run in `deferred-claim-adoption` on `windows-shard-4`, `C4t` and
 `C4s-transfer` in `deferred-transfer-reset` on `windows-shard-6`, and `C7-renew` in
-`deferred-lease-refresh` on `windows-shard-9`. `C7-renew` measured about 96 s on run 36625440255,
-while that suite still ran on `windows-shard-1`. Two suites moved off that shard to pay for it,
-and when the shard ran out of room again the suite itself moved to the front of `windows-shard-9`.
-Those measurements, the budget of
+`deferred-lease-refresh` on `windows-shard-9`. `C7-renew` takes about 96 s on Windows (run
+36625440255), and `deferred-lease-refresh` runs at the front of `windows-shard-9`. The
+measurements, the budget of
 `deferred-claim-adoption` and its position on its shard are recorded in
 `.claude/rules/windows-budget-best-solution-first.md`.
 
-**Lock pins** live in `.claude/rules/lock-holder-liveness.md` §"Tests". Older fixtures that
-planted a live PID under a `created_at` older than that process, which is the reused-PID shape
-itself, plant `created_at` at write time.
+**Lock pins** live in `.claude/rules/lock-holder-liveness.md` §"Tests". A fixture that plants a
+live PID plants `created_at` at write time, because a `created_at` older than that process is
+the reused-PID shape itself.
 
 **Operator-facing accounts.** The "Who holds an adopted review" paragraphs in
 `docs/session-control.md` and question three of the `pendingReviewTtlHours` row in

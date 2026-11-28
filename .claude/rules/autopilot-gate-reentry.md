@@ -11,14 +11,13 @@ paths:
 
 # Autopilot Gate Re-entry (`transition` in `hooks/lib/zensu-autopilot-state.sh`)
 
-`PR_OPENED` accepts only the head the gates tested (`evidence.gates.headSha`). Before this
-change the gates could be recorded in GATES alone, and `CONVERGENCE_FAILED` returns its fix to
-CONVERGE, the one pre-PR return path that skips GATES. A convergence fix that landed a commit
-therefore reached OPEN_PR with gate evidence for the commit before it, and `PR_OPENED` refused
-the new head for good: run `run_8c3e58615f328a12` (zensu-session-hub, 2026-11-10) blocked as
-`PR_HEAD_GATE_MISMATCH` and was cancelled by hand.
+`PR_OPENED` accepts only the head the gates tested (`evidence.gates.headSha`).
+`CONVERGENCE_FAILED` returns its fix to CONVERGE, the one pre-PR return path that skips GATES,
+so a convergence fix that lands a commit reaches OPEN_PR with gate evidence for the commit
+before it. With gates recorded in GATES alone, `PR_OPENED` would refuse the new head for good
+and the run would block as `PR_HEAD_GATE_MISMATCH`.
 
-**The fix adds edges and relaxes one head comparison; no existing edge changes.** `GATES_PASSED`
+**Re-entry adds edges and relaxes one head comparison; no existing edge changes.** `GATES_PASSED`
 and `GATES_FAILED` are also accepted in CONVERGE and in OPEN_PR. A failure stores the failed
 evidence and returns the fix through `toAwaitTdd(state, "GATES")`, the path GATES already uses.
 A pass in OPEN_PR stores the gate evidence for its head and moves the run to CONVERGE, so
@@ -35,8 +34,9 @@ precondition or effect of an existing case would therefore turn a record that is
 into an invalid one, terminal records included, and `begin` and `read-workspace` read every
 record of the project. Returning `CONVERGENCE_FAILED` through GATES instead was rejected for
 exactly that reason: every stored record whose `TDD_CHAIN_DONE` returned to CONVERGE would stop
-replaying. `GATES:GATES_PASSED` and `GATES:GATES_FAILED` keep their bodies; the new cases have
-their own. The `sameSha` comparison accepts what the exact comparison accepted plus case
+replaying. `GATES:GATES_PASSED` and `GATES:GATES_FAILED` keep their bodies; the CONVERGE and
+OPEN_PR cases have their own. The `sameSha` comparison accepts every head an exact comparison
+accepts plus case
 variants, so no stored `PR_OPENED` replays differently.
 
 **OPEN_PR accepts gate events in both of its effect states.** In OPEN_PR the PR-open effect is
@@ -85,15 +85,14 @@ version; never bump it by hand.
 **Tests.** `GR1` to `GR9` in `tests/structure/test-autopilot-state-machine.sh` and `D17` in
 `tests/structure/test-autopilot-durable-skill.sh`. `GR6` and `GR3` start from a frozen record:
 `tests/structure/fixtures/autopilot-0.36.0-pr-head-gate-mismatch/` holds the run record and the
-owner pointer the 0.36.0 library wrote for the incident's event sequence (a convergence fix,
+owner pointer the 0.36.0 library wrote for a blocked run's event sequence (a convergence fix,
 `CONVERGENCE_PASSED`, `PR_OPEN_REQUESTED`, a refused `PR_OPENED`, `BLOCK`), with `@PROJECT_ROOT@`
 in place of the two path fields, which the suite fills with the fixture project's native path.
 `GR6` reads it as valid with the current library, so a change to an existing case's effect that
 moves write and replay together still turns it red; `GR3` resumes it and opens the PR on the
 recorded key. `GR8` pins that a gate event in CONVERGE keeps the Stop budget and `GR9` that
-OPEN_PR refuses a same-head gate event. Against the released library `GR1`, `GR2`, `GR3`, `GR4`,
-`GR4b`, `GR5` and `GR8` fail, `GR6` and `GR7` pass, and `GR9` passes only because that library
-refuses every gate event in OPEN_PR. `D17` pins the step 2, 2b and 3 wording, the rules file's takeover and bound, and the
+OPEN_PR refuses a same-head gate event.
+`D17` pins the step 2, 2b and 3 wording, the rules file's takeover and bound, and the
 work-order line, with negative checks that neither step 3 nor the work-order line commits.
 
 **Windows cost, UNMEASURED.** The GR block makes 58 lease-taking state-library calls across five
@@ -123,5 +122,5 @@ the next green Windows figure replaces it.
   every stage move does.
 - A gate event in CONVERGE may name the head the gates already recorded; it stores the evidence
   again and changes nothing else.
-- A `requested` PR-open effect can now sit through CONVERGE and a fix loop; the resume hook and
+- A `requested` PR-open effect can sit through CONVERGE and a fix loop; the resume hook and
   the doctor only render its status.

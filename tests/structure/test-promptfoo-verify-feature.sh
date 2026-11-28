@@ -117,10 +117,19 @@ if grep -qF 'require_disposable_environment: true' "$CFG" \
 else
   check "live eval requires and documents a disposable unrestricted host" FAIL
 fi
-if grep -qF 'for cli in promptfoo claude jq node git curl playwright-cli; do' "$RUNNER"; then
+if grep -qF 'for cli in claude jq node git curl playwright-cli; do' "$RUNNER" \
+  && grep -qF 'if [ ! -x "$PROMPTFOO" ]; then' "$RUNNER"; then
   check "runner preflights every CLI the live run needs, including playwright-cli" PASS
 else
   check "runner preflights every CLI the live run needs, including playwright-cli" FAIL
+fi
+OUT_RELATIVE_PROMPTFOO="$(cd "$PLUGIN_DIR" && env ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 VERIFY_FEATURE_PROMPTFOO=no-such-dir/promptfoo bash "$RUNNER" 2>&1)"
+RC_RELATIVE_PROMPTFOO=$?
+if [ "$RC_RELATIVE_PROMPTFOO" = 64 ] \
+  && printf '%s\n' "$OUT_RELATIVE_PROMPTFOO" | grep -qF 'VERIFY_FEATURE_PROMPTFOO must be an absolute path'; then
+  check "runner refuses a relative VERIFY_FEATURE_PROMPTFOO before it starts anything" PASS
+else
+  check "runner refuses a relative VERIFY_FEATURE_PROMPTFOO (rc=$RC_RELATIVE_PROMPTFOO, out=${OUT_RELATIVE_PROMPTFOO:0:200})" FAIL
 fi
 
 case "$(uname -s)" in
@@ -158,7 +167,7 @@ exec node -e '
 STUB
 chmod +x "$RUNNER_SIGNAL_STUBS"/*
 env PATH="$RUNNER_SIGNAL_STUBS:$PATH" RUNNER_SIGNAL_STATE="$RUNNER_SIGNAL_STATE" \
-  RUNNER_LATE_STATE="$RUNNER_LATE_STATE" \
+  RUNNER_LATE_STATE="$RUNNER_LATE_STATE" VERIFY_FEATURE_PROMPTFOO="$RUNNER_SIGNAL_STUBS/promptfoo" \
   ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 /bin/bash "$RUNNER" \
   >"$RUNNER_SIGNAL_STUBS/out" 2>"$RUNNER_SIGNAL_STUBS/err" &
 RUNNER_SIGNAL_PID=$!
@@ -237,10 +246,10 @@ else
   check "remote scenario pins pre-navigation query rejection and final-report non-disclosure" FAIL
 fi
 
-if grep -qF "id: 'exec: ./remote-provider.sh'" "$REMOTE_ACCEPTED" \
+if grep -qF "id: 'exec: ../remote-provider.sh'" "$REMOTE_ACCEPTED" \
   && grep -qF 'https://example.com/' "$REMOTE_ACCEPTED" \
-  && grep -qF '`Learn more`' "$REMOTE_ACCEPTED" \
-  && grep -qF 'link "Learn more"' "$ASSERTION" \
+  && grep -qF '2. The page shows a visible link.' "$REMOTE_ACCEPTED" \
+  && grep -qF 'const NAMED_LINK = ' "$ASSERTION" \
   && grep -qF 'check: remoteAcceptedTools' "$REMOTE_ACCEPTED" \
   && grep -qF 'check: remoteAcceptedEvidence' "$REMOTE_ACCEPTED" \
   && grep -qF 'check: remoteAcceptedVerdict' "$REMOTE_ACCEPTED" \
@@ -254,7 +263,7 @@ else
   check "accepted remote scenario pins a dedicated exact policy and complete gated evidence" FAIL
 fi
 
-if grep -qF "id: 'exec: ./remote-network-only-provider.sh'" "$REMOTE_NETWORK_ONLY" \
+if grep -qF "id: 'exec: ../remote-network-only-provider.sh'" "$REMOTE_NETWORK_ONLY" \
   && grep -qF 'https://example.com/' "$REMOTE_NETWORK_ONLY" \
   && grep -qF '.zensu/remote-network-only.yaml' "$REMOTE_NETWORK_ONLY" \
   && grep -qF 'check: remoteNetworkOnlyTools' "$REMOTE_NETWORK_ONLY" \

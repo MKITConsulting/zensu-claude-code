@@ -68,7 +68,7 @@ sent a message:` followed by an `<agent-message from="…">` block, with `origin
    fails toward firing.
 
 A `<cross-session-message>` block, bare or after the peer line, is what a session receives from
-another one; transcripts store the second shape with `origin.kind: peer`, so the tag arm now
+another one; transcripts store the second shape with `origin.kind: peer`, so the tag arm
 agrees with the structured one. `session-brief` exists for the zen-mode gate. The reminder and the
 router keep treating a side-session brief as typed: neither lists it among the kinds it skips, and
 the reminder's linked-session brief note (`.claude/rules/session-delivery-route.md`) names it
@@ -144,22 +144,22 @@ newest transcripts of this project on 2026-10-30: 202 of 268 sessions with typed
 leading reminders on some or all of them, the most frequent being the linked-sessions status and
 the worktree path, and side-session report notes arrive the same way. A worktree or a linked
 session whose name holds a phrase would otherwise end the mode, and the editor phrase could never
-match behind a reminder, so typing that escape did nothing. The largest reminder block in that
+match behind a reminder, so typing that escape would do nothing. The largest reminder block in that
 census was 1,615 characters, well inside the window.
 
-The same census shows the class of the defect: a deactivation phrase appeared in 17 of 2,090 task
-notifications, 1 of 166 subagent or peer hand-backs and 2 of 38 side-session briefs, and in none of
-1,514 typed prompts. One of those briefs ended the mode of the session it started on 2026-10-30.
+The same census shows why only the user's own text counts: a deactivation phrase appeared in 17
+of 2,090 task notifications, 1 of 166 subagent or peer hand-backs and 2 of 38 side-session briefs,
+and in none of 1,514 typed prompts.
 
 **The lost-prompt last resort honours the same gate.** Both call sites scan what
 `zen_payload_own_text` hands them: one `awk` pass reads the `prompt` string out of the raw payload
 up to its first unescaped closing quote, decodes the `\n`, `\t` and `\r` escapes so the classifier
 and the phrase boundaries see real whitespace, keeps an escaped backslash a backslash so `\\n` is
-never read as a newline, and the gate and the own-text helper run on the result. That also removes
-three false readings of the raw scan: a phrase in another field, such as `scratchpad_dir`, no
-longer fires whether it is serialized before or after the prompt, an empty `prompt` string scans
-nothing instead of the whole payload, and a phrase right after a newline escape, where the `n` of
-`\n` defeated the word boundary, is now seen. The healthy-path call site runs only when the
+never read as a newline, and the gate and the own-text helper run on the result. Scanning that
+result rather than the raw payload avoids three false readings: a phrase in another field, such as
+`scratchpad_dir`, never fires whether it is serialized before or after the prompt, an empty
+`prompt` string scans nothing instead of the whole payload, and a phrase right after a newline
+escape, where the `n` of `\n` defeats the word boundary of a raw scan, is seen. The healthy-path call site runs only when the
 lost-prompt arm did not already scan, so no turn pays for the scan twice; `Z115` drives that call
 site through a live child.
 

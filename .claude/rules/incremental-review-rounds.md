@@ -8,14 +8,15 @@ paths:
 
 # Incremental Review Rounds (`review-round-scope-v1.js` + `aspect-activation-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 Two reductions to what the `/zensu:build` review fan-out READS, both gated on a permissively
 read config key and both defaulting ON. They exist because the fan-out, not the round
 counter, is what the chain actually costs: **measured** on this repository's own subagent
 transcripts, one `zensu:review-aspect` agent ingests ~513k context tokens over ~40 internal
 turns, `review-judge` ~540k and the consume `code-reviewer` ~345k, so a single full fan-out
-moves roughly **3.4M** tokens and `autoFixMaxRounds: 5` multiplied that by up to five. Take
+moves roughly **3.4M** tokens, and every further full-panel round adds that again
+(`hooks.autoFixMaxRounds` defaults to 2). Take
 those figures as ONE measurement over six recent sessions, not a bound.
 
 **`hooks.incrementalReviewRounds` narrows rounds 2..N to that round's OWN delta.** Round 1 is
@@ -53,13 +54,13 @@ and `design` checklist lines of `agents/review-aspect.md`, the `reviewPanel` row
 LC3 to LC3j in `tests/structure/test-review-convergence.sh`, and LP1 to LP4 in
 `evals/config-gate/test-review-convergence-directive.sh`.
 
-**FAIL-OPEN IS THE WHOLE CONTRACT, and it has three degraded causes rather than two.**
+**FAIL-OPEN IS THE WHOLE CONTRACT, and it has three degraded causes.**
 `roundScope` answers `ok` only when it resolved a real delta; `empty` (no claims logged for the
-round) and `degraded` keep the WHOLE diff. TRUNCATION at EITHER cap is a degraded cause and was
-a real defect before it was one: the per-claim cap silently dropped paths, so a claim naming more
-than `MAX_CLAIM_FILES` would have reported `status=ok` over a delta missing files — narrowing to
-an incomplete delta skips a file the round changed, which is the exact outcome the module exists
-to prevent. Its own unit suite caught it. Keep `dropped > 0 → degraded`.
+round) and `degraded` keep the WHOLE diff. TRUNCATION at EITHER cap is a degraded cause: a
+per-claim cap that silently dropped paths would let a claim naming more than `MAX_CLAIM_FILES`
+report `status=ok` over a delta missing files — narrowing to an incomplete delta skips a file the
+round changed, which is the exact outcome the module exists to prevent. Keep
+`dropped > 0 → degraded`.
 
 **`hooks.aspectActivation` drops the built-in perspectives a change set cannot implicate**, using
 the shape `persona-activation.js` already established for repo-local personas. `conventions` and
@@ -76,9 +77,9 @@ failing helper logs `ASPECT ACTIVATION UNAVAILABLE — <reason>` and spawns the 
 shrank silently is indistinguishable from one that was never spawned, which is the failure this
 repository treats as worse than the cost it removes.
 
-**Who resolves each key, and why there.** Both keys shipped documented and in `config.example.json`
-while nothing read them, so a `false` in any config changed nothing. Each is now resolved where its
-decision is made, through `zensu_hook_enabled` against the Session Control record's project root:
+**Who resolves each key, and why there.** A documented key that nothing reads turns a `false` in
+any config into a no-op, so each key is resolved where its decision is made, through
+`zensu_hook_enabled` against the Session Control record's project root:
 
 - **`hooks.aspectActivation` belongs to `/zensu:build` step 3.** Every fan-out runs there, and the
   first review has no hook directive in front of it. A main-thread probe runs
@@ -101,9 +102,9 @@ decision is made, through `zensu_hook_enabled` against the Session Control recor
   review-convergence clause names the round-scope helper itself, through `SCOPE_HELPER_Q` beside
   `LEDGER_HELPER_Q`, because convergence still runs that helper while the key is off and
   `ROUND_SCOPE` names the file only while it is on (`I17g`, `I17h`, `I32c`).
-- **The delegate also resolves `hooks.aspectActivation`**, into `ACTIVATION_INPUT`, because its
-  re-review parenthetical used to prescribe the helper over the round's `changed_files`
-  unconditionally, which contradicted a probe answering `off`. It now names the round's
+- **The delegate also resolves `hooks.aspectActivation`**, into `ACTIVATION_INPUT`, because a
+  re-review parenthetical that prescribed the helper over the round's `changed_files`
+  unconditionally would contradict a probe answering `off`. It names the round's
   `changed_files` while the key is on and an empty change set while it is off, so the directive and
   step 3 name the same input.
 
@@ -128,7 +129,7 @@ execute at all when either file and the directory disagree.
 
 **Generations and the claim prefix.** A `REVIEW BUDGET RESET` line, which
 `/zensu:reset-review-limit` appends after a same-chain rearm, starts a new generation:
-`roundScope` counts only claims after the last marker, so restarted round numbers no longer merge
+`roundScope` counts only claims after the last marker, so restarted round numbers never merge
 old and new `R1-` claims. The `R<n>-` claim prefix itself is prescribed by the fix-round text
 of EVERY severity arm in `hooks/post-review-tdd-delegate.sh` and by the `/zensu:build` fix-round
 paragraph, independent of `hooks.reviewConvergence`, because this key must not silently depend on

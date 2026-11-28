@@ -12,7 +12,7 @@ paths:
 
 # TDD Mode Precedence (`hooks/lib/zensu-config.sh` + `zensu-log.sh --tdd-begin`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The strict/vanilla implementation mode is decided by a FOUR-RANK ladder, and
 `hooks/lib/zensu-log.sh`'s `--tdd-begin` branch is the only place that orders all four
@@ -57,9 +57,9 @@ for TDD (`with tdd`, `use tdd`) ensures the `/zensu:build` specification carries
 `TDD-MODE: strict` line and begins with `Executing via /zensu:build (strict TDD requested)`,
 and the foreign-executor notice says the same for an approval that asks for TDD. "Exactly
 one" matters because Phase 0 ignores the channel when a specification carries more than one
-such line. Before this, "with tdd" took the vanilla workflow in a vanilla session while the
-`/zensu:tdd-mode` description claimed the same phrase for a session switch, so a user who
-asked for TDD got none. The channel stays escalation-only, and the line is never recorded.
+such line. Without the rule, "with tdd" takes the vanilla workflow in a vanilla session while
+the `/zensu:tdd-mode` description claims the same phrase for a session switch, so a user who
+asks for TDD gets none. The channel stays escalation-only, and the line is never recorded.
 The hooks see rank 1 only through the effective mode, which does not say whether the
 session's `/zensu:tdd-mode` choice or the config made a session vanilla, so the status line
 says "requested": a session whose `/zensu:tdd-mode` choice is vanilla keeps the chain
@@ -102,8 +102,8 @@ after the base line is computed — a load fault loses the disclosure, never the
 "effective" read there would return the config anyway; a marker that a `clear` keeps under
 the same key is reported by `/zensu:tdd-mode --status` and the `mode:` echo at
 `--tdd-begin`, never by these two.
-A directive that names a cause must name the one that actually decided: after the
-switch to the effective mode, the vanilla branches may not assert
+A directive that names a cause must name the one that actually decided: the vanilla
+branches read the effective mode, so they may not assert
 `hooks.tddImplementation=false`.
 
 Moving together with the ladder: `zensu_tdd_mode_marker_path` / `zensu_tdd_mode_state_linked`

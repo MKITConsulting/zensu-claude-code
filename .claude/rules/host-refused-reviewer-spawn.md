@@ -8,7 +8,7 @@ paths:
 
 # Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The Stop chain-enforcer demands a `zensu:code-reviewer` spawn. When the HOST
 permission layer refuses that spawn, the call never executes — so no PreToolUse
@@ -42,19 +42,16 @@ Ten things are coupled and must move together:
   shell edit — and, unlike the `case` arms, with no remedy arm to add and none
   missing. The hook's PROBE deliberately holds no third copy — it reads `kind`
   as a field, so a marker added to the module reaches the doctor under its real
-  name with no shell edit, where the old closed set degraded it to the empty
-  string and made the doctor render `unclassified` for a refusal both sides could
+  name with no shell edit, where a closed set would degrade it to the empty
+  string and make the doctor render `unclassified` for a refusal both sides can
   already name. Adding a marker still means adding a remedy arm; without one the
   refusal renders unclassified, which is a degraded message rather than a wrong
-  one, because the unknown arm is the safe arm. **That safety clause is already OVERTAKEN, and by code that predates the turn
-  counter — record it, do not restate it as a live rule.** Keeping the value a
-  `case` SELECTOR is what would hold module output out of user-visible text, and
-  TWO stderr messages already interpolate it: the cap-release diagnosis in
-  `stop-chain-enforcer.sh`, which predates this counter, and the counter's own
-  refused-spawn notice. Neither reaches the hook's JSON `reason`, which is the
-  string the clause was written about, so nothing is broken — but a renamed `kind`
-  now moves operator-visible bytes in two places, and that cost belongs in the
-  rename's plan rather than inside a rule the tree stopped following.
+  one, because the unknown arm is the safe arm. **The value does not stay inside
+  `case` SELECTORS**, the only use that would hold module output out of user-visible text:
+  TWO stderr messages interpolate it, the cap-release diagnosis in
+  `stop-chain-enforcer.sh` and the turn counter's own refused-spawn notice. Neither
+  reaches the hook's JSON `reason`, but a renamed `kind` moves operator-visible bytes
+  in both places, and that cost belongs in the rename's plan.
 - **The CLI's one output line is a parsed contract**, not a display string:
   `status=<s> kind=<k> tool=<n> spawns=<n> denials=<n>`. The probe matches
   `status=` in first position, and reads `denials` with `${probe##* denials=}`,
@@ -85,7 +82,7 @@ Ten things are coupled and must move together:
   `REVIEWER_SUBAGENT_TYPE`, the pair most likely to diverge because the require is lazy
   and nothing at load time compares them. A SECOND carrier is pinned, and the count
   below is derived from both: `ZENSU_REVIEW_SPAWN_IN_SCOPE` in
-  `hooks/lib/zensu-tdd-phase.sh` made that file the TENTH carrier, and because it names
+  `hooks/lib/zensu-tdd-phase.sh` makes that file the TENTH carrier, and because it names
   `zensu:review-aspect` and `zensu:review-judge` in the same sentence a rename of ANY of
   the three identities lands there — so T38 in
   `tests/structure/test-stop-enforcer-self-review-routing.sh` asserts all three on the
@@ -115,47 +112,37 @@ Ten things are coupled and must move together:
 - **Every row that INSTRUCTS a settings edit carries `SELF_PERMISSION_BAR`**, and
   all SIX call sites consume it — the exposure row, the reactive refused-spawn row,
   the deny row, the ask row, the could-not-judge row, and the refusal caveat the
-  implementing-turns row appends when a live note records a refused spawn. That sixth
-  arrived with the turn counter and this census was left at five for a round, which is
-  the drift the enumeration exists to prevent. The two that previously
-  spelled the sentence inline now consume the constant with their emitted bytes
-  unchanged, which is what keeps P1be and P1qr green. A shared constant with an
-  unconsumed copy beside it is worse than either honest duplication or one source,
-  because it advertises a single source that does not exist; do not reintroduce one.
+  implementing-turns row appends when a live note records a refused spawn. A shared
+  constant with an unconsumed copy beside it is worse than either honest duplication or
+  one source, because it advertises a single source that does not exist; do not
+  reintroduce one.
   **The bar ALSO exists in `hooks/stop-chain-enforcer.sh`, in bash, where no copy can
-  ever consume the constant — and this paragraph does NOT enumerate them, because the
-  enumeration was wrong the day it was written.** It said "twice" and named the
-  blocked-Stop `REASON` and the turn counter's refused-spawn notice, while the
-  cap-release diagnosis carried a third, independently worded copy (`the remedy is the
-  user's to apply and no agent may apply it for them, least of all by editing a
-  settings file itself`) that meets this section's own membership test — a remedy
-  string EMITTED to a user. A maintainer working from that census would have reworded
-  two sites and left the third stating the rule in a fourth form. So: **before
+  ever consume the constant — and this paragraph does NOT enumerate them, because a
+  census of them misses copies.** The cap-release diagnosis carries an independently
+  worded one (`the remedy is the user's to apply and no agent may apply it for them, least
+  of all by editing a settings file itself`) that meets this section's own membership
+  test — a remedy string EMITTED to a user — and a maintainer working from a census without
+  it would reword the others and leave it stating the rule in another form. So: **before
   rewording this bar, run `grep -n 'settings file' hooks/stop-chain-enforcer.sh` and
   judge every hit**, the same instruction this file gives for `zensu:code-reviewer`
   and `scv1_`. Two facts a grep cannot supply, and they are the reason the class is
   hard: two of the three bash copies are second person and match `SELF_PERMISSION_BAR`
   (`no agent may edit a settings file to widen its own permissions`) in neither person nor
   wording, while the cap-release copy is THIRD person like the constant and differs only in
-  wording — so "neither person nor wording", which this paragraph asserted of all of them, is
-  false for the very copy it exists to stop people missing; and
+  wording; and
   `skills/doctor/SKILL.md` carries two further paraphrases beside the one place it
   pins the constant verbatim. Nothing pins any bash copy against anything. Never
   describe this sentence as having one source.
-- **The deny-first caveat sentence is a SEVEN-member hand-copy class, pinned nowhere
-  across its copies.** The seventh is `REVIEWER_SPAWN_DENY_FIRST` in
+- **The deny-first caveat sentence is a SEVEN-member hand-copy class; six members are
+  pinned, `unjudgeableRow` is not.** The seventh is `REVIEWER_SPAWN_DENY_FIRST` in
   `hooks/stop-chain-enforcer.sh`, interpolated into the implementing-turns refused-spawn
   notice — a remedy string EMITTED to a user, which is this paragraph's own membership
   test. It PARAPHRASES rather than sharing the trailing clause, so it cannot be caught by
   the three `grep -qF` pins below; `C27` in `tests/structure/test-impl-stop-counter.sh`
-  now pins its distinguishing lead-in instead, which makes it the SIXTH member with a pin —
-  read that against this bullet's own closing sentence, which says five of the six original
-  members are caught by something and `unjudgeableRow` alone is the copy nothing catches. That
-  sentence still holds; the class is now six-of-seven pinned, with `unjudgeableRow` still the
-  sole unpinned copy. The count below was SIX and stale on the day the constant landed —
-  corrected here rather than in a later round, because the same commit updated the
-  adjacent `SELF_PERMISSION_BAR` census and left this one alone.
-  The original six, unchanged: `DENY_FIRST_CAVEAT` in `hooks/lib/zensu-doctor-report.js`
+  pins its distinguishing lead-in instead, which makes it the SIXTH member with a pin. The
+  count below covers the other six members, five of which are caught by something; with the
+  seventh, the class is six-of-seven pinned, and `unjudgeableRow` is the sole unpinned copy.
+  The other six: `DENY_FIRST_CAVEAT` in `hooks/lib/zensu-doctor-report.js`
   is consumed by the ask row, the exposure row and the `auto-exposure-granted` row; the reactive row in the SAME
   file spells its own lead-in and shares only the trailing clause; `DENIAL_REMEDY`
   in `hooks/stop-chain-enforcer.sh` is a third; `skills/doctor/SKILL.md`'s
@@ -177,8 +164,8 @@ Ten things are coupled and must move together:
   `Deny is evaluated before ask and allow` literally. So five of the six are caught by
   something, and `unjudgeableRow` alone is the copy nothing catches; it is the one to check
   by hand after any reword. The ask row, the exposure row and the
-  `auto-exposure-granted` row CONSUME the constant — THREE consumers since the reviewer-spawn
-  grant landed — which keeps them out of the drift class entirely: consumers, not members. The
+  `auto-exposure-granted` row CONSUME the constant — THREE consumers — which keeps them out
+  of the drift class entirely: consumers, not members. The
   renderer's own comment beside the constant counts the same class as FIVE BESIDES the
   constant, which is the same six; keep both numbers and both bases, and do not "fix" one
   into the other. The criterion needs a real discriminator, not a blanket exclusion: a member
@@ -191,7 +178,7 @@ Ten things are coupled and must move together:
   read, so a reword of that row is what a maintainer notices; the refused-spawn bullet is a
   member because it stands in for a string the model never sees rendered. `docs/build-workflow.md` is
   narrative and outside the class. Without that discriminator the class grows until it stops
-  being checkable, which is what an earlier wording of this paragraph did. P1be and P1qr each pin a doctor copy against
+  being checkable. P1be and P1qr each pin a doctor copy against
   the skill, and the routing suite pins the enforcer copy against itself — nothing
   pins the doctor and the enforcer against each other. Reword one and the others
   go stale with every check green; check them by hand, as with `WRAP` above.
@@ -213,13 +200,13 @@ Ten things are coupled and must move together:
   `docs/build-workflow.md` §"The proactive counterpart", and the bullet above.
   P1bh requires every suite that NAMES either doctor file to sandbox HOME or to
   carry an explicit `# zensu-doctor-home-exempt:` sentence — deliberately blunt,
-  because its first version tried to recognise an execution and missed the one
-  suite that binds the path to a variable and runs it six hundred lines later.
+  because a check that tries to recognise an execution misses a suite that binds
+  the path to a variable and runs it many lines later.
   The renderer reads HOME for both the user-scoped config and the settings file,
   so a suite without one is environment-dependent. P1bi separately requires every
   settings key the ladder reads to be shape-vetted, which is the coupling that
   reopens the original defect if it drifts.
-  **The proactive ladder is now decision-then-text, and the two halves must move
+  **The proactive ladder is decision-then-text, and the two halves must move
   together**: `classifyPermissionExposure` answers WHICH verdicts hold — in emission
   order, as a LIST, so the fact that the auto-mode verdict and the `autoMode.allow`
   verdict can both hold is visible in the return value instead of asserted in prose —
@@ -233,17 +220,17 @@ Ten things are coupled and must move together:
   the Config block already gathered — a second `readJson` pass would double the
   non-blocking opens the FIFO hardening exists for. It suppresses the ROW and can never
   redirect which file is opened, which is what keeps `claudeSettingsFile`'s refusal of a
-  `ZDOC_`/`ZENSU_` override intact: that argument is about INJECTION and it still holds,
-  while this closes the SUPPRESSION complaint it never answered. **Disabling does not
+  `ZDOC_`/`ZENSU_` override intact: that argument is about INJECTION, and the boolean
+  answers SUPPRESSION, which that argument does not. **Disabling does not
   produce silence** — it emits one ✅ row naming the flag and saying the check was
   skipped, because silence is the one verdict this check cannot qualify and hiding the
-  rows under a config key would reinstate the defect the feature removed. `P1bz`/`P1bz1`
+  rows under a config key would produce exactly that silence. `P1bz`/`P1bz1`
   pin both halves and `P1bz2` pins that a quoted `"false"` does not disable it.
   **The proactive ladder has no unit seam**: this renderer exports nothing and
   ends in `process.exit(0)`, so `settingsShape`, the rule predicates
   (`matchesDenyOrAskRule` and `matchesAllowRule` — deliberately TWO named predicates and
-  not one boolean-flag predicate, because the flag named the input while it decided the
-  trim behaviour, so no call site said which side of the asymmetry it meant — plus
+  not one boolean-flag predicate, because a flag would name the input while it decides the
+  trim behaviour, so no call site would say which side of the asymmetry it means — plus
   `namesReviewerSpawn`, `mentionsReviewerAgent`, `hasUnreadableEntry`), the shared
   `isVerifiedSpelling` test that every exact-match arm consults instead of re-spelling it,
   the combinator `reviewerSpawnMention` over the deny/ask pair, and the
@@ -256,8 +243,8 @@ Ten things are coupled and must move together:
   preload rather than through a settings file, because neither a short read nor a
   throw inside the check is producible from file content alone (P1bp, P1bs).
   `settingsShape` returns TWO deferred carriers, not one: each row is suppressed only
-  by a malformed key its own claim depends on. Collapsing them back into one carrier
-  restores the defect where a malformed `autoMode.allow` deleted the exposure row. Extracting a
+  by a malformed key its own claim depends on. Collapsing them into one carrier would
+  let a malformed `autoMode.allow` delete the exposure row. Extracting a
   pure classifier into a `*-v1.js` module would buy one, at the cost of a lazy
   require, a degraded-row fixture and a `node --test` driver charged to a named
   Windows shard budget. Deliberately not done; recorded so it is not mistaken for
@@ -272,7 +259,7 @@ Ten things are coupled and must move together:
   (`tests/profiles/windows-ci.v1.json`, `stop-enforcer-self-review-routing`), where
   a `TIMED_OUT` means the tail of the file never ran. The driver therefore runs
   FIRST in that file, before any scenario: it needs only `PLUGIN_DIR` and
-  `STATE_DIR`, and at the tail a timeout cost the whole unit suite — the only
+  `STATE_DIR`, and at the tail a timeout would cost the whole unit suite — the only
   coverage the scanner's own properties have anywhere.
 - **The note is only this plugin's word when a session backs it.** `reviewerDenialRows`
   requires `tdd-phase-<same key>.json` beside the note before counting it. The state
@@ -294,142 +281,84 @@ Ten things are coupled and must move together:
   drift — only a fresh capture can.
 
 **The Windows budget for this suite is MEASURED, and the measurement is a RANGE.**
-Two green runs of byte-identical suite content reported `stop-enforcer-self-review-routing`
-at **985846 ms** and **1274496 ms** — a 29% spread on the same GitHub runner class, so a
-single sample here says nothing about headroom. Budget against the HIGH figure: at
-`timeoutMs: 1500000` in `tests/profiles/windows-ci.v1.json` the slow run consumes 85% of
-its own cap. The previous ceiling of 1200000 sat BELOW that high sample and the suite
-was killed by it, which is exactly the failure this range exists to prevent.
-**That range no longer covers the file.** Scenario 7b (T36/T36a, the real-host capture)
-added a session and a Stop after the range was taken, and the T38-T59 scope-sentence block
-added a second post-range increment on top of that — one further session and two further
-`bash "$STOP"` invocations in T59, plus roughly twenty source and behavioural checks. The
-ceiling was NOT raised for either: 85% of cap was already the slow sample's share, and this
-file's own rule is that a ceiling comes from a green wall clock and never from an estimate.
+Two green runs of byte-identical content of the unsplit suite reported
+`stop-enforcer-self-review-routing` at **985846 ms** and **1274496 ms** — a 29% spread on the
+same GitHub runner class, so a single sample here says nothing about headroom. Budget against
+the HIGH figure: a `timeoutMs` in `tests/profiles/windows-ci.v1.json` below the high sample
+kills the suite on a slow run, which is exactly the failure this range exists to prevent. A
+ceiling comes from a green wall clock and never from an estimate.
 
-**IT WAS RE-MEASURED, AND IT HAD ALREADY GONE RED — the ceiling HAS since been raised, so
-the paragraph above is history rather than current state.** It said to re-measure if the
-shard ever reported `TIMED_OUT`; it did, on more than one branch. The cap sat AT the
-measurement — the error the shard-8 note in `windows-ci-contract.test.js` ends by naming —
-so `main` itself was a coin flip on every run rather than a suite under test being at
-fault. Two things changed together: `review-worker-evidence-lease` MOVED to
-`windows-shard-8`, leaving this suite ALONE on shard 7 with the shard's whole envelope, and
-the cap rose. **The NUMBERS live in that contract-test note and are deliberately not copied
-here**, for the reason this file gives about `MAX_BLOCK` and about the architecture doc's
-KB totals: a prose copy of a measurement goes stale silently, and the note carries the run
-ids, the measured wall clocks and the arithmetic together.
+**A cap never sits AT the measurement.** That is the error the shard-8 note in
+`windows-ci-contract.test.js` ends by naming: it makes `main` a coin flip on every run rather
+than a suite under test being at fault. The figures and their run ids are recorded below.
 
-**KNOWN RESIDUAL, and it is the reason this is a mitigation rather than a fix:** the raise
-does not absorb the 29% spread recorded above, and at this suite's current size no cap
-inside the shard envelope can — the envelope itself is smaller than the spread's upper end.
-The raise cannot go further without moving `timeout-minutes` and every profile's
-`profileTimeoutMs` together. The durable answer is to find why this suite needs 25 minutes
-on Windows, and until then, treat a `TIMED_OUT` here as the suite outgrowing its shard
-rather than as a defect in whatever change happened to be under test — and expect the cap
-to bind again.
-
-**IT DID REPORT `TIMED_OUT`, and the prediction above held exactly.** On the PR carrying
-the workflow-baseline repair, `windows-shard-7` reported
-`TIMED_OUT stop-enforcer-self-review-routing (1500157ms)` against its own 1500000 cap while
-the same shard was GREEN on `main` — so the content this suite scans grew past the edge the
-paragraph above says it was sitting on. The remedy was NOT to raise the cap inside the
-shard: the sibling `review-worker-evidence-lease` measured 158850 ms on that run, so the
-1800000 shard budget left roughly 141000 ms of room and a raise would have bought 9% against
-an unknown requirement. The SIBLING moved instead, to `windows-shard-8`, which measured a
-196 s job against the same 1800000 budget after `session-trail-lineage` came down to 154673 ms
-— the same rebalance-rather-than-add move this file records for that suite, and it costs no
-new CI job because a suite moving between existing profiles changes no key in
-`expectedProfiles`. `stop-enforcer-self-review-routing` then held `windows-shard-7` ALONE at
-`timeoutMs: 1740000`, deliberately below the 1800000 profile budget so an overrun still
-surfaced as a visible suite `TIMED_OUT` rather than as a profile abort that truncated the
-tail silently.
-
-**The green figure arrived on the very next run and was then the one to budget against:
-`PASSED stop-enforcer-self-review-routing (1482704ms)`**, alone on `windows-shard-7`, with
-the whole shard job at 1579 s. Two things about it are worth keeping. It is BELOW the
-1500000 cap the previous run breached at 1500157 ms, so the failure was the documented 29%
-spread landing on its slow side rather than a step change — which is exactly why a single
-sample must not be read as headroom. And 1482704 against 1740000 is **85% of cap**, the same
-share this section already called too tight at the old ceiling; the difference was that the
-suite then held the shard alone, so the only other bound was the 1800000 profile budget it
-no longer shared. Treat further growth here as needing a shard of its own, not another
-raise. The sibling measured `PASSED review-worker-evidence-lease (113321ms)` on
-`windows-shard-8`, whose two suites together came to roughly 265 s against 1800000.
-
-**The shard budget is the SECOND ceiling, and it binds first — though on the run that
-forced the rebalance above it was the SUITE cap that bound, not the shard.**
+**The shard budget is the SECOND ceiling, and it can bind first.**
 `windows-shard-7`'s
 `profileTimeoutMs` is 1800000 and every profile is pinned to that same value
 (`windows-ci-contract.test.js`), which is itself pinned against the job's
-`timeout-minutes: 35`. A suite therefore never receives its configured `timeoutMs` — it
-receives `profileTimeoutMs` MINUS everything its shard already spent. When
-`autopilot-state-machine` (554832 ms) still shared this shard, the routing suite started
-with 1138363 ms and died there while its own cap read 1200000 ms, so raising the cap
-alone would have changed nothing. Do NOT read a suite's `timeoutMs` as its deadline;
-read the shard's remaining budget. Note also that summing a shard's `timeoutMs` values
-and comparing that to `profileTimeoutMs` proves nothing — EVERY shard exceeds it by
-design, because the per-suite values are individual caps and not a shared budget.
+`timeout-minutes: 35`, so the envelope grows only when `timeout-minutes` and every profile's
+`profileTimeoutMs` move together. A suite therefore never receives its configured `timeoutMs` —
+it receives `profileTimeoutMs` MINUS everything its shard already spent, and once that remainder
+is below its cap, raising the cap alone changes nothing. Do NOT read a suite's `timeoutMs` as its
+deadline; read the shard's remaining budget. A cap that binds before the envelope makes an
+overrun surface as a visible suite `TIMED_OUT` rather than as a profile abort that truncates the
+tail silently, and a suite moving between existing profiles changes no key in
+`expectedProfiles`, so a rebalance costs no new CI job. Note also that summing a shard's
+`timeoutMs` values and comparing that to `profileTimeoutMs` proves nothing — EVERY shard
+exceeds it by design, because the per-suite values are individual caps and not a shared budget.
 
-**THE SUITE WAS SPLIT, and the "why 25 minutes" question now has a measured answer.** The
-file ran the full Stop hook 47 times and started 19 sessions. On green run 36556263889 each
-single-Stop check (T21, T21a, T37, T42, T45) took 19.0-19.9 s on the Windows runner, and the
-two cap loops, nine Stops each, took 216.0 s (T24) and 275.0 s (T30) of that run's 1551.3 s.
-Run 36511537256 on #340, whose diff touched nothing this suite reads, then reported
-`TIMED_OUT stop-enforcer-self-review-routing (1700190ms)` after its 62nd check, T30, with
-every check before it green. It reached T36b at 877.8 s against 681.5 s on 36556263889, so
-a runner 29% slower than the green one was enough. Two changes landed together:
+**Why the suite is split: a single-Stop check costs about 19 s on Windows.** On green run
+36556263889 of the unsplit file each single-Stop check (T21, T21a, T37, T42, T45) took
+19.0-19.9 s on the Windows runner, and the two cap loops, nine Stops each, took 216.0 s (T24)
+and 275.0 s (T30) of that run's 1551.3 s. A runner 29% slower reached T36b at 877.8 s against
+681.5 s and timed the unsplit file out (run 36511537256). Two measures follow:
 
-- The note lifecycle — T23-T25, T27-T32 and T35 — moved to
-  `tests/structure/test-stop-enforcer-reviewer-denial-note.sh`, on a new `windows-shard-9`
-  that it held alone until `deferred-lease-refresh` joined it (see below). The routing file
-  keeps T1-T22, T26, T33-T34 and T36-T59 on `windows-shard-7`, which it held alone until
-  `versioned-plugin-upgrade` joined it (see below), and lost a trailing `start_session` that
-  no check read.
+- The note lifecycle — T23-T25, T27-T32 and T35 — lives in
+  `tests/structure/test-stop-enforcer-reviewer-denial-note.sh` on `windows-shard-9`, which it
+  shares with `deferred-lease-refresh` (see below). The routing file keeps T1-T22, T26,
+  T33-T34 and T36-T59 on `windows-shard-7`, which it shares with `versioned-plugin-upgrade`
+  (see below).
 - T24 and T30 configure `autoFixMaxRounds: 1`, the floor `zensu-config.sh` accepts, so each
   reaches a cap of 4 in five Stops instead of a cap of 8 in nine. That is the idiom
   `test-deferred-review-claim.sh` and `test-autopilot-stop-enforcer.sh` already use for
-  their cap cases, and the DEFAULT cap of 8 stays pinned by E3 in
-  `test-stop-enforcer-escapes.sh`. Together with the dropped session, the two files run 39
-  Stops and 18 sessions where the one file ran 47 and 19.
+  their cap cases, and the cap of 8 that `autoFixMaxRounds: 5` yields stays pinned by E3 in
+  `test-stop-enforcer-escapes.sh`. The two files run 39 Stops and 18 sessions.
 
 Both caps are 1200000 ms, taken from the per-check timestamps of the 14 green `main` runs
 from 36246568272 to 36556263889, each reporting 67 PASS: the routing part took
 480.8-828.4 s and the note part 478.9-835.2 s. Each cap therefore sits about 45% over its
-part's slowest green figure, leaves 600 s of its shard's envelope unspent so an overrun
-surfaces as a suite `TIMED_OUT`, and still covers the timed-out run's routing work (877.8 s
+part's slowest green figure and still covers the timed-out run's routing work (877.8 s
 through T36b) with a quarter to spare. The note part's range was measured BEFORE its loops
 were cut, so it bounds the trimmed file from above; the first green run of the two files is
-the figure to budget against from then on. These figures live here with their run ids,
+the figure to budget against. These figures live here with their run ids,
 because the contract-test note beside `windows-shard-7` records only the earlier 1700000
 raise. Growth in either file is paid for the way this split was — a shard of its own or a
 cheaper check — never by a raise past its measured range.
 
-**The note part no longer has `windows-shard-9` to itself.** `deferred-lease-refresh` (cap
-900000 ms) moved in AHEAD of it when `windows-shard-1` ran out of room, so the 600 s of unspent
-envelope above no longer holds for the note part. That suite took 735535-780910 ms on the runs
-that forced the move, which left the note part a grant just under 1019-1064 s against its own
-626985-713658 ms on the same runs. On shard 9 the envelope, not the 1200000 ms cap, therefore
-bounds the note part. It runs LAST because its cap is the larger one: an overrun of either suite
-surfaces as that suite's own `TIMED_OUT` instead of starving the other. The run ids and the shard
-sums are in `.claude/rules/windows-budget-best-solution-first.md`.
+**The note part shares `windows-shard-9` with `deferred-lease-refresh`** (cap 900000 ms), which
+runs AHEAD of it. That suite took 735535-780910 ms on the measured runs, which left the note
+part a grant just under 1019-1064 s against its own 626985-713658 ms on the same runs. On
+shard 9 the envelope, not the 1200000 ms cap, therefore bounds the note part. It runs LAST
+because its cap is the larger one: an overrun of either suite surfaces as that suite's own
+`TIMED_OUT` instead of starving the other. The run ids and the shard sums are in
+`.claude/rules/windows-budget-best-solution-first.md`.
 
-**The routing part no longer has `windows-shard-7` to itself either.** `versioned-plugin-upgrade`
-(cap 900000 ms) moved in AHEAD of it when `windows-shard-2` ran out of room. On the 29 all-green
-runs from 38309344682 to 38432294025 that suite took 247-480 s and the routing part 383-630 s. So
-the 600 s of unspent envelope above no longer holds for the routing part either: a run of it to
-its cap would have left 120-353 s of the envelope on those runs. While that suite stays under
-600 s, the routing part's 1200000 ms cap still binds before the envelope. A run of that suite to
-its own cap, plus the up to 45 s `tests/run-profile.js` spends ending it, leaves the routing part
-about 855-900 s, still above its slowest figure. The routing part stays LAST because its cap is
-the larger one. The shard sums are in `.claude/rules/windows-budget-best-solution-first.md`.
+**The routing part shares `windows-shard-7` with `versioned-plugin-upgrade`** (cap 900000 ms),
+which runs AHEAD of it. On the 29 all-green runs from 38309344682 to 38432294025 that suite
+took 247-480 s and the routing part 383-630 s, so a run of the routing part to its cap would
+have left 120-353 s of the envelope on those runs. While that suite stays under 600 s, the
+routing part's 1200000 ms cap binds before the envelope. A run of that suite to its own cap,
+plus the up to 45 s `tests/run-profile.js` spends ending it, leaves the routing part about
+855-900 s, still above its slowest figure. The routing part runs LAST because its cap is the
+larger one. The shard sums are in `.claude/rules/windows-budget-best-solution-first.md`.
 
 **Three conditions decide a refusal, and no one of them is sufficient.** (1) the
 `tool_result` is keyed by `tool_use_id` to an `Agent`/`Task` call whose
 `subagent_type` is the reviewer; (2) the host's own `is_error === true`; (3) the
-result text STARTS with a marker. Keying alone was the original design and it was
-wrong: for an `Agent` call the tool_result body IS the subagent's returned message,
-so a reviewer that merely quotes a denial literal — reviewing this module, for
-instance — was read as a refusal and the chain was abandoned with a real review in
+result text STARTS with a marker. Keying alone is not enough: for an `Agent` call
+the tool_result body IS the subagent's returned message, so a reviewer that merely
+quotes a denial literal — reviewing this module, for instance — would be read as a
+refusal and the chain abandoned with a real review in
 hand. **It is a diagnostic, never a gate:** an unreadable transcript, an absent
 `transcript_path`, or a missing module must leave every existing routing decision
 byte-identical, which is what T19 pins.
@@ -439,7 +368,7 @@ STANDALONE spelling that command verifies its own claim and refuses while any fi
 is changed, so a chain with real changes cannot be closed there — that would claim a
 review that never ran, and the branch says so. The Autopilot-BOUND spelling carries
 `--outcome no-changes` into the durable receipt and performs no worktree check at
-all; that is pre-existing in `zensu-log.sh` and is restated as a known gap below,
+all; that lives in `zensu-log.sh` and is restated as a known gap below,
 because this branch is what promotes the command to the only exit on offer. It also does NOT disclose the Stop cap count:
 a number plus "stop acting" is a wait-it-out recipe. Do not "fix" a wedge here by
 teaching an unqualified `--chain-done`.
@@ -448,7 +377,7 @@ teaching an unqualified `--chain-done`.
 Stop without routing the inner chain retires it, because after such a release this
 session's Stop never reaches the routing branches again and nothing else can remove
 a note keyed to its session: the three terminal early exits (no active session,
-implementation not complete, chain closed) — and note that the MIDDLE one is now also a
+implementation not complete, chain closed) — and note that the MIDDLE one is also a
 WRITE site, because it clears and then runs `zensu_impl_stop_nudge`, which re-mints when
 that Stop reaches its refused-spawn branch — both inner-guard escapes
 (`ZENSU_CHAIN=off`, `hooks.chainEnforcer=false`), every release in the Autopilot
@@ -467,8 +396,8 @@ tell whether the spawn was refused, and clearing on it would delete a correct
 diagnosis whenever a retry died of something else.
 
 **THREE sites mint a note, not two.** The routing site guarded by `REVIEWER_DENIAL_ROUTED`, the
-cap-release site guarded by hand with `tdd_code_review_done`, and — added by the
-implementing-turns counter — `zensu_impl_stop_nudge`'s refused-spawn branch, whose guard is
+cap-release site guarded by hand with `tdd_code_review_done`, and the implementing-turns
+counter's refused-spawn branch in `zensu_impl_stop_nudge`, whose guard is
 STRUCTURAL rather than a test: it runs only from the `SESSION_IMPL_COMPLETE != "true"` exit, and
 a chain whose implementation is not complete has no review to have converged. A caller added
 elsewhere breaks that silently, which is why the guard is named here rather than left to be
@@ -524,9 +453,9 @@ deadlock from the outside — it surfaces as unrelated checks failing two scenar
 later, because the Stop that held the lease finished in a degraded state. Cheap to
 prevent, expensive to diagnose.
 
-**Both halves of the note run under the workflow document's external lease.** It
-was the only artifact in `.zensu/state/` written with none, and its two halves are
-an unlink and a rename, so a clear could remove a note a concurrent write had just
+**Both halves of the note run under the workflow document's external lease.** Its two
+halves are an unlink and a rename, so without the lease a clear could remove a note a
+concurrent write had just
 published. `reviewer_note_locked` wraps both. The lease is an IMPROVEMENT, never a
 precondition — on failure the operation still runs unlocked, because failing to
 write the note must not change the Stop decision. That fallback is only sound while
@@ -545,13 +474,13 @@ resolves the directory from the RECORD's project root (`stateProjectRoot`, see
 yields — they agree by construction. Honoring an override would write the note where
 `/zensu:doctor` never looks and aim an unlink outside the session-bound directory.
 
-**The note's shape-and-freshness judgement now has TWO consumers and ONE implementation.**
+**The note's shape-and-freshness judgement has TWO consumers and ONE implementation.**
 `classifyDenialNote` (verdict `live|stale|rejected|missing`) and `denialKindsAllowed` in
-`hooks/lib/zensu-doctor-report.js` were EXTRACTED from `reviewerDenialRows` when
-§"Implementing-Phase Turn Counter" needed the same predicate to decide whether its chain row
-carries a refusal caveat; `ownRefusalNoteLive` is NOT an extraction but a new second consumer
-built on them, so the pre-existing `reviewerDenialRows` pins do not cover it — its only coverage
-is `C35pre`/`C35`/`C35s`/`C35r` in `tests/structure/test-impl-stop-counter.sh`. A change to the note schema therefore
+`hooks/lib/zensu-doctor-report.js` serve `reviewerDenialRows` and `ownRefusalNoteLive`, the
+consumer §"Implementing-Phase Turn Counter" uses to decide whether its chain row carries a
+refusal caveat. The `reviewerDenialRows` pins do not cover `ownRefusalNoteLive` — its only
+coverage is `C35pre`/`C35`/`C35s`/`C35r` in `tests/structure/test-impl-stop-counter.sh`.
+A change to the note schema therefore
 reaches a row in a different feature; the verdict is a WORD rather than a boolean precisely so
 the counting consumer keeps its three buckets while the qualifying one tests for `live`.
 
@@ -605,8 +534,8 @@ port's own loader, or drop the Config block's loader claims entirely.
 
 **Known gap in the Config block, accepted and recorded.** The `soleSource` axis is present-ness,
 not effectiveness: when BOTH default config files exist and both degrade to `{}`, each failure row
-says "the other config source still applies" while defaults actually apply. Not a regression — the
-predicate that preceded it was wrong in that case too — and self-limiting, because a row prints for
+says "the other config source still applies" while defaults actually apply. It is self-limiting,
+because a row prints for
 each broken file. Closing it means counting entries that are present AND not `loaderFallback`.
 For the REACTIVE module below, every constant here is host-coupled: a port copies
 `DENIAL_MARKERS`, `SPAWN_TOOL_NAMES` and the transcript envelope
@@ -623,14 +552,11 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
   first thing to check before suspecting the scanner.** The probe's
   `[ -f "$lib" ] && [ ! -L "$lib" ] || return 0` returns before `node` is ever invoked,
   leaving the verdict `none` and routing byte-identical — the correct fail-open
-  direction for a diagnostic, and indistinguishable from "no refusal happened". The
-  module first shipped in **v0.18.2**; a session on 0.18.1 or earlier gets the ordinary
+  direction for a diagnostic, and indistinguishable from "no refusal happened". A session
+  served by such an installation gets the ordinary
   `Resume the /zensu:build Phase 6 review sequence` directive on every Stop until the cap
-  releases, and `/zensu:doctor` stays silent because no note is ever minted. Measured
-  2026-08-22: three classifier-refused `zensu:code-reviewer` spawns, seven Stop
-  interceptions, zero notes — and the shipped scanner run against that same transcript
-  afterwards answered `status=blocked kind=auto-mode-classifier spawns=3 denials=3`. The
-  detection was never wrong; the code was not installed. Nothing surfaces the version
+  releases, and `/zensu:doctor` stays silent because no note is ever minted. Nothing
+  surfaces the version
   skew, so diagnose it by checking whether the executing plugin root actually contains
   `hooks/lib/reviewer-spawn-denial-v1.js` before touching the marker set. T36b pins the
   guard and its position ahead of the invocation.
@@ -659,8 +585,8 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
   another reason and the field can travel with it.
 - The zero-change terminus this branch offers is worktree-verified only in its
   STANDALONE spelling. An Autopilot-bound chain routes `--outcome no-changes` through
-  `autopilot_finish_tdd_attempt`, which never reads the worktree. That is pre-existing
-  — the untouched ordinary branch offers the same command — but this branch is the one
+  `autopilot_finish_tdd_attempt`, which never reads the worktree. The ordinary branch
+  offers the same command, but this branch is the one
   that tells the model the spawn cannot succeed, which promotes it to the only exit on
   offer. Closing that gap belongs in `zensu-log.sh`, not here.
 - A denial note is keyed to its own session, so no other session can retire it

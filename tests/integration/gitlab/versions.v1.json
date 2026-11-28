@@ -2,8 +2,8 @@
   "schema": "zensu-gitlab-live-versions-v1",
   "gitlab": {
     "image": "gitlab/gitlab-ce",
-    "tag": "19.5.3-ce.0",
-    "digest": "sha256:6863d156a1a477bd6f69fc674b671d0163cd8b06bf63bb17cc4a4a803b78b27c"
+    "tag": "19.6.1-ce.0",
+    "digest": "sha256:d3727f8b1a1ee6de44916bb9113f3dc40339dba2d6a6ad6ef331d0f239004056"
   },
   "glab": [
     {
@@ -23,11 +23,11 @@
       }
     },
     {
-      "version": "1.128.0",
+      "version": "1.133.0",
       "role": "newest-pinned",
       "sha256": {
-        "linux_amd64": "bc024819e7598b19429a199cd87f640d98b2b67416d8ad796f19e4260b57a7c7",
-        "darwin_arm64": "541cdde6a0f706b4b69fed9fb558b421a361f63408d072d78ffdf304aee04248"
+        "linux_amd64": "b17f858b8d700f1607f8ec02fe092a455da6a8dd18dac3eb6ccb09db1befd4bf",
+        "darwin_arm64": "d81ed2620b0d1374e2e0a8bfd90a3ef8945d177667d065a0945b301a1eada3e2"
       }
     }
   ]

@@ -8,7 +8,7 @@ paths:
 
 # Plugin-Data Guard (`runDataGuard` in `hook-dispatch-v1.js` + `plugin-data-guard-v1.js`)
 
-_Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+_Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 A PreToolUse check of the hook dispatcher, in-process and with two registry entries
 (`plugin-data-guard` on `Edit|Write|MultiEdit`, `plugin-data-guard-notebook` on `NotebookEdit`), that denies a file-mutating
@@ -19,8 +19,7 @@ Session Control records and the review-evidence leases.
 `docs/multi-repo-chains-spec.md` §6.1.2: all three PreToolUse hooks matching a `Write`
 answered `allow` for a target inside the store in every chain state — no chain armed, a
 vanilla chain, and a strict chain at `RED_WRITE`. Enumerate that matcher from `hooks.json`
-before claiming a count: the `.*` capability gate matches `Write` too, and missing it is the
-exact mistake §"Relaxable Bind Failures" already records twice.
+before claiming a count: the `.*` capability gate matches `Write` too.
 
 **A check of its own, not a branch in `pre-edit-tdd-reminder.sh`.** That hook returns early
 while no chain is armed, which is precisely the state in which the store is read.
@@ -52,12 +51,11 @@ becomes ongoing Edit-channel control over what a reader gets back from that reco
 path. The store's own bytes stay untouched, which is why it is a residual rather
 than a defect in the walk. (10) NOTHING BOUNDS THE PROJECT ROOT: the over-arm valve
 fires whenever the store contains or equals it, so a project root naming a directory
-INSIDE the store carves that subtree out. A residual of the valve, NOT a regression —
-the total disarm it replaced allowed the whole store in the same configuration — and
+INSIDE the store carves that subtree out. That is a residual of the valve, and
 bounding it would teach this module the store's own layout, which is a shape it does
 not own. AND THE EQUALITY CASE IS THE MAXIMUM: at `store === projectRoot` the carve-out
-is the whole store and the gate denies nothing — say "never more permissive than the
-total disarm it replaced", never "strictly stricter", because at equality the two are
+is the whole store and the gate denies nothing — say "never more permissive than a
+total disarm", never "strictly stricter", because at equality the two are
 identical. (11) THE VALVE'S PROJECT ROOT IS THE AMBIENT `CLAUDE_PROJECT_DIR`, which
 §"Foreign-Chain Row" in this same file records as NOT the authoritative anchor — every
 writer resolves the bound record's `project_root`. Where the two diverge, the ordinary
@@ -65,7 +63,7 @@ case for a session whose cwd is a worktree, the valve carves out the harness roo
 the session writes elsewhere, and `overArmUnchecked` stays false because the root DID
 resolve. Binding the record here would put a session lookup on every `Edit`. State the carriers precisely rather
 than as a uniform count: all eleven sit in the module header, `docs/gates.md` and the
-`docs/configuration.md` row; the entry point, now a wrapper, carries none.
+`docs/configuration.md` row; the entry point, a wrapper, carries none.
 
 **THE NET DELTA IS THE MAIN THREAD ONLY, and the measurement sentence must say so.**
 `hooks/lib/reviewer-capability-v1.js` already denies every NON-main principal a file-tool write
@@ -75,18 +73,17 @@ measured open, and is the justification. Never justify it with "every principal"
 hook's behaviour, false as a description of what it adds. That module therefore belongs on the
 coupled-site roster below, with the principal split spelled out.
 
-**RESOLUTION IMITATES THE KERNEL, and TWO bypasses of one class were measured before it did.**
-Both came from resolving the spelling before resolving the links. First, a DANGLING leaf symlink
-into the store: `realpath` cannot resolve a destination that does not exist yet, so the canonical
-spelling stayed outside while the tool's own `open(O_CREAT)` followed the link in. Second,
-`<symlink-into-store>/../x`: `path.resolve` collapses `..` LEXICALLY, so the link was never read.
-A THIRD was measured one round later — a case-variant spelling of the store prefix, which on a
-case-insensitive volume `lstat`s fine while `within`'s pure string compare reports it outside —
-and a FOURTH, a link whose own target traverses another link into the store. Four bypasses of one
-class in four rounds is the argument for the structural form: `resolveTargetPath` walks components left to right, follows a
-symlink at each one, and applies `..` to the ALREADY RESOLVED prefix, bounded on both the
-component count and the link hops. THREE properties carry it, and dropping any one reopens a
-measured bypass: the raw spelling and its base travel SEPARATELY into the walk (a `path.resolve`
+**RESOLUTION IMITATES THE KERNEL.** Four measured bypasses of one class are the argument for the
+structural form. The first two came from resolving the spelling before resolving the links. First,
+a DANGLING leaf symlink into the store: `realpath` cannot resolve a destination that does not exist
+yet, so the canonical spelling stays outside while the tool's own `open(O_CREAT)` follows the link
+in. Second, `<symlink-into-store>/../x`: `path.resolve` collapses `..` LEXICALLY, so the link is
+never read. A THIRD is a case-variant spelling of the store prefix, which on a case-insensitive
+volume `lstat`s fine while `within`'s pure string compare reports it outside, and a FOURTH is a
+link whose own target traverses another link into the store. `resolveTargetPath` walks components
+left to right, follows a symlink at each one, and applies `..` to the ALREADY RESOLVED prefix,
+bounded on both the component count and the link hops. THREE properties carry it, and dropping
+any one reopens a measured bypass: the raw spelling and its base travel SEPARATELY into the walk (a `path.resolve`
 on the way in collapses `..` before a link can be read); every EXISTING ordinary component is
 `realpath`ed, so both operands of `within` sit in one case namespace; and a link TARGET is
 re-split into segments and prepended to the remaining walk rather than adopted wholesale.
@@ -102,8 +99,8 @@ legitimate input reaches a bound. FOUR faults carry a stderr note, and the label
 the containment module failing to load, a payload the module cannot read (a PAYLOAD fault, not a
 load fault), `NO_STORE`, the one that turns the control off completely, and `NO_TARGET`, a
 payload with no path field — which is what a renamed or restructured host field looks like from
-here. The set is `SILENT_FAULT_IS_A_LIE` and it has FOUR members; every carrier of this sentence
-said three. A FIFTH note is not a fault: `overArmUnchecked` reports an armed decision taken
+here. The set is `SILENT_FAULT_IS_A_LIE` and it has FOUR members. A FIFTH note is not a fault:
+`overArmUnchecked` reports an armed decision taken
 without a project root, so the over-arm valve could not be evaluated. THREE further faults are outside the
 MODULE's reach, because it is never loaded: a missing `node` and a `hooks/lib` the entry point
 cannot enter, each noted by `hooks/pre-write-plugin-data-guard.sh`, and a
@@ -112,8 +109,8 @@ dispatcher that cannot start because `node` is missing blocks the call instead; 
 the entry point writes that note. They are
 NOT SILENT — each writes its own stderr note, and so do the exit-2 plugin-root
 branches — self-resolution failure and inherited-root mismatch, two distinct messages, so name
-them in the plural. Say "cannot carry the module's TYPED reason", never "cannot carry a note": the earlier
-wording named a structural limit where there was a choice, and `cannot` is the word that stops the
+them in the plural. Say "cannot carry the module's TYPED reason", never "cannot carry a note": that
+wording names a structural limit where there is a choice, and `cannot` is the word that stops the
 next maintainer from fixing it. What is genuinely structural is only that the module never runs.
 
 **No escape and no config flag**, deliberately — so `ESCAPE_STEMS` in
@@ -129,7 +126,7 @@ rename re-anchors every relative target in the plugin tree and fails only for re
 so the ordinary rows stay green; `hooks/lib/reviewer-capability-v1.js`, which owns a SUPERSET of this
 boundary for every non-main principal through a DIFFERENT predicate (`isInside`, the hand-copy
 pair `within` is held in lockstep with by W3b) AND a DIFFERENT RESOLVER
-(`canonicalCandidate` ↔ `resolveTargetPath`), pinned since the round that added `G39` in
+(`canonicalCandidate` ↔ `resolveTargetPath`), pinned by `G39` in
 `tests/structure/test-plugin-data-guard.sh` — a SLICED source scan over the two resolver bodies
 with a control on EACH side, which is weaker than one shared implementation and stronger than
 nothing: it sees an element deleted from either resolver and nothing else — they diverge in TWO ways, and the second is what makes
@@ -145,14 +142,13 @@ paragraph, which names this module as the second consumer; both matcher entries 
 the exported set — a matcher widened alone yields a hook that runs and allows with no signal);
 the hook count in `docs/configuration.md` plus every `#hooks-N` anchor, INCLUDING the one in
 `docs/architecture.md` — which H3 in `test-readme-hook-count-sync.sh` does cover, since it binds
-that file alongside `docs/configuration.md` and `README.md`; an earlier wording here called it
-unpinned and contradicted §"Reviewer-Spawn Grant" two sections up; the flagless-hook
+that file alongside `docs/configuration.md` and `README.md`; the flagless-hook
 roster in `docs/architecture.md`; the per-gate roster in `docs/session-control.md` (this gate
 binds no session, so all three columns are identical); `docs/gates.md`'s gate COUNT in its own
 intro, which no test checks; the README docs-index row; the suite manifest entry in
 `tests/profiles/promptfoo-local-only.v1.json` together with the unit file's entry in
 `tests/profiles/unit-files.v1.json`; and the seam-consumer sentence in `bash-source-write-parse.js` —
-this module is its SECOND consumer, so removing `within` or `msysToDrive` now degrades a DENY
+this module is its SECOND consumer, so removing `within` or `msysToDrive` degrades a DENY
 gate to allow, not just a skill's rendering.
 
 **Version: `minor`.** Walked against §"Runtime Lineage": adding a hook is a `patch` UNLESS it
@@ -162,14 +158,14 @@ changes, which is the disqualifier that bullet spells out.
 **Known gaps, accepted and named:** the Windows half is UNVERIFIED — the suite is in
 `ciStructureTests` and NOT in `windows-ci.v1.json`, so it never runs on the Windows PR shard — but
 the weekly Windows Safety structure shard DOES run it, so the Windows half stays unverified only
-until that run reports green. Never write "never runs on Windows". A `node --test` driver DOES exist since the round that added `tests/structure/plugin-data-guard-v1.test.js`, and it injects `decide()`'s
+until that run reports green. Never write "never runs on Windows". A `node --test` driver DOES exist, `tests/structure/plugin-data-guard-v1.test.js`, and it injects `decide()`'s
 `isWindows` seam on every call and reaches the containment export-shape arm through a
 copied module beside a stub sibling parser — but the platform-conditional separator class still means the branch
 where a backslash IS a separator is exactly the one that unverified platform would exercise. Say
 "unverified", never "covered". The resolver pair (`resolveTargetPath` ↔ `canonicalCandidate`) is pinned by the
 sliced `G39` scan and its two controls, which catches a deleted element on either side but cannot
-see a semantic divergence; one extracted resolver is the durable end state and is deliberately NOT this
-change, because swapping the sibling's resolver alters verdicts for non-main principals in
+see a semantic divergence; one extracted resolver is the durable end state and is deliberately NOT done
+here, because swapping the sibling's resolver alters verdicts for non-main principals in
 sessions an older runtime still serves — its own `minor` decision. `/zensu:doctor` carries no
 row for this gate, so a store that was never configured is visible only in the hook's stderr note.
 

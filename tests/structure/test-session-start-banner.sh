@@ -5,6 +5,7 @@
 # guard's fourth arm and the hooks.defaultDeliveryRoute disclosure by R14 in
 # test-delivery-route.sh.
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 # Pins the SessionStart "Zensu active" banner + agent primer (0.4.0):
 # user banner via systemMessage, agent primer via additionalContext, both gated by

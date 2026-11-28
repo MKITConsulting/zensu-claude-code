@@ -104,7 +104,7 @@ probes only on attempts 0, 20, 60, 140 and 300 (`externalIdentityProbeAttempt`):
 lease polls every 50 ms for 200 attempts, so it probes at 0, 1, 3 and 7 s; `withFileLock` polls
 every 20 ms for 500 attempts and reaches all five.
 
-On win32 the rule now judges only records without a usable marker: records written by a runtime
+On win32 the rule judges only records without a usable marker: records written by a runtime
 from before holder markers, by a holder whose self-probe failed, by a holder whose marker create
 failed on a name proven free, and records whose marker reads `unreadable`. Measured cost of the PowerShell read on run
 36716394774 (`windows-2022` and `windows-2025`, 4 vCPU, Node 20.20.2), warm p50 per call:
@@ -122,7 +122,7 @@ is why `_tdd_locked_run` keeps the lease in the coprocess keeper on bash 4+. Lin
 ## The `created_at` clamp
 
 `createOwnedArtifact` writes `created_at` through `lockRecordCreatedAt`:
-`max(Date.now(), ceil(performance.timeOrigin))`. `nowIso` is unchanged, so context records and
+`max(Date.now(), ceil(performance.timeOrigin))`. `nowIso` does not clamp, so context records and
 workflow documents keep their plain timestamps. The OS creation time preceded
 `performance.timeOrigin` by 4–33 ms in 48 of 48 samples on the same run, and the unit case `a lock
 record never dates from before the process start its readers see` re-checks that premise on
@@ -206,7 +206,7 @@ their `ps -ww -p <pid> -o args=` check. The operator account of every row is
 ## Tests
 
 `tests/session-control/session-control-core-v1.test.js`. Portable, with `process.platform`
-faked as `win32` (`WIN32_LOCK_CHILD`), each failing on the core before this change. Three need
+faked as `win32` (`WIN32_LOCK_CHILD`). Three need
 nothing more: `a free holder marker reclaims a young record whose owner pid is alive, without a
 start-time read`; `a holder marker that is not a free empty file proves nothing, so a young live
 owner keeps its lock without a start-time read`; and `a holder marker that is not a free empty

@@ -15,7 +15,9 @@ suite covers the non-deterministic complement: the model's behaviour.
 
 - **`scenarios/reaction-configured.yaml`** — a confident nudge ("~60% of the configured 1M window"). The
   model must open with `CONTEXT-NUDGE-HANDLING: RELAY-TO-USER`, surface `/compact` as a user option (a
-  "you …/compact" framing), not claim to self-run it, and still answer the user's question.
+  "you …/compact" framing), not claim to self-run it, and still answer the user's question. The two
+  first-line graders read the reply's prose through the envelope extractor of the zen-mode eval,
+  because the wrapper opens every reply with an `[assistant_text]` marker line.
 
 ## Why this design
 
@@ -25,6 +27,10 @@ suite covers the non-deterministic complement: the model's behaviour.
 - **No `llm-rubric`/grader** — matching every eval in this repo. Assertions are `type: javascript` over
   the model output, keyed on a forced decision token (`CONTEXT-NUDGE-HANDLING: RELAY-TO-USER`) and literal
   markers. `repeat: 3` averages model variance.
+- **The graders are unit-tested.** `tests/structure/context-nudge-assertions.test.js`, driven from
+  `tests/structure/test-context-nudge-hook.sh` (which CI runs), compiles every assertion body and runs it
+  against canned replies in the wrapper envelope, so a grader that misreads the envelope fails CI
+  instead of a nightly run.
 - **Live + advisory.** Running this costs API credits and can flake on model variance — NOT a CI gate.
   Only the deterministic shape pin
   [`tests/structure/test-promptfoo-context-nudge-reaction.sh`](../../tests/structure/test-promptfoo-context-nudge-reaction.sh)

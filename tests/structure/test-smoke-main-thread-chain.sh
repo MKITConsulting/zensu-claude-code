@@ -12,6 +12,7 @@
 #   4. post-review in-thread routing + max-round chainDone
 #   5. hooks.json + plan-approved wiring
 set -u
+unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID ZENSU_CCD_STORE ZENSU_CCD_EXTRA_STORES 2>/dev/null || true
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
