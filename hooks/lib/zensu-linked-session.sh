@@ -5,6 +5,9 @@ declare -F zensu_linked_session_state >/dev/null 2>&1 \
   || source "$_ZENSU_LINKED_SESSION_LIB_DIR/zensu-config.sh"
 declare -F zensu_write_session_marker >/dev/null 2>&1 \
   || source "$_ZENSU_LINKED_SESSION_LIB_DIR/zensu-marker-write.sh"
+declare -F zensu_supervise >/dev/null 2>&1 \
+  || { [ -f "$_ZENSU_LINKED_SESSION_LIB_DIR/zensu-supervise.sh" ] && [ ! -L "$_ZENSU_LINKED_SESSION_LIB_DIR/zensu-supervise.sh" ] \
+    && source "$_ZENSU_LINKED_SESSION_LIB_DIR/zensu-supervise.sh" 2>/dev/null; }
 
 _zensu_linked_session_write() {
   local project_dir="$1" marker="$2" line="$3"
@@ -37,31 +40,21 @@ zensu_linked_session_pending() {
   command -v node >/dev/null 2>&1
 }
 
+_zensu_linked_session_deadline_action() {
+  return 124
+}
+
 _zensu_linked_session_answer() {
-  local project_dir="$1" session_id="$2" budget="${3:-}" pid watchdog rc
+  local project_dir="$1" session_id="$2" budget="${3:-}"
   if [ -z "$budget" ]; then
     ZENSU_LINKED_SESSION_ID="$session_id" ZENSU_LINKED_PROJECT_ROOT="$project_dir" \
       node "$_ZENSU_LINKED_SESSION_LIB_DIR/linked-session-v1.js" 2>/dev/null
     return $?
   fi
-  [ "$budget" -gt 0 ] || return 124
-  set -m 2>/dev/null
+  [ "$budget" -gt 0 ] && declare -F zensu_supervise >/dev/null 2>&1 || return 124
   ZENSU_LINKED_SESSION_ID="$session_id" ZENSU_LINKED_PROJECT_ROOT="$project_dir" \
-    node "$_ZENSU_LINKED_SESSION_LIB_DIR/linked-session-v1.js" </dev/null 2>/dev/null &
-  pid=$!
-  (
-    set +m 2>/dev/null
-    sleep "$budget"
-    kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null
-  ) </dev/null >/dev/null 2>&1 &
-  watchdog=$!
-  set +m 2>/dev/null
-  wait "$pid" 2>/dev/null
-  rc=$?
-  kill -KILL -- "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null
-  wait "$watchdog" 2>/dev/null
-  [ "$rc" -eq 137 ] && return 124
-  return "$rc"
+    zensu_supervise _zensu_linked_session_deadline_action "$budget" "" \
+    node "$_ZENSU_LINKED_SESSION_LIB_DIR/linked-session-v1.js" </dev/null 2>/dev/null
 }
 
 zensu_linked_session_resolve() {
