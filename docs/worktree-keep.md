@@ -24,8 +24,8 @@ it, which is why the branch-drift detector below exists as the safety net.
 
 Every hook anchors on the bound session record's project root. The SessionStart half falls back
 to the session's `cwd` while the record is not readable yet, which is the ordinary state of a
-fresh start, and the SessionEnd half always does, because the session binder accepts no
-`SessionEnd` event; the UserPromptSubmit half does NOT — an unbound session gets no
+fresh start, or when the recorded root fails verification, and the SessionEnd half always does,
+because the session binder accepts no `SessionEnd` event; the UserPromptSubmit half does NOT — an unbound session gets no
 drift disclosure at all, which is listed under Limits below. A payload that names no
 `.claude/worktrees` component is declined before any helper runs.
 

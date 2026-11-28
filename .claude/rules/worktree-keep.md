@@ -128,8 +128,9 @@ accumulation when SessionEnd never arrives.
 
 **Three hooks, all ADVISORY, all main-principal, all behind the permissive `hooks.worktreeKeep`.**
 The SessionStart and SessionEnd halves anchor on ONE root in ONE order — the bound record's native project root first, the
-payload `cwd` only when the bind fails (a fresh start whose record is still being minted, and
-every SessionEnd, whose bind always fails: see the gap list) — and
+payload `cwd` whenever the record yields no verified root and key: the bind fails (a fresh start
+whose record is still being minted, and every SessionEnd, whose bind always fails: see the gap
+list) or the recorded root fails verification — and
 hand node the host-native spelling the bind exports, never the MSYS one `zensu_resolve_project_dir`
 renders on Git Bash; each also declines, before any helper is sourced, a payload that names no
 `.claude/worktrees` component, so a session in a plain checkout pays no bind on this path — a
@@ -392,7 +393,8 @@ the hooks read, before the cut:
 
 `zensu_hook_enabled worktreeKeep` started no `node` already, through its shell pre-check. Three
 cuts bring every run whose root verifies, or whose session record does not exist yet, to at most
-four `node` children and change no answer: `_zensu_config_bounded_int`
+four `node` children and change no answer for a session id the binder accepts; the payload
+reader's refusals below are the one narrowing: `_zensu_config_bounded_int`
 takes the same pre-check, so the idle-hours getter answers 72 in shell while no file names
 `worktreeKeepIdleHours` (`.claude/rules/hook-process-budget.md` §"Config pre-check"); the
 SessionStart half reads `source` as the optional field of its own principal check,
@@ -433,7 +435,8 @@ because a native `node` on Windows starts `git.exe` past any shim.
 rates four `node` children cost 6.4 to 11.6 s; the prompt half's two `git` children bring a
 prompt to 6.9 to 12.4 s and the SessionStart half's three or four bring a start to 7.2 to 13.2 s,
 so 10 s falls inside both ranges, and the three registrations moved to `"timeout": 20` (`K2`). A
-config file the pre-check cannot clear for either key sends both reads to `node`, six children:
+set `ZENSU_CONFIG`, or a config file the pre-check cannot clear for either key, sends both reads
+to `node`, six children:
 up to 18.2 s on a prompt, 19.0 s on a start and 17.4 s on a session end. A bound start whose root
 also fails verification adds the payload reader, up to 21.9 s, past the registration. Supervision by
 `hooks/lib/zensu-prompt-deadline.sh` was weighed and not taken: these hooks emit a rare notice and
@@ -624,8 +627,9 @@ record, key set or hook, so it is `patch` on the same walk.
 - **The per-prompt cost is counted, not timed under load.** Past the payload pre-filter every
   prompt of a managed-worktree session pays four `node` children and two `git` children (the
   process-budget paragraph above). Its burst cost is derived from the reminder's per-start
-  figures, not from a timing of this hook in a burst, and a config file that names
-  `worktreeKeepIdleHours` adds the getter's `node` child back.
+  figures, not from a timing of this hook in a burst, and a config state the shell pre-check
+  cannot clear (`docs/configuration.md` §"Config Resolution Order") adds the `node` child of each
+  read it cannot rule out.
 - **SessionEnd never binds.** `ALLOWED_EVENTS` in `hooks/lib/claude-hook-session-v1.js` names no
   `SessionEnd`, so `zensu_bind_hook_session` fails on every SessionEnd payload (measured: the bind
   child runs and no verification follows it) and the end half always anchors on the payload `cwd`
