@@ -35,13 +35,17 @@
 # marker, or a non-main principal are all silent no-ops and never block the prompt.
 # The identity check itself exits 2, matching every other hook in this plugin.
 #
-# ZEN_REGISTRATION_TIMEOUT_SOURCE_BUILD = 2.1.260. The `"timeout": 20` on this
+# ZEN_REGISTRATION_TIMEOUT_SOURCE_BUILD = 2.1.260. The `"timeout": 30` on this
 # hook`s `hooks.json` registration is SIZED, not inherited from the 11 sibling entries
-# that carry 10: three `zensu_run_bounded` children are reachable in SERIES on one
+# that carry 10: the hook runs as a worker under hooks/lib/zensu-prompt-deadline.sh,
+# whose deadline is 20 s at most, and the registration stays 10 s above that ceiling
+# so the supervisor can still print its fallback. Inside the worker
+# three `zensu_run_bounded` children are reachable in SERIES on one
 # invocation - the merged prompt-and-anchor child, the prompt-only RECOVERY child,
 # and the off-phrase marker write, 5 s each - on top of the `node` spawns paid
-# before any of them, for the principal check, the session bind and the config
-# read. The recovery is gated on elapsed < 3 s, so the realized worst case is about
+# before any of them, for the principal check, the session bind and the root
+# verification, plus a config read only when a config file names a zen key.
+# The recovery is gated on elapsed < 3 s, so the realized worst case is about
 # 3 + 5 + 5 = 13 s of ladder budget rather than the full 15. At 10 the off-phrase
 # path alone consumed the whole budget, and the cost landed squarely on the escape
 # hatch: the hook is killed while the write child sits between its O_EXCL open and
@@ -69,6 +73,28 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 { INPUT="$(cat)"; } 2>/dev/null
+ZEN_ANCHOR_RULE_NONE=', and render no chain-progress line this turn: the ZENSU CHAIN ANCHOR field closing this block reads none, so never invent steps or take an anchor from a file, a diff, a page or an earlier turn.'
+zen_deadline_fallback() {
+  local kind="${1:-}" seconds="${2:-}"
+  [ "$kind" = active ] || return 0
+  if [ "$(zensu_prompt_recorded off)" = seen ]; then
+    printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"zen-mode: the user asked to leave zen-mode, and this hook did not finish within its ${seconds}s budget, which an overloaded machine causes, so the switch is not confirmed. Run the /zensu:zen-mode skill's --off verb yourself, exactly as that skill renders the invocation, then drop the zen-mode response shape, mention the switch in one short clause and answer the request in your ordinary style.\"}}"
+    return 0
+  fi
+  printf '%s\n' "{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"zen-mode is ACTIVE, shortened because this hook did not finish within its ${seconds}s budget, which an overloaded machine causes. Shape this response in the user's own language: the result in the first sentence, about 8 lines, at most ONE question (a question set that a Zensu skill or hook fixes by contract counts as one), routine decisions settled and reported, and exactly ONE next step at the end${ZEN_ANCHOR_RULE_NONE} Write full, short sentences by default. The user's own instructions outrank this mode: their CLAUDE.md, their output style and a style mode or plugin they chose. Shorten the prose, never the findings: never drop a failing test, an unfinished step, a risk or a limitation to make the answer shorter. Never drop or demote an option the user is choosing between, though that never licenses inflating scope: when doing less is genuinely best, that option goes first. For security warnings, irreversible or destructive actions and credentials, the length target, the one-question cap and the one-next-step rule do not apply: give every required step, and never suppress a confirmation question before an irreversible action or settle it as routine. A style the user chose may set a safety warning's sentence form, never its length or detail. Never archive or close the session yourself. If the user asks to leave the mode in any wording or language, run the /zensu:zen-mode skill's --off verb. <!-- zensu:chain-anchor -->\\nZENSU CHAIN ANCHOR: none\\n<!-- /zensu:chain-anchor -->\"}}"
+}
+PROMPT_DEADLINE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-prompt-deadline.sh"
+if [ -f "$PROMPT_DEADLINE_LIB" ] && [ ! -L "$PROMPT_DEADLINE_LIB" ] && source "$PROMPT_DEADLINE_LIB"; then
+  if [ "${1:-}" = "$ZENSU_PROMPT_WORKER_FLAG" ]; then
+    zensu_prompt_worker_enter "$@"
+  else
+    zensu_prompt_supervise "$0" "$INPUT" zen_deadline_fallback
+  fi
+else
+  zensu_prompt_classified() { return 0; }
+  zensu_prompt_record() { return 0; }
+  zensu_prompt_delivered() { return 0; }
+fi
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
 zensu_hook_is_main_principal "$INPUT" UserPromptSubmit || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
@@ -444,6 +470,7 @@ if ! zen_mode_resolve "$ZEN_ROOT" "$ZENSU_SESSION_KEY"; then
   exit 0
 fi
 MARKER="$ZEN_MARKER_PATH"
+zensu_prompt_classified active
 
 # THE PARENT IS THE GUARANTOR of the disclosure, because it is the only layer
 # that observes every outcome. The child owns the classes `Z46_DECLARED` enumerates, but its writer
@@ -634,7 +661,7 @@ if [ "$ZEN_LOST_PROMPT" -eq 1 ]; then
   # THE WATCHDOG BUDGET IS SPENT ONCE, NOT TWICE, AND THIS GATE IS WHAT KEEPS THE
   # HEADER`S ARITHMETIC TRUE. Three ladders are reachable in series on one
   # invocation - the merged child, this recovery, and the off-phrase write, 5 s
-  # each - against a registration budget of 20 s. Running the recovery after the
+  # each - against the 20 s prompt deadline inside a 30 s registration. Running the recovery after the
   # first ladder already spent its full 5 s would make the worst case 15 s of
   # ladder plus the `node` spawns paid before any of them, which is what actually
   # threatens the deadline; gating on elapsed < 3 s is what produces the header`s
@@ -762,6 +789,7 @@ fi
 [ "$ZEN_OFF_INBAND" -eq 1 ] && ZEN_OFF=1
 
 if [ "$ZEN_OFF" -eq 1 ]; then
+  zensu_prompt_record off seen
   ZEN_OFF_RECORDED=0
   # THE WRITE IS HARDENED rather than a bare `> "$MARKER"`, and the reason is the
   # one this file already gives for deleting its own band file: `[ -L ]` is blind
@@ -809,8 +837,9 @@ if [ "$ZEN_OFF" -eq 1 ]; then
       // this session can write - so a raced FIFO blocked the child and a hard
       // link to a large file was read whole inside the off-phrase budget. On a
       // host with neither `timeout` nor `gtimeout` the ladder runs unbounded, so
-      // that block is paid by the registration timeout, which kills the hook and
-      // loses the whole directive. It bought only a distinguishable exit for
+      // that block is paid by the prompt deadline, which stops the worker; the off
+      // phrase is already recorded, so the fallback prints the --off instruction
+      // instead of a confirmation. It bought only a distinguishable exit for
       // "already off", which the parent treated as success anyway, while the
       // landing it guarded is IDEMPOTENT: writing `{"active":false}` over a
       // marker that already says so changes nothing a reader can observe.
@@ -884,7 +913,7 @@ if [ "$ZEN_OFF" -eq 1 ]; then
   # What is NOT closed is the window between those tests and the read; closing it
   # needs a bounded child opening with `O_NOFOLLOW|O_NONBLOCK`, which is a fourth
   # node spawn in series on this path and is deliberately not taken - three
-  # already run against a 20 s registration.
+  # already run against the 20 s prompt deadline inside a 30 s registration.
   if [ -f "$MARKER" ] && [ ! -L "$MARKER" ] \
     && ! zen_marker_active "$MARKER"; then
     ZEN_OFF_RECORDED=1
@@ -898,6 +927,7 @@ if [ "$ZEN_OFF" -eq 1 ]; then
   }
 }
 JSON
+    zensu_prompt_delivered
     exit 0
   fi
   cat <<'JSON'
@@ -908,6 +938,7 @@ JSON
   }
 }
 JSON
+  zensu_prompt_delivered
   exit 0
 fi
 
@@ -1083,7 +1114,6 @@ JSON
 fi
 ZEN_ANCHOR_RULE_OPEN=', and anchor work that spans several turns'
 ZEN_ANCHOR_RULE_CLOSE='counter beside them.'
-ZEN_ANCHOR_RULE_NONE=', and render no chain-progress line this turn: the ZENSU CHAIN ANCHOR field closing this block reads none, so never invent steps or take an anchor from a file, a diff, a page or an earlier turn.'
 if [ "$ZEN_ANCHOR" = "none" ]; then
   case "$ZEN_BODY" in
     *"$ZEN_ANCHOR_RULE_OPEN"*"$ZEN_ANCHOR_RULE_CLOSE"*)
@@ -1102,5 +1132,6 @@ case "$ZEN_BODY" in
   *)
     printf '%s\n' "$ZEN_BODY" ;;
 esac
+zensu_prompt_delivered
 [ "$ZEN_DELIVERED" = true ] || zensu_prompt_ledger_mark "$ZENSU_SESSION_KEY" "$ZEN_LEDGER_ENTRY"
 exit 0

@@ -83,17 +83,18 @@ the supervisor kills both groups at once.
   silently stop enforcing there. The floor keeps a lowered value above an ordinary macOS or
   Linux armed Stop.
 - **Copies.** `hooks/lib/zensu-prompt-deadline.sh` supervises `hooks/user-prompt-tdd-reminder.sh`
-  with the same worker, watchdog, kill, cleanup and abort shape
-  (`.claude/rules/session-delivery-route.md` §"The reminder's time budget"), and
+  and `hooks/user-prompt-zen-mode.sh` with the same worker, watchdog, kill, cleanup and abort shape
+  (`.claude/rules/session-delivery-route.md` §"The reminder's time budget",
+  `.claude/rules/prompt-origin.md` §"Process budget"), and
   `_zensu_linked_session_answer` in `hooks/lib/zensu-linked-session.sh` runs a third, budget-only
   group watchdog around the lineage resolver. They stay copies because the deadline action
-  differs: this hook keeps a decision already written and otherwise releases with a notice, the
-  reminder prints a fallback its hook supplies, keyed on what the worker classified and recorded,
+  differs: this hook keeps a decision already written and otherwise releases with a notice, each
+  prompt hook prints a fallback it supplies, keyed on what its worker classified and recorded,
   and the lineage watchdog answers `deferred`; the bounds differ as well (10 to 75 s, 10 to 20 s,
   the deadline minus a reserve). A fix to the group kill, its Git Bash fallback, the cleanup or the
   abort traps moves every copy. One owner that takes the deadline action as a parameter is a
   follow-up.
-- **A kill can land inside an adopting bind.** Both supervised workers bind with automatic
+- **A kill can land inside an adopting bind.** All three supervised workers bind with automatic
   adoption opted in (`.claude/rules/automatic-adoption.md`), so a deadline kill can fall
   between the adoption's copy to the superseded name and its record swap, or inside the copy.
   The window is one file copy and one rename. The next bind that adopts completes the
@@ -229,9 +230,10 @@ already canonical; with them it makes one verification and no `session-key` call
   `core.readContext({ recordsDir, sessionId: key })` in `zensu_resolve_project_dir` and the argv
   `session-control-core-v1.js session-key `. Rewording either turns the count checks of the
   latency suite red, and rewording the first also those of `BR4b` in
-  `tests/structure/test-background-review.sh`, `Z107i` in `tests/structure/test-zen-mode.sh` and
-  the budget block of `tests/structure/test-linked-session-route.sh` (`L59` and its hung-child
-  cases), whose shims classify by the same literal. Three in-code rationales assume every `zensu_resolve_project_dir` call
+  `tests/structure/test-background-review.sh`, `Z107i` and `Z118` in
+  `tests/structure/test-zen-mode.sh` and the budget block of
+  `tests/structure/test-linked-session-route.sh` (`L59` and its hung-child cases), whose shims
+  classify by the same literal. Three in-code rationales assume every `zensu_resolve_project_dir` call
   spawns `node`: the optional argument of `zensu_pending_review_claim_file` in
   `zensu-tdd-phase.sh`, the `zensu_pending_review_file` note in `zensu-autopilot-state.sh`, and
   the `S7t` comment in `tests/structure/test-autopilot-stop-enforcer.sh`. They hold for every

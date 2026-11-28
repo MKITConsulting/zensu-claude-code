@@ -14,8 +14,9 @@
 # into the list above, because it changes what the deadline below is. The zen-mode
 # children fire on EVERY prompt of a zen-mode session, so this constant bounds a
 # per-prompt caller as well as the two end-of-turn ones — one deadline across all of
-# them, and `Z45` in `tests/structure/test-zen-mode.sh` is what holds it under that
-# hook's own registration timeout. Raising it is therefore no longer a Stop-path-only
+# them, and `Z45` in `tests/structure/test-zen-mode.sh` is what holds it under the
+# floor of that hook's prompt deadline and under its registration timeout. Raising it
+# is therefore no longer a Stop-path-only
 # decision.
 #
 # The two Stop-path children it was created for used to carry SEPARATE ladders, so the arm added to one was missing
@@ -63,10 +64,12 @@
 # understated it. On the Stop path it costs a DIAGNOSTIC: the whole Stop hook runs under
 # the internal deadline in `hooks/lib/zensu-stop-deadline.sh`, backed by a host `timeout`
 # in `hooks.json`, so a hung child here ends with the hook rather than holding the session.
-# On the zen-mode path the registration DOES carry a bound — `"timeout": 20` —
-# so the host kills the whole hook instead, and that turn loses the entire injected
-# directive: the mode contract, the anchor AND the in-band `zen off` escape, which is the
-# only way out of the mode. On the `--tdd-complete` path it costs the VERB: that call is
+# On the zen-mode path the hook runs as a worker under the 20 s deadline of
+# `hooks/lib/zensu-prompt-deadline.sh`, inside a `"timeout": 30` registration, so the
+# deadline stops the worker instead: once the mode resolved active the turn gets the
+# shortened directive, or the `--off` instruction when an off phrase was recorded, and
+# only a hang before that, or the host's own kill at 30 s, loses the entire injected
+# directive. On the `--tdd-complete` path it costs the VERB: that call is
 # what closes a chain, its registration is a plain Bash invocation with no host timeout at
 # all, and `|| return 0` at the call site tests an exit status a hang never produces — so
 # the chain simply never completes. Same arm, three very different prices.

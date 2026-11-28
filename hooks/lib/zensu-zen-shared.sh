@@ -134,11 +134,12 @@ zen_mode_resolve() {
     # persistent plant is closed by the arms above; the RACED one is not - anything
     # with write access to `.zensu/state/`, which is in-session by construction, can
     # rename a FIFO or a symlink into place between the tests and this read. What
-    # bounds it in the hook is the `"timeout": 20` on its registration, and losing
-    # that turn loses the whole directive. DELIBERATELY NOT wrapped in
-    # `zensu_run_bounded` either: this is the hottest path in the plugin, and the
-    # shared watchdog ladder's own deadline plus the child would approach the
-    # registration timeout rather than stay under it. The strongest fix is a single
+    # bounds it in the hook is the 20 s deadline of hooks/lib/zensu-prompt-deadline.sh,
+    # inside a 30 s registration, and because this read runs before the hook
+    # classifies the prompt, losing that turn loses the whole directive. DELIBERATELY
+    # NOT wrapped in `zensu_run_bounded` either: this is the hottest path in the
+    # plugin, and the shared watchdog ladder's own deadline plus the child would
+    # approach the prompt deadline rather than stay under it. The strongest fix is a single
     # bounded child that opens with `O_NOFOLLOW|O_NONBLOCK` and reads from that
     # descriptor, which is what `readRegularFileSnapshot` already does one directory
     # over - deliberately NOT taken, because it puts a `node` spawn on that same
