@@ -55,7 +55,8 @@ Both are handled by Session Control v1:
   anchor. A fork inherits no workflow state: it starts with its own baseline
   document, and Claude Code's `SessionStart` payload carries no parent session
   id to inherit from. The one exception is the delivery route of a session that
-  another Claude Desktop session started: it inherits the parent's recorded `build`,
+  another Claude Desktop session started, or that the user forked or continued in the
+  desktop app: it inherits the parent's recorded `build`,
   read from the desktop app's own session records rather than from the payload
   (see the `user-prompt-tdd-reminder.sh` row in `docs/configuration.md`); no
   chain, phase or other marker carries over. **The loss of the parent's chain is silent, and

@@ -30,8 +30,8 @@ a plan approval (four options: `/zensu:autopilot`, `/zensu:build`, `/zensu:pilot
 implement directly) and `hooks/user-prompt-tdd-reminder.sh` on a code request while no
 chain is active (Zensu workflow, direct and, while a person is present, `/zensu:autopilot`). Both read this session's marker
 first and ask only when nothing decided. A linked session — one another session started
-in Claude Desktop — that has no marker of its own takes its parent's `build`, so the user
-who chose the Zensu workflow there is not asked again. The marker records exactly one of
+in Claude Desktop, or a fork the user starts or continues there — that has no marker of its
+own takes its parent's `build`, so the user who chose the Zensu workflow there is not asked again. The marker records exactly one of
 two answers — the Zensu workflow (`build`) or direct implementation (`direct`). It never
 records `/zensu:autopilot` or `/zensu:pilot`: those push a branch, open a pull request
 or mutate tracked feature state, so they stay choices made per plan or request, through
@@ -122,8 +122,10 @@ Both hooks resolve the route in this order, and `zensu-config.sh` owns the ladde
 5. **ask** — the question, exactly as before
 
 A linked session inherits `build` only: a parent's `direct` and a parent's released choice
-pass nothing on. Its first prompt is the brief the parent session wrote, not the user's
-own text, so a route named in that brief decides nothing.
+pass nothing on. When another session started it, its first prompt is the brief that session
+wrote, not the user's own text, so a route named in that brief decides nothing. A fork the user
+starts or continues in Claude Desktop is the exception: its first prompt is the user's own, so a
+route named there counts as usual.
 
 Neither the marker nor the config key can name `/zensu:autopilot` or `/zensu:pilot`.
 The helper refuses every verb but the four above, and the hooks read any other config

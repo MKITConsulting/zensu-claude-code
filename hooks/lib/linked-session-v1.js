@@ -38,6 +38,7 @@ const REPOSITORY = Object.freeze({
 const TURNS = Object.freeze({
   FIRST: 'first',
   LATER: 'later',
+  FORK: 'fork',
 });
 
 const REASONS = Object.freeze({
@@ -98,6 +99,13 @@ function verdict(kind, reason, extra = {}) {
 function turnOf(record) {
   const completed = record.completedTurns;
   return completed === undefined || completed === null || completed === 0 ? TURNS.FIRST : TURNS.LATER;
+}
+
+function isUserFork(record, spawnedFrom, parentSession) {
+  if (spawnedFrom.userFork === true) return true;
+  const source = record.forkedFromSessionId;
+  return typeof source === 'string' && HOST_SESSION_RE.test(source)
+    && source !== parentSession && source !== record.sessionId;
 }
 
 function absoluteStore(value, platform) {
@@ -388,7 +396,7 @@ function resolveVerdict(input, detail) {
     return verdict(KINDS.NONE, REASONS.MALFORMED_PARENT);
   }
   if (detail) detail.parentSession = parentSession;
-  const turn = turnOf(own.record);
+  const turn = isUserFork(own.record, spawnedFrom, parentSession) ? TURNS.FORK : turnOf(own.record);
 
   const parent = readDesktopRecord(directory, parentSession);
   if (parent.state !== 'read' || parent.record.sessionId !== parentSession) {
@@ -460,6 +468,7 @@ module.exports = {
   DESKTOP_RECORD_MAX_BYTES,
   CONTEXT_RECORD_MAX_BYTES,
   storeCandidates,
+  isUserFork,
   resolveLinkedSession,
   renderVerdict,
 };
