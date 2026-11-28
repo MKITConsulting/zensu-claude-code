@@ -443,9 +443,10 @@ limit, and the short lines carry every obligation (`.claude/rules/prompt-ledger.
 starts when bash starts: a machine that cannot schedule the supervisor within the host's 30 s still
 loses the field. A worker stopped after the resolver wrote the linked marker and before the brief
 was recorded loses the brief note for good, because the next prompt reads the marker; the reserve
-leaves at least 6 s for that step. The other prompt hooks of a fan-out burst keep their own limits
-and their own costs; the router and zen-mode bind and verify the same way and are the next
-candidates.
+leaves at least 6 s for that step. Zen-mode runs under the same library with a fallback of its own,
+and the router, measured, binds and verifies nothing; `.claude/rules/prompt-origin.md` §"Process
+budget" holds both. The other prompt hooks of a fan-out burst, worktree-keep among them, keep their
+own limits and costs.
 
 ## Placeholders, not interpolation
 
@@ -642,7 +643,11 @@ route: a route change moves only the field, and every shape of the reminder carr
   library does not load, and its three `zensu_prompt_delivered` calls; the optional budget and
   `_zensu_linked_session_answer` in `hooks/lib/zensu-linked-session.sh`, the third copy of the
   group watchdog (`.claude/rules/stop-latency.md`); and the reminder's `"timeout": 30` in
-  `hooks/hooks.json`.
+  `hooks/hooks.json`. Zen-mode is the library's second caller (`zen_deadline_fallback`, its
+  `"timeout": 30`), so a change to the library's contract moves both hooks. `Z119c` in
+  `tests/structure/test-zen-mode.sh` drives `zen_deadline_fallback` against the library's
+  private state: it sets `_ZENSU_PROMPT_SUPERVISED_WORK` and writes the `fact-off` file that
+  `zensu_prompt_recorded` reads, so a change to that layout moves the zen suite too.
 - `evals/plan-approval-hook/`: `route_recorded` in the runner grades `T2.9` on the marker the
   helper writes, through `zensu_delivery_route_marker_path` and
   `zensu_delivery_route_marker_state` rather than a copy of either, the expect script's

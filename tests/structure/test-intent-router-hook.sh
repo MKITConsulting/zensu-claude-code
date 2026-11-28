@@ -304,6 +304,74 @@ esac
   && check "C25 the full notice and the short line both end with the yield sentence of docs/precedence.md" PASS \
   || check "C25 router yield sentence (full=$C25_FULL_OK short=$C25_SHORT_OK)" FAIL
 
+C26_DIR="$(mktemp -d -t router-budget-XXXXXX)"
+mkdir -p "$C26_DIR/bin" "$C26_DIR/home" "$C26_DIR/project" "$C26_DIR/data"
+C26_REAL_NODE="$(command -v node)"
+cat > "$C26_DIR/bin/node" <<'STUB'
+#!/bin/bash
+kind=other
+case "$*" in
+  (*classifyPreToolPayload*) kind=principal ;;
+  (*'sessionKey(j.session_id)'*) kind=key ;;
+  (*'session-control-core-v1.js session-key'*) kind=session-key ;;
+esac
+printf '%s\n' "$kind" >> "$C26_CALLS"
+exec "$C26_REAL_NODE" "$@"
+STUB
+chmod +x "$C26_DIR/bin/node"
+c26_fire() {
+  : > "$C26_DIR/calls"
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2]}))' "$2" "$1" \
+    | env -u ZENSU_CONFIG -u ZENSU_SESSION_KEY PATH="$C26_DIR/bin:$PATH" C26_CALLS="$C26_DIR/calls" C26_REAL_NODE="$C26_REAL_NODE" HOME="$C26_DIR/home" \
+      CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$C26_DIR/data" CLAUDE_PROJECT_DIR="$C26_DIR/project" ${3:+ZENSU_SESSION_KEY="$3"} \
+      bash "$HOOK" 2>/dev/null
+}
+c26_count() { grep -c "^$1\$" "$C26_DIR/calls" 2>/dev/null || true; }
+c26_all() { grep -c . "$C26_DIR/calls" 2>/dev/null || true; }
+C26_BAD=""
+C26_FIRST="$(c26_fire "plan the product roadmap for next quarter" "router-c26-$$" | classify)"
+C26_FIRST_ALL="$(c26_all)"; C26_FIRST_KEY="$(c26_count key)"; C26_FIRST_PRINCIPAL="$(c26_count principal)"; C26_FIRST_CLI="$(c26_count session-key)"
+C26_REPEAT="$(c26_fire "plan the product roadmap for next quarter" "router-c26-$$" | c24_ctx)"
+C26_REPEAT_ALL="$(c26_all)"
+C26_PLAIN="$(c26_fire "fix the auth token expiry bug" "router-c26-$$")"
+C26_PLAIN_ALL="$(c26_all)"; C26_PLAIN_PRINCIPAL="$(c26_count principal)"
+[ "$C26_FIRST" = "UserPromptSubmit|main|triage|planmode" ] || C26_BAD="$C26_BAD [first keyword prompt: $C26_FIRST]"
+[ "$C26_FIRST_ALL" = 2 ] && [ "$C26_FIRST_PRINCIPAL" = 1 ] && [ "$C26_FIRST_KEY" = 1 ] && [ "$C26_FIRST_CLI" = 0 ] \
+  || C26_BAD="$C26_BAD [keyword prompt children: all=$C26_FIRST_ALL principal=$C26_FIRST_PRINCIPAL key=$C26_FIRST_KEY session-key=$C26_FIRST_CLI]"
+case "$C26_REPEAT" in
+  "Zensu planning notice (the full notice given earlier in this context still applies)"*) ;;
+  *) C26_BAD="$C26_BAD [repeat is not the short line: $(printf '%s' "$C26_REPEAT" | head -c 60)]" ;;
+esac
+[ "$C26_REPEAT_ALL" = 2 ] || C26_BAD="$C26_BAD [repeat children: $C26_REPEAT_ALL]"
+[ -z "$C26_PLAIN" ] || C26_BAD="$C26_BAD [non-keyword prompt emitted: $(printf '%s' "$C26_PLAIN" | head -c 60)]"
+[ "$C26_PLAIN_ALL" = 1 ] && [ "$C26_PLAIN_PRINCIPAL" = 1 ] || C26_BAD="$C26_BAD [non-keyword children: all=$C26_PLAIN_ALL principal=$C26_PLAIN_PRINCIPAL]"
+if [ -z "$C26_BAD" ]; then
+  check "C26 a keyword prompt starts two node children, the principal-and-prompt read and the payload key, and no session-key child, on the full notice and on the short line, and any other prompt starts one" PASS
+else
+  check "C26 router process budget:$C26_BAD" FAIL
+fi
+
+C27_BAD=""
+C27_OTHER_KEY="scv1_$(printf '%064d' 0 | tr 0 a)"
+C27_A="$(c26_fire "plan the product roadmap for next quarter" "router-c27-$$" "$C27_OTHER_KEY" | classify)"
+C27_B="$(c26_fire "plan the product roadmap for next quarter" "router-c27-$$" "$C27_OTHER_KEY" | classify)"
+[ "$C27_A" = "UserPromptSubmit|main|triage|planmode" ] && [ "$C27_B" = "UserPromptSubmit|main|triage|planmode" ] \
+  || C27_BAD="$C27_BAD [another session's key: first=$C27_A second=$C27_B]"
+C27_OWN_KEY="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key "router-c27b-$$" 2>/dev/null)"
+C27_C="$(c26_fire "plan the product roadmap for next quarter" "router-c27b-$$" "$C27_OWN_KEY" | classify)"
+C27_D="$(c26_fire "plan the product roadmap for next quarter" "router-c27b-$$" "$C27_OWN_KEY" | c24_ctx)"
+[ "$C27_C" = "UserPromptSubmit|main|triage|planmode" ] || C27_BAD="$C27_BAD [own key first: $C27_C]"
+case "$C27_D" in
+  "Zensu planning notice (the full notice given earlier in this context still applies)"*) ;;
+  *) C27_BAD="$C27_BAD [own key repeat is not the short line: $(printf '%s' "$C27_D" | head -c 60)]" ;;
+esac
+rm -rf "$C26_DIR"
+if [ -z "$C27_BAD" ]; then
+  check "C27 an injected session key that differs from the payload's keys no ledger entry, so both keyword prompts get the full notice, while the matching key gets the short line on the repeat" PASS
+else
+  check "C27 router injected-key check:$C27_BAD" FAIL
+fi
+
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

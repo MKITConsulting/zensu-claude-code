@@ -186,9 +186,11 @@ that names the key still goes to node, which applies the range and the integer t
 `tests/structure/test-worktree-keep.sh` holds the idle-hours getter equal to the node reader over
 an absent file, other keys, a global and a project value, an escaped key and an out-of-range value,
 and `K30` requires every getter the file defines to answer its default without `node`, and the
-same default from the forced node reader. `zensu_hook_enabled_strict` takes no such pre-check: a
-present file it cannot parse must withdraw its grant, and the pre-check would read such a file as
-naming no key.
+same default from the forced node reader. `zensu_zen_mode_default_on` takes the same pre-check for
+`zenModeDefault`, under the root it is handed, because zen-mode reads that default on every prompt
+of a session that recorded no choice; `C2z` holds it equal to the node reader and node-free when no
+file names the key. `zensu_hook_enabled_strict` takes no such pre-check: a present file it cannot
+parse must withdraw its grant, and the pre-check would read such a file as naming no key.
 
 - **The read is bounded.** Bash reads a file one byte per system call here, so the pre-check
   reads at most `_ZENSU_CONFIG_PRECHECK_BYTES` (16384) bytes and sends a longer file to node.

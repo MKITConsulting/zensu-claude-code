@@ -195,20 +195,37 @@ tree measured 5,699 and 5,775 characters at two install depths.
 Under a fan-out burst every `node` start costs seconds: at a load average of 90 to 120 on 16 cores
 one took 1.6 to 2.9 s and a `git` start 0.25 to 0.4 s (`.claude/rules/session-delivery-route.md`
 §"The reminder's time budget"). Measured with a classifying `node` shim, macOS bash 3.2, with no
-config file naming a key the hook reads:
+config file naming a key the hook reads, on a linked session's first prompt for the first three
+rows and in a bound managed-worktree session for worktree-keep:
 
 | Hook | `node` children | Root verifications | Bound | Pin |
 |---|---|---|---|---|
-| `user-prompt-tdd-reminder.sh` | at most 9 on a linked first prompt | 1 | prompt deadline 20 s, registration 30 s | `L59` in `tests/structure/test-linked-session-route.sh` |
+| `user-prompt-tdd-reminder.sh` | at most 9 | 1 | prompt deadline 20 s, registration 30 s | `L59` in `tests/structure/test-linked-session-route.sh` |
+| `user-prompt-zen-mode.sh` | 4: the principal check, the session bind, the root verification and the merged child | 1 | prompt deadline 20 s, registration 30 s | `Z118` and `Z119` in `tests/structure/test-zen-mode.sh` |
+| `user-prompt-intent-router.sh` | 1, the principal check that also reads the prompt; a keyword prompt adds the child that derives the session key | 0 | the host default, 30 s | `C26` in `tests/structure/test-intent-router-hook.sh` |
 | `user-prompt-worktree-keep.sh` | 4: the principal check, the session bind, the root verification and the module, which starts 2 `git` children | 1 | registration 20 s, no deadline | `K26` and `K26b` in `tests/structure/test-worktree-keep.sh` |
 
-Worktree-keep started 5 before its cut, the fifth being the idle-hours read, which
+Before these cuts zen-mode started 5, the fifth being the default rung's config read
+(`zensu_zen_mode_default_on` now takes the shell pre-check, `.claude/rules/hook-process-budget.md`),
+the router 2, or 4 on a keyword prompt: separate prompt and `session_id` reads and a
+`session-key` child, and worktree-keep 5, the fifth being the idle-hours read, which
 `_zensu_config_bounded_int` now answers in shell (`.claude/rules/hook-process-budget.md`
-§"Config pre-check"). In the transcripts last written on 2026-11-20 the host cancelled it 119
-times at its then 10 s registration, recording 10.1 to 17.4 s. Why it verifies the root once
-without the memo, takes no prompt deadline and now registers 20 s, and what its two lifecycle
-halves count, is the process-budget paragraph of `.claude/rules/worktree-keep.md` and the one
-after it.
+§"Config pre-check"). In the transcripts last written during the 2026-11-20 burst the host cancelled
+zen-mode 7 times at its then 20 s limit, recording 20.5 to 34.0 s, the reminder 15 times at 30 s,
+worktree-keep 23 times at 10 s, and the router never. Across every record since 2026-09-28 in the
+1,942 transcripts last written on 2026-11-20, the host cancelled the worktree-keep prompt half 119
+times at that 10 s registration, recording 10.1 to 17.4 s.
+
+- Zen-mode verifies the root once and does not memoize it: no second verification follows, so the
+  memo of `.claude/rules/stop-latency.md` would save nothing.
+- Zen-mode runs under `hooks/lib/zensu-prompt-deadline.sh` with `zen_deadline_fallback`, whose
+  outputs `.claude/rules/zen-mode-chain-anchor.md` states. The router has no deadline: two `node`
+  children stay far below its host limit, and a router the host kills loses only advisory text.
+- The router binds no session: its ledger key needs only the payload's `session_id`
+  (`.claude/rules/prompt-ledger.md`).
+- Worktree-keep verifies the root once without the memo and takes no prompt deadline. Why, why
+  its registrations now carry 20 s, and what its two lifecycle halves count, is the process-budget
+  paragraph of `.claude/rules/worktree-keep.md` and the one after it.
 
 ## Version
 
@@ -224,6 +241,10 @@ hook gains a `permissionDecision`. `session-brief` is a new return value of an i
 function that only hooks of the same installation read, and the reminder names it beside `typed`
 for its brief note, so that note's behaviour does not move. The reminder and the router going
 silent on a cross-session message changes advisory `additionalContext` only.
+
+The zen-mode registration's `timeout` moved from 20 to 30 s, which is not a hook added, removed or
+renamed and not a matcher change; no schema field, strict key set, config key or attestation moves,
+and every changed hook still emits only `additionalContext`, so that move is a `patch` too.
 
 The worktree-keep process budget is a `patch` as well; `.claude/rules/worktree-keep.md` walks it in
 its version paragraph.

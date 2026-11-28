@@ -576,6 +576,7 @@ zensu_zen_mode_default_on() {
   else
     root="${CLAUDE_PROJECT_DIR:-}"
   fi
+  CLAUDE_PROJECT_DIR="$root" _zensu_config_key_unset zenModeDefault && return 0
   val=$(CLAUDE_PROJECT_DIR="$root" _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.zenModeDefault===false?"0":"1")' 2>/dev/null)
   [ -z "$val" ] && return 0
   [ "$val" = "1" ]
