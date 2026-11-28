@@ -147,8 +147,12 @@ exists, and every record whose key directory is gone. It emits nothing.
 ## Known gaps, accepted and named
 
 - **A delivery can be lost while the ledger says sent:** a rewind or an edit of the prompt that
-  carried the full text, or another plugin's `UserPromptSubmit` hook blocking that prompt. The
-  short lines carry every per-turn obligation, so what is lost is the long-form detail and the
+  carried the full text, another plugin's `UserPromptSubmit` hook blocking that prompt, or the host
+  stopping the reminder's supervisor after its worker marked the ledger and before the supervisor
+  forwarded the text. The worker marks its output delivered before it marks the ledger, so a
+  deadline that meets it in between forwards the full text rather than replacing it, and a
+  fallback the deadline prints marks nothing itself (`.claude/rules/session-delivery-route.md`
+  §"The reminder's time budget"). The short lines carry every per-turn obligation, so what is lost is the long-form detail and the
   examples, never an obligation, and the next `/compact` or `/clear` restores the full text.
 - **A reset that never ran** (the `SessionStart` hook killed, timed out or not registered) leaves
   short lines for the rest of that generation, with the same bound. A reset that ran and failed is
