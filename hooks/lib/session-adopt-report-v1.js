@@ -1217,7 +1217,7 @@ function renderRestoreOutcome(outcome) {
 // Wrapped in a function because `node -e` evaluates at module top level, where a
 // bare `return` is a syntax error — and a syntax error here would surface as a
 // crashed helper rather than as the refusal it was meant to print.
-// ONE rendering of the crash-resume refusal, for the read-only report and for
+// ONE rendering of the superseded-file refusal, for the read-only report and for
 // --confirm. The two used to disagree about the same state: the read-only path
 // answered ADOPTABLE, because the probe finds the record adoptable, while --confirm
 // refused it and opened on "the read-only check above found the record adoptable"
@@ -1225,11 +1225,12 @@ function renderRestoreOutcome(outcome) {
 // the file. Both now ask the shared preview, which owns the check, and both print
 // this.
 function renderSupersededConflict(file) {
-  process.stdout.write("The record itself is adoptable, but a superseded record from an interrupted adoption\n");
-  process.stdout.write("is already in place, and the adoption refuses to overwrite it:\n");
+  process.stdout.write("The record itself is adoptable, but the file at the superseded record name is not a\n");
+  process.stdout.write("provable copy of this record, and the adoption refuses to overwrite it:\n");
   process.stdout.write("  " + safe(file) + "\n");
-  process.stdout.write("Nothing was changed. That file is the copy taken before the earlier adoption was\n");
-  process.stdout.write("interrupted. Move it aside, then re-run this command with --confirm.\n");
+  process.stdout.write("Nothing was changed. A byte copy of this record that an interrupted adoption left\n");
+  process.stdout.write("at that name would have been completed; this file could not be proven to be one.\n");
+  process.stdout.write("Move it aside, then re-run this command with --confirm.\n");
 }
 
 // The provenance vocabulary through its owner, guarded the way BASELINE_STATES is
@@ -1410,10 +1411,10 @@ function main(deps = {}) {
   }
 
   if (process.env.ZADOPT_CONFIRM !== "1") {
-    // The crash-resume shape, asked of the SAME preview every hook asks. The probe
-    // above finds this record adoptable — it is — while a superseded file an
-    // interrupted adoption left behind makes adoptContext's exclusive copy refuse
-    // every later attempt. Strictly read-only: the preview performs no write, which
+    // The superseded-file conflict, asked of the SAME preview every hook asks. The probe
+    // above finds this record adoptable — it is — while a superseded file that is
+    // not a provable copy of it makes adoptContext's exclusive copy refuse every
+    // later attempt. Strictly read-only: the preview performs no write, which
     // is the premise the PreToolUse recognizer's admission of this command rests on.
     // respectOptOut:false for the reason --confirm passes it — the opt-out governs
     // the hooks, never the command the user runs by hand, so an opted-out record

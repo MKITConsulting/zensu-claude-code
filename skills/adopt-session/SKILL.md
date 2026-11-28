@@ -432,7 +432,7 @@ remedy inline, so render that verbatim too.
 |--------|---------|
 | `session-id-unusable` | Entry-point refusal, raised before anything is read: the session identity the command was given is empty, malformed, or a DERIVED Session Control identifier rather than the raw host session id. Nothing is read and nothing is changed, and the record store is not implicated — a fresh Claude Code session is the way forward. |
 | `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
-| `superseded-record-exists` | Entry-point refusal, raised AFTER `adoptableRecord` passed: the record itself is adoptable, but an interrupted adoption left `<session-key>.superseded-<version>.json` in place and the adoption refuses to overwrite it. Both forms name the file — the read-only report as `NOT adoptable`, `--confirm` as `NOT adopted` — because the shared preview owns the check. Moving the file aside is the remedy; a retry alone is a loop. |
+| `superseded-record-exists` | Entry-point refusal, raised AFTER `adoptableRecord` passed: the record is adoptable, but `<session-key>.superseded-<version>.json` is not a provable copy of it, and the adoption refuses to overwrite it; a copy an interrupted adoption left is completed instead. Both forms name the file — the read-only report as `NOT adoptable`, `--confirm` as `NOT adopted` — because the shared preview owns the check. Moving the file aside is the remedy; a retry alone is a loop. |
 | `record-unreadable` | The record no longer re-verifies against the installation that minted it — altered, or a real schema change. A recorded project root that is merely GONE is adoptable, and so is a minting installation pruned from the cache, a retired remnant included, and so are both together. The report names why each record reader refused it. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
 | `already-served` | Nothing to RE-MINT, and TWO things beside the record can still be wedged. **The workflow document** this session is anchored to may be gone — a deleted and re-created worktree loses it, because `.zensu/state/` is gitignored — and while it is, the capability gate denies every tool in the session. **The lease store** is the second: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly that state. The report below the remedy says which of the two applies. Re-running with `--confirm` repairs both, idempotently, and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
@@ -453,10 +453,8 @@ which ignores the opt-out, and never run it on your own initiative),
 the call), `not-completed`, `lock-timeout` and `adoption-failed` (the adoption did
 not finish; retry, then run the report — the last two appear only in the all-tool
 gate's deny, which sees the adoption's own error where the shell gates see a
-preview), `superseded-record-exists` (an interrupted adoption left
-`<session-key>.superseded-<version>.json` in place; the report names it in BOTH forms —
-see the table row above — and moving it aside lets the adoption complete; a retry
-alone is a loop), and `(unknown)` when
+preview), `superseded-record-exists` (see the table row above: moving the file aside
+lets the adoption complete; a retry alone is a loop), and `(unknown)` when
 the binder could not answer at all. A refusal that establishes no named state —
 `record-unreadable`, `plugin-data-mismatch` — rides on the generic bind-failure deny
 as one appended sentence rather than on the lineage or pruned wording.

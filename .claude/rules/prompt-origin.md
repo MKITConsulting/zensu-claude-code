@@ -107,7 +107,9 @@ reminders the desktop adds. A fresh brief opens with the app's Background line a
 the session's lineage instead: on the prompt that first resolves the
 lineage as linked, its directive opens with one sentence saying the prompt is another session's
 brief, so a route preference in it decides nothing (`.claude/rules/session-delivery-route.md`
-§"Linked sessions inherit `build`"). No other hook reads the lineage.
+§"Linked sessions inherit `build`"). A fork the user starts or continues in the desktop app is
+linked too, but its first prompt is the user's own, so the reminder tells it apart through its
+desktop record and adds no sentence there. No other hook reads the lineage.
 
 `.claude/rules/prompt-ledger.md` owns the once-per-generation mechanism. Zen-mode and best-solution-first stay on every kind on purpose: the reply to a notification or a
 CI event is user-visible, so its shape and its option set still matter. The reminder's CI note, its decided
@@ -240,7 +242,8 @@ silent on a cross-session message changes advisory `additionalContext` only.
 
 - A session forked from another one opens with a fork reminder and no app line, so its brief stays
   `typed` and can deactivate. A fork the user started has the same shape, so the two cannot be told
-  apart.
+  apart by the prompt. The reminder's brief note tells them apart through the desktop record
+  (`.claude/rules/session-delivery-route.md`); zen-mode does not consult it.
 - `<side-sessions-event>`, `<create-pr-command>` and the app's other generated prompts stay `typed`.
   Their bodies are fixed app text and side-session notes ride in leading reminders, so none of them
   carried a deactivation phrase in its own text in the census above; a future app text that quotes

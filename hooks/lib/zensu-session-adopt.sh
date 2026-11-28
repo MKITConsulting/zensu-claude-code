@@ -18,8 +18,11 @@
 #     local to this header — a grep for `write class` finds them nowhere else — so
 #     what the sibling carriers share is the ORDER, not the labels; do not restate
 #     that as a census a reader cannot check. (1) one record for THIS session in the
-#     private plugin-data store; (2) one workflow history entry in the recorded
-#     project; (3) any review-evidence lease naming the previous installation,
+#     private plugin-data store, and under the records lock the removal of a byte
+#     copy or prefix of that record which an interrupted adoption left at its
+#     superseded name, which the copy step then writes again; (2) one workflow
+#     history entry in the recorded project; (3) any review-evidence lease naming
+#     the previous installation,
 #     MOVED (never deleted) out of that session's own lease records directory
 #     into a sibling `superseded/` one; and (4) this session's own workflow document
 #     plus its `.zensu` ancestors under the recorded project root, created with mode

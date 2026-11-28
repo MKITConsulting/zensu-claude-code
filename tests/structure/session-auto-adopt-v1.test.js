@@ -4,7 +4,7 @@
 // binder, the SessionStart adapter and the manual entry point share.
 //
 // Every case here injects the core and the sweep through createAutoAdopter, so a
-// refusal, a lock timeout or a crash-resume conflict costs a stub rather than a
+// refusal, a lock timeout or a superseded-file conflict costs a stub rather than a
 // synthetic install plus a session lifecycle. The one real-filesystem surface is
 // the config reader, driven against a temp HOME, because its precedence rule is a
 // hand mirror of _ZENSU_CFG_JS in hooks/lib/zensu-config.sh.
@@ -13,6 +13,7 @@
 // tests/run-all.sh discovers only test-*.sh, so an undriven *.test.js never runs.
 
 const assert = require('node:assert/strict');
+const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -158,7 +159,8 @@ test('every core refusal reason maps to REFUSED and already-served to ALREADY_SE
     assert.equal(verdict.prunedPluginRoot, true, 'the state flag travels with the refusal');
     assert.equal(verdict.orphanedProjectRoot, false);
     assert.equal(calls.adopt, 0, `adoptContext must not run for ${reason}`);
-    assert.equal(probes, 1, `one probe for ${reason}`);
+    const raced = reason === 'record-unreadable' || reason === 'workflow-schema-mismatch';
+    assert.equal(probes, raced ? 2 : 1, `${raced ? 'two probes' : 'one probe'} for ${reason}`);
     // A served record is an adoption another process performed, and it is complete
     // only once the lease sweep has run: that outcome sweeps, every refusal does not.
     assert.equal(sweepCalls.length, reason === 'already-served' ? 1 : 0, `sweep for ${reason}`);
@@ -229,7 +231,7 @@ test('a typed refusal thrown under the lock keeps its reason', () => {
   assert.match(verdict.error, /workflow-schema-mismatch/);
 });
 
-test('a crash-resume conflict is REFUSED as superseded-record-exists and names the file', () => {
+test('a superseded-file conflict under the lock is REFUSED as superseded-record-exists and names the file', () => {
   const { instance } = adopter({ adoptContext: () => { throw conflictError('/records/scv1_x.superseded-0.20.0.json'); } });
   const verdict = instance.adoptForHook(REQUEST);
   assert.equal(verdict.outcome, 'refused');
@@ -669,7 +671,7 @@ test('the default instance is wired to the real core and sweep', () => {
   assert.equal(verdict.reason, 'invalid-request');
 });
 
-// The crash-resume shape belongs to the PREVIEW, so every consumer of it agrees:
+// The superseded-file conflict belongs to the PREVIEW, so every consumer of it agrees:
 // the hook binder, the read-only report and --confirm. It was asked by the binder
 // alone, which left the report answering ADOPTABLE for a state the deny named as a
 // refusal and told the reader that report would name the file.
@@ -1056,4 +1058,345 @@ test('the adapter names the lease sweep of a served answer when the strict re-re
       { core, autoAdopt: servedWith({ discarded: 0, failed: [], unsafe: '', unsafeAt: '' }) }),
     (error) => error.message === 'session-control-v1: context project root does not exist',
   );
+});
+
+const INTERRUPTED_SESSION = 'interrupted-adoption-session';
+const ADOPTING_CHILD = `
+const fs = require('node:fs');
+const [moduleFile, requestJson, mode] = process.argv.slice(1);
+const copy = fs.copyFileSync;
+fs.copyFileSync = function interruptedCopy(source, destination, flags) {
+  if (mode === 'none' || !String(destination).includes('.superseded-')) return copy.call(fs, source, destination, flags);
+  if (mode === 'after-copy') {
+    copy.call(fs, source, destination, flags);
+  } else {
+    const bytes = fs.readFileSync(source);
+    fs.writeFileSync(destination, bytes.subarray(0, Math.floor(bytes.length / 2)), { flag: 'wx' });
+  }
+  process.kill(process.pid, 'SIGKILL');
+  return undefined;
+};
+process.stdout.write(JSON.stringify(require(moduleFile).adoptForHook(JSON.parse(requestJson))));
+`;
+
+function pluginTree(root, version) {
+  fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'zensu', version }));
+  fs.mkdirSync(path.join(root, 'hooks', 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'hooks', 'lib', 'runtime.js'), 'module.exports = 1;\n');
+  return fs.realpathSync.native(root);
+}
+
+function interruptedFixture(t) {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-auto-adopt-interrupted-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const recordedRoot = pluginTree(path.join(root, 'cache', '0.17.0'), '0.17.0');
+  const executingRoot = pluginTree(path.join(root, 'cache', '0.18.0'), '0.18.0');
+  const projectRoot = path.join(root, 'project');
+  const pluginData = path.join(root, 'data');
+  fs.mkdirSync(projectRoot);
+  fs.mkdirSync(pluginData);
+  const recordsDir = path.join(pluginData, 'session-control', 'v1', 'records');
+  realCore.registerContext({
+    recordsDir,
+    host: 'claude',
+    sessionId: INTERRUPTED_SESSION,
+    projectRoot,
+    pluginRoot: recordedRoot,
+    pluginData,
+    createdAt: '2026-11-24T00:00:00.000Z',
+  });
+  realCore.initializeWorkflowState({ projectRoot, sessionId: INTERRUPTED_SESSION });
+  const key = realCore.sessionKey(INTERRUPTED_SESSION);
+  return {
+    executingRoot,
+    projectRoot,
+    recordsDir,
+    recordFile: path.join(recordsDir, `${key}.json`),
+    supersededFile: realCore.supersededRecordFile(recordsDir, key, '0.17.0'),
+    request: {
+      executingPluginRoot: executingRoot,
+      pluginData,
+      recordsDir,
+      sessionId: INTERRUPTED_SESSION,
+      host: 'claude',
+      environment: {},
+    },
+  };
+}
+
+function runAdoptingChild(request, mode) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', ADOPTING_CHILD, MODULE_FILE, JSON.stringify(request), mode], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
+  });
+}
+
+function assertKilled(child) {
+  const forced = child.signal === 'SIGKILL'
+    || (process.platform === 'win32' && child.signal === null && Number.isInteger(child.code) && child.code !== 0);
+  assert.ok(forced, `expected a killed child, code=${child.code}, signal=${child.signal}, stderr=${child.stderr}`);
+}
+
+function adoptedEntries(f) {
+  const document = JSON.parse(fs.readFileSync(realCore.adoptionWorkflowStatePath(f.projectRoot, INTERRUPTED_SESSION), 'utf8'));
+  return (document.history || []).filter((entry) => entry.phase === 'RUNTIME_ADOPTED').length;
+}
+
+function servedRoot(f) {
+  return realCore.readContext({ recordsDir: f.recordsDir, sessionId: INTERRUPTED_SESSION, expectedHost: 'claude' }).plugin_root;
+}
+
+test('a bind killed between the superseded copy and the record swap is completed by the next bind', async (t) => {
+  const f = interruptedFixture(t);
+  const before = fs.readFileSync(f.recordFile);
+  assertKilled(await runAdoptingChild(f.request, 'after-copy'));
+  assert.deepEqual(fs.readFileSync(f.supersededFile), before);
+  assert.deepEqual(fs.readFileSync(f.recordFile), before);
+  assert.equal(adoptedEntries(f), 0);
+
+  const verdict = mod.adoptForHook(f.request);
+  assert.equal(`${verdict.outcome}/${verdict.reason}`, 'adopted/adopted', verdict.error || '');
+  assert.equal(verdict.supersededFile, f.supersededFile);
+  assert.equal(servedRoot(f), f.executingRoot);
+  assert.deepEqual(fs.readFileSync(f.supersededFile), before);
+  assert.equal(adoptedEntries(f), 1);
+  assert.equal(mod.adoptForHook(f.request).outcome, 'already-served');
+});
+
+test('a copy that a kill cut short is rolled back and the next bind completes the adoption', async (t) => {
+  const f = interruptedFixture(t);
+  const before = fs.readFileSync(f.recordFile);
+  assertKilled(await runAdoptingChild(f.request, 'cut-short'));
+  const residue = fs.readFileSync(f.supersededFile);
+  assert.ok(residue.length > 0 && residue.length < before.length, `${residue.length} of ${before.length} bytes`);
+  assert.deepEqual(residue, before.subarray(0, residue.length));
+
+  const verdict = mod.adoptForHook(f.request);
+  assert.equal(`${verdict.outcome}/${verdict.reason}`, 'adopted/adopted', verdict.error || '');
+  assert.equal(servedRoot(f), f.executingRoot);
+  assert.deepEqual(fs.readFileSync(f.supersededFile), before);
+  assert.equal(adoptedEntries(f), 1);
+});
+
+test('concurrent binds over an interrupted adoption adopt it exactly once', async (t) => {
+  const f = interruptedFixture(t);
+  const before = fs.readFileSync(f.recordFile);
+  assertKilled(await runAdoptingChild(f.request, 'after-copy'));
+  const children = await Promise.all(Array.from({ length: 6 }, () => runAdoptingChild(f.request, 'none')));
+  const outcomes = children.map((child) => {
+    assert.equal(child.code, 0, child.stderr);
+    const verdict = JSON.parse(child.stdout);
+    return `${verdict.outcome}/${verdict.reason}`;
+  });
+  assert.equal(outcomes.filter((outcome) => outcome === 'adopted/adopted').length, 1, outcomes.join(', '));
+  assert.deepEqual(outcomes.filter((outcome) => !/^(adopted|already-served)\//.test(outcome)), [], outcomes.join(', '));
+  assert.equal(servedRoot(f), f.executingRoot);
+  assert.deepEqual(fs.readFileSync(f.supersededFile), before);
+  assert.equal(adoptedEntries(f), 1);
+});
+
+test('the read-only preview writes nothing over an interrupted adoption and answers ADOPTABLE', (t) => {
+  const f = interruptedFixture(t);
+  const before = fs.readFileSync(f.recordFile);
+  fs.copyFileSync(f.recordFile, f.supersededFile);
+  const preview = mod.previewAdoption(f.request);
+  assert.equal(`${preview.outcome}/${preview.reason}`, 'adoptable/adoptable');
+  assert.equal(preview.supersededFile, null);
+  assert.deepEqual(fs.readFileSync(f.recordFile), before);
+  assert.deepEqual(fs.readFileSync(f.supersededFile), before);
+  assert.equal(adoptedEntries(f), 0);
+});
+
+test('the preview asks the core about the superseded file and refuses only a not-a-copy answer', () => {
+  const states = realCore.INTERRUPTED_COPY_STATES;
+  const asked = [];
+  const present = { lstatSync: () => ({}) };
+  const answering = (answer) => ({
+    supersededRecordFile: realCore.supersededRecordFile,
+    INTERRUPTED_COPY_STATES: states,
+    interruptedAdoptionCopyState: (recordsDir, key, recorded) => { asked.push([recordsDir, key, recorded]); return answer; },
+  });
+  for (const answer of [states.COPY, states.INDETERMINATE]) {
+    const passing = adopter(answering(answer), null, { fs: present });
+    assert.equal(passing.instance.previewAdoption(REQUEST).outcome, 'adoptable', answer);
+    assert.equal(passing.instance.adoptForHook(REQUEST).outcome, 'adopted', answer);
+    assert.equal(passing.calls.adopt, 1, answer);
+  }
+  assert.deepEqual(asked[0], [REQUEST.recordsDir, 'scv1_session-id', '0.20.0']);
+
+  const unproven = adopter(answering(states.NOT_A_COPY), null, { fs: present });
+  const refused = unproven.instance.previewAdoption(REQUEST);
+  assert.equal(refused.reason, 'superseded-record-exists');
+  assert.equal(refused.supersededFile, path.join(REQUEST.recordsDir, 'scv1_session-id.superseded-0.20.0.json'));
+  assert.equal(unproven.instance.adoptForHook(REQUEST).reason, 'superseded-record-exists');
+  assert.equal(unproven.calls.adopt, 0);
+
+  const predating = adopter({ supersededRecordFile: realCore.supersededRecordFile }, null, { fs: present });
+  assert.equal(predating.instance.previewAdoption(REQUEST).reason, 'superseded-record-exists');
+
+  const { core } = stubCore(answering(states.COPY));
+  const optedOut = mod.createAutoAdopter({
+    core, sweep: stubSweep().sweep, fs: present, readConfig: () => ({ hooks: { sessionAutoAdopt: false } }),
+  });
+  assert.equal(optedOut.previewAdoption(REQUEST).reason, 'opted-out');
+
+  const absent = { lstatSync: () => { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; } };
+  const before = asked.length;
+  assert.equal(adopter(answering(states.NOT_A_COPY), null, { fs: absent }).instance.previewAdoption(REQUEST).outcome, 'adoptable');
+  assert.equal(asked.length, before);
+});
+
+test('a superseded file the preview cannot judge is decided by the adoption under the lock, and the opt-out still stands', () => {
+  const states = realCore.INTERRUPTED_COPY_STATES;
+  const present = { lstatSync: () => ({}) };
+  const unjudged = {
+    supersededRecordFile: realCore.supersededRecordFile,
+    INTERRUPTED_COPY_STATES: states,
+    interruptedAdoptionCopyState: () => states.INDETERMINATE,
+  };
+  const overtaken = adopter({ ...unjudged, adoptContext: () => { throw refusalError('already-served'); } }, null, { fs: present });
+  const served = overtaken.instance.adoptForHook(REQUEST);
+  assert.equal(`${served.outcome}/${served.reason}`, 'already-served/adopted-concurrently');
+  assert.equal(served.supersededFile, null);
+  assert.equal(overtaken.sweepCalls.length, 1);
+
+  const conflicting = adopter({ ...unjudged, adoptContext: () => { throw conflictError('/records/scv1_session-id.superseded-0.20.0.json'); } }, null, { fs: present });
+  const refused = conflicting.instance.adoptForHook(REQUEST);
+  assert.equal(`${refused.outcome}/${refused.reason}`, 'refused/superseded-record-exists');
+  assert.equal(refused.supersededFile, '/records/scv1_session-id.superseded-0.20.0.json');
+
+  let adoptions = 0;
+  const { core } = stubCore({ ...unjudged, adoptContext: () => { adoptions += 1; return {}; } });
+  const optedOut = mod.createAutoAdopter({
+    core, sweep: stubSweep().sweep, fs: present, readConfig: () => ({ hooks: { sessionAutoAdopt: false } }),
+  });
+  assert.equal(optedOut.previewAdoption(REQUEST).reason, 'opted-out');
+  assert.equal(optedOut.adoptForHook(REQUEST).reason, 'opted-out');
+  assert.equal(adoptions, 0);
+});
+
+test('a superseded file a sibling adoption wrote while the preview looked answers already-served, never superseded-record-exists', () => {
+  let probes = 0;
+  const states = realCore.INTERRUPTED_COPY_STATES;
+  const racing = {
+    supersededRecordFile: realCore.supersededRecordFile,
+    INTERRUPTED_COPY_STATES: states,
+    interruptedAdoptionCopyState: () => states.NOT_A_COPY,
+    adoptableRecord: () => {
+      probes += 1;
+      return probes === 1
+        ? { ok: true, recorded: '0.20.0', executing: '0.21.1', orphanedProjectRoot: false, prunedPluginRoot: false, context: {} }
+        : { ok: false, reason: 'already-served', recorded: '0.21.1', executing: '0.21.1', orphanedProjectRoot: false, prunedPluginRoot: false };
+    },
+  };
+  const { instance, calls, sweepCalls } = adopter(racing, { discarded: 1, failed: [], unsafe: '', unsafeAt: '' }, { fs: { lstatSync: () => ({}) } });
+  const verdict = instance.adoptForHook({ ...REQUEST, observedRecorded: '0.20.0' });
+  assert.equal(`${verdict.outcome}/${verdict.reason}`, 'already-served/already-served');
+  assert.equal(verdict.recorded, '0.20.0');
+  assert.equal(verdict.executing, '0.21.1');
+  assert.equal(verdict.supersededFile, null);
+  assert.equal(probes, 2);
+  assert.equal(calls.adopt, 0);
+  assert.equal(sweepCalls.length, 1);
+});
+
+test('a superseded file a sibling rewrites while the preview reads it never reads as superseded-record-exists', (t) => {
+  const f = interruptedFixture(t);
+  const record = fs.readFileSync(f.recordFile);
+  const realOpen = fs.openSync;
+  t.after(() => { fs.openSync = realOpen; });
+  const previewWhile = (hooks) => {
+    let fired = false;
+    fs.openSync = function openHook(file, ...rest) {
+      if (fired || file !== f.supersededFile) return realOpen.call(this, file, ...rest);
+      fired = true;
+      if (hooks.beforeOpen) hooks.beforeOpen();
+      const opened = realOpen.call(this, file, ...rest);
+      if (hooks.afterOpen) hooks.afterOpen();
+      return opened;
+    };
+    try {
+      return mod.previewAdoption(f.request);
+    } finally {
+      fs.openSync = realOpen;
+    }
+  };
+  const recopy = () => {
+    fs.rmSync(f.supersededFile);
+    fs.copyFileSync(f.recordFile, f.supersededFile, fs.constants.COPYFILE_EXCL);
+  };
+  const races = [{ beforeOpen: () => fs.rmSync(f.supersededFile) }];
+  if (process.platform !== 'win32') races.push({ afterOpen: () => fs.rmSync(f.supersededFile) }, { afterOpen: recopy });
+  for (const hooks of races) {
+    fs.rmSync(f.supersededFile, { force: true });
+    fs.writeFileSync(f.supersededFile, record.subarray(0, 5));
+    const preview = previewWhile(hooks);
+    assert.equal(`${preview.outcome}/${preview.reason}`, 'adoptable/adoptable', Object.keys(hooks).join());
+    assert.equal(preview.supersededFile, null);
+  }
+  fs.rmSync(f.supersededFile, { force: true });
+  fs.writeFileSync(f.supersededFile, Buffer.from('{"planted":true}'));
+  const foreign = previewWhile({});
+  assert.equal(`${foreign.outcome}/${foreign.reason}`, 'refused/superseded-record-exists');
+  assert.equal(foreign.supersededFile, f.supersededFile);
+  assert.deepEqual(fs.readFileSync(f.recordFile), record);
+  assert.equal(adoptedEntries(f), 0);
+});
+
+test('a refusal a sibling\'s swap can cause is probed once more, and only that refusal', () => {
+  const refusal = (reason) => ({ ok: false, reason, recorded: '0.20.0', executing: '0.21.1', orphanedProjectRoot: false, prunedPluginRoot: false });
+  const served = { ok: false, reason: 'already-served', recorded: '0.21.1', executing: '0.21.1', orphanedProjectRoot: false, prunedPluginRoot: false };
+  const adoptable = { ok: true, recorded: '0.20.0', executing: '0.21.1', orphanedProjectRoot: false, prunedPluginRoot: false, context: {} };
+  const sequence = (answers) => {
+    let probes = 0;
+    return {
+      adoptableRecord: () => {
+        const answer = answers[Math.min(probes, answers.length - 1)];
+        probes += 1;
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
+      count: () => probes,
+    };
+  };
+  for (const reason of ['record-unreadable', 'workflow-schema-mismatch']) {
+    const overtaken = sequence([refusal(reason), served]);
+    const { instance, calls, sweepCalls } = adopter({ adoptableRecord: overtaken.adoptableRecord });
+    const verdict = instance.adoptForHook({ ...REQUEST, observedRecorded: '0.20.0' });
+    assert.equal(`${verdict.outcome}/${verdict.reason}`, 'already-served/already-served', reason);
+    assert.equal(verdict.recorded, '0.20.0', reason);
+    assert.equal(overtaken.count(), 2, reason);
+    assert.equal(calls.adopt, 0, reason);
+    assert.equal(sweepCalls.length, 1, reason);
+
+    const settled = sequence([refusal(reason), adoptable]);
+    const next = adopter({ adoptableRecord: settled.adoptableRecord });
+    assert.equal(next.instance.adoptForHook(REQUEST).outcome, 'adopted', reason);
+    assert.equal(next.calls.adopt, 1, reason);
+    assert.equal(settled.count(), 2, reason);
+
+    const stuck = sequence([refusal(reason), refusal(reason)]);
+    const refused = adopter({ adoptableRecord: stuck.adoptableRecord }).instance.previewAdoption(REQUEST);
+    assert.equal(`${refused.outcome}/${refused.reason}`, `refused/${reason}`);
+    assert.equal(stuck.count(), 2, reason);
+
+    const throwing = sequence([refusal(reason), new TypeError('boom')]);
+    const kept = adopter({ adoptableRecord: throwing.adoptableRecord }).instance.previewAdoption(REQUEST);
+    assert.equal(`${kept.outcome}/${kept.reason}`, `refused/${reason}`);
+    assert.equal(throwing.count(), 2, reason);
+  }
+  for (const reason of ['executing-runtime-older', 'not-a-sibling-installation', 'plugin-data-mismatch']) {
+    const stable = sequence([refusal(reason), served]);
+    const verdict = adopter({ adoptableRecord: stable.adoptableRecord }).instance.previewAdoption(REQUEST);
+    assert.equal(`${verdict.outcome}/${verdict.reason}`, `refused/${reason}`);
+    assert.equal(stable.count(), 1, reason);
+  }
 });

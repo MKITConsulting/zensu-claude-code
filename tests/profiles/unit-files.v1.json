@@ -7,7 +7,7 @@
       "summary": "AI work capture: durable retries, account and host binding, explicit goals, the local feature search and its ranking before the scope question, commit submission and refusal of automatic decisions."
     },
     {
-      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 237, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
+      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 241, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
       "runs": [{ "driver": "tests/session-control/run.sh" }],
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
@@ -113,7 +113,7 @@
       "summary": "The tool-call dispatcher: which checks run for each tool, the wrapper and body each check names, the failure policy, the exec-form registration, the host's aggregation order and the fast-path pre-checks."
     },
     {
-      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 41,
+      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 42,
       "guards": [
         "a detached linked session and everything below it is never listed",
         "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"
@@ -246,14 +246,14 @@
       "summary": "The marker-block reader both rule carriers share: marker position, the size ceilings and the short-read and swapped-file refusals."
     },
     {
-      "path": "tests/structure/session-adopt-report-v1.test.js", "registered": 63,
+      "path": "tests/structure/session-adopt-report-v1.test.js", "registered": 64,
       "runs": [{ "driver": "tests/structure/test-versioned-plugin-upgrade.sh" }],
       "summary": "The adoption report payload: the safe() folding, the pair-forgery guard and the rendered rows."
     },
     {
-      "path": "tests/structure/session-auto-adopt-v1.test.js", "registered": 44,
+      "path": "tests/structure/session-auto-adopt-v1.test.js", "registered": 53,
       "runs": [{ "driver": "tests/structure/test-versioned-plugin-upgrade.sh" }],
-      "summary": "Automatic adoption across a lineage break: the ladder, every refusal and unavailable arm, and the lock."
+      "summary": "Automatic adoption across a lineage break: the ladder, every refusal and unavailable arm, the lock, and an adoption a process kill interrupted."
     },
     {
       "path": "tests/structure/session-control-lineage.test.js", "registered": 13,

@@ -97,10 +97,16 @@ export function isoOf(ms) {
   return Number.isFinite(ms) && Math.abs(ms) <= 8.64e15 ? new Date(ms).toISOString() : null;
 }
 
-export function linkedKind(spawnedFrom) {
+function continuesAnotherSession(record, from) {
+  const source = record && typeof record === 'object' ? record.forkedFromSessionId : null;
+  return typeof source === 'string' && RUN_ID.test(source)
+    && source !== runIdOf(from.sessionId) && source !== runIdOf(record.sessionId);
+}
+
+export function linkedKind(spawnedFrom, record) {
   const from = spawnedFrom && typeof spawnedFrom === 'object' ? spawnedFrom : {};
   if (from.btw === true) return 'btw';
-  if (from.userFork === true) return 'fork';
+  if (from.userFork === true || continuesAnotherSession(record, from)) return 'fork';
   if (from.sideSession === true) return 'side';
   return 'task';
 }
@@ -255,7 +261,7 @@ function entryOf(node, checkout) {
     sessionId: cliSessionIdOf(record.cliSessionId),
     priorSessionIds: (Array.isArray(record.priorCliSessionIds) ? record.priorCliSessionIds : []).map(cliSessionIdOf).filter(Boolean),
     name: continuationName(run),
-    kind: linkedKind(from),
+    kind: linkedKind(from, record),
     title: lineText(record.title) || lineText(from.title) || null,
     createdAt: Number.isFinite(record.createdAt) ? record.createdAt : null,
     throughArchived,

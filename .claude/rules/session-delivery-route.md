@@ -323,7 +323,15 @@ prompt is the brief: it is keyed by root and session key, so a patch update reac
 session, `--restore-root`, a re-anchor or a new CLI session id under the same desktop session all
 find it absent on a prompt the user typed. The desktop's own `completedTurns`, which its result
 handler raises after every successful turn and which is absent before the first, is the
-session-wide fact; the module reads it as the sixth field of its line, `first` or `later`. The lead is
+session-wide fact; the module reads it as the sixth field of its line, `first` or `later`. A fork
+the user starts in the desktop app carries `spawnedFrom.userFork: true`, and a fork in which the
+user continues another linked session carries a `forkedFromSessionId` that names that session, not
+its parent. Neither shows a completed turn, yet the first prompt of each is the user's own, so
+`isUserFork` makes the module answer `fork` for both, which the wrapper treats like `later`: they
+inherit `build` and never carry the note (spec D16, L73-L75, L77, L78). Only `userFork: true`
+counts, or a fork source that matches the host session pattern and names neither the parent nor
+the session itself. The lead asks for the route question only while the field reads `ask`
+and the request changes executable code, the condition of the reminder's own clause (a) (L76). The lead is
 added on the parsed JSON, never in a third heredoc, so it leaves the heredocs that `P1`, `P2` and
 `R13` grade alone. A retry
 that resolves `linked` answers `linked`, because a later prompt is the user's own. The plan gate adds
@@ -562,6 +570,14 @@ route: a route change moves only the field, and every shape of the reminder carr
   `const`, `let` or `var` binding, or when a `realDirectory` call names a policy other than
   `writableOnlyByCaller` or `anyOwnerOrMode` or is spelled in a form the pin cannot read, and `L3l` when the
   reader stops reusing the scratch buffer session-trail passes or the resolver starts passing one;
+  `isUserFork` in the resolver and `linkedKind` in `skills/session-trail/scripts/linked-sessions-v1.mjs`
+  and its `plugins/session-hub/` copy, which apply one rule to the desktop's fork markers, a
+  `spawnedFrom.userFork` of `true` or a `forkedFromSessionId` of the session pattern that names
+  neither the parent nor the session itself, which `L3p` in `test-linked-session-route.sh` holds
+  equal over one table of desktop records, so a change to either marker moves all three (PLM's
+  frozen copy takes it as a fix, `.claude/rules/session-hub-companion.md`), and
+  `.claude/rules/session-trail-linked-sessions.md` names session-trail's side and the Session Hub's
+  `kind_of`, which still reads `user_fork` alone;
   `ZENSU_LINKED_BRIEF_LEAD` and the `ZENSU_DIRECTIVE_LEAD` name in `zensu-directive.sh`; the
   closed spelling list in the doctor probe of `zensu-doctor.sh` and the two source regexes in
   `zensu-doctor-report.js`, which accept `inherited from parent session`; and
@@ -591,7 +607,8 @@ route: a route change moves only the field, and every shape of the reminder carr
   heredocs.
 - `skills/delivery-route/SKILL.md`, its `plugin.json` entry and the README row and counts;
   `config.example.json`; the `defaultDeliveryRoute` row and the hook rows in
-  `docs/configuration.md`; the Layer 2 edge label in `docs/architecture.md` (the `D17` needle
+  `docs/configuration.md`; the fork paragraph of `docs/session-control.md`, which names the delivery
+  route as the one state a linked session or a user fork inherits; the Layer 2 edge label in `docs/architecture.md` (the `D17` needle
   stays contiguous); the first `## When to Use` bullet of `skills/build/SKILL.md`; both interception paragraphs of
   `skills/gauntlet-loop/SKILL.md`.
 - The doctor probe in `zensu-doctor.sh`, the two renderer rows and the shared literals in
@@ -668,6 +685,10 @@ matcher), the knob is an environment variable rather than a config key, `deferre
 of an in-tree shell function that writes nothing, and the hook still emits only
 `additionalContext`. An older runtime of the same lineage never reads the new library, and a marker
 it finds absent after a deferral it resolves itself.
+The `fork` turn and the code condition in the lead are `patch` as well: the turn is a
+new value of the line's sixth field, which only `zensu-linked-session.sh` reads, comparing it with
+`first`, so no kind, reason, field or marker changes, and the lead stays advisory
+`additionalContext`.
 
 ## Known bounds
 
@@ -795,12 +816,13 @@ it finds absent after a deferral it resolves itself.
   that reads `direct` (the own marker or `hooks.defaultDeliveryRoute`) that removes review: a
   request for the workflow typed into that prompt is implemented directly. The effect covers that
   one prompt, the brief note asks the model to name the route the prompt asked for, and an `ask`
-  field asks the route question instead. Letting a request for the workflow count even in a brief
+  field asks the route question instead for a code change. Letting a request for the workflow count even in a brief
   would close it, at the price of letting a genuine brief add the workflow, so the brief decides
   nothing in either direction and this residual is accepted, for the accidental paths below as
   well: after a first turn that ended in an error, `completedTurns` is still absent, so the user's
   own next prompt is taken for the brief once more. Every path ends the same way: one prompt, a
-  note that names the requested route, and the route question under an `ask` field. In the desktop
+  note that names the requested route, and, for a code change, the route question under an `ask`
+  field. In the desktop
   store only a deliberate actor with the user's own write access forges these records, and the
   plugin guards against accidents, not against such an actor: off Windows the resolver refuses a
   store, account or organization directory and a record that another account owns or that grants
@@ -808,15 +830,19 @@ it finds absent after a deferral it resolves itself.
   extending the residual to another account. The check reads the owner and the mode bits only: a
   directory or record another account can write through an access-control list still extends it,
   and on Windows, where neither is judged, so does any store another account can write. A fork the
-  user starts is not resolved as linked, so no prompt typed there is taken for a brief.
+  user starts or continues resolves with the turn `fork`, so no prompt typed there is taken for a
+  brief.
 - A brief that is a bare slash command is skipped by the reminder, like every bare slash command,
   so the lineage resolves on the next typed prompt. That prompt carries no brief note once the slash
   command's turn completed and raised `completedTurns`; after a turn that ended in an error, the
   user's own next prompt still carries it, and for that one request a route preference the user
   typed decides nothing.
 - With `hooks.tddReminder=false` no brief note appears; the plan gate still resolves the
-  inheritance. Forks the user starts (the desktop's fork action, `--fork-session`) carry no
-  `spawnedFrom` and inherit nothing; their lineage source is different and is a follow-up.
+  inheritance. A terminal fork (`--fork-session`) leaves no desktop record and inherits nothing;
+  its lineage source is different and is a follow-up. The desktop's fork action writes `spawnedFrom`
+  with `userFork: true`, and a fork in which the user continues another linked session names that
+  session in `forkedFromSessionId`, so both inherit `build` like any linked session and never carry
+  the note.
 - The one resolution is a cross-session read: two desktop records, one Session Control record, up
   to two markers of another session, and `git rev-parse` in both roots. Measured on 2026-10-18:
   p95 26 ms in-process, and p95 174 ms through the CLI at a load average of 27, where a bare `node`
@@ -838,6 +864,20 @@ it finds absent after a deferral it resolves itself.
   the note; a desktop build that never writes it makes every re-resolution `first`, so the linked
   marker's absence alone decides the note; and the field must be on disk before the next prompt's hook reads
   it, which the desktop's save after each result makes likely but which was not observed live.
+- A user fork is recognized through two more private fields of the own record, `spawnedFrom.userFork`
+  and `forkedFromSessionId`. Measured on 2026-11-24 over the ten Session Hub profile stores: 74
+  records carried `forkedFromSessionId`; 43 carried `userFork: true` (41 with the parent as the fork
+  source, 2 with another session) and 31 carried `userFork: false` with a source other than the
+  parent. None of the 74 was created by a `start_session` or `hand_off_to_session` call, and none
+  opened with a brief: 63 first prompts were typed by the user, the rest were task notifications,
+  compaction summaries, a `/goal` command or no prompt. No `start_session` call with
+  `context: "fork"` appears in the 5,538 transcripts written since 2026-10-15, so the record of a
+  session that another session forks is unmeasured. `isUserFork` therefore counts a source other
+  than the parent, never the parent itself, so such a session keeps the note as long as it names its
+  own parent as the source and carries no `userFork: true`. A session another session started that
+  carried either marker would lose the note, so a route preference in its brief would decide that
+  one prompt, the direction that removes review under a `build` field. A desktop build that renames
+  the markers makes user forks read as briefs again, the behavior from before the `fork` turn.
 - A linked session that is already running when the release carrying this arrives resolves its
   lineage on its first prompt under the new runtime. It gets no brief note, because its
   `completedTurns` is set, but it can start inheriting `build` mid-session, which the field discloses.

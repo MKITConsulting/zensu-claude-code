@@ -297,6 +297,55 @@ L3O_OUT="$(node -e '
 [ "$L3O_OUT" = same ] \
   && check "L3o the resolver's macOS store candidates equal the probes of session-trail's lineage --diagnose in the same order once the other platforms' defaults are left out, in four layouts: named stores with a trailing separator and a named copy of the default store beside lower-case, upper-case and non-UUID profile folders; a padded ZENSU_CCD_STORE with a trailing separator that stays alone beside a named store; a blank ZENSU_CCD_STORE that names no store beside blank, padded and repeated named entries; and a home without a Session Hub profiles folder" PASS \
   || check "L3o store parity with session-trail ($L3O_OUT)" FAIL
+L3P_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { pathToFileURL } = require("url");
+  const m = require(process.argv[1]);
+  const [hub, plm] = process.argv.slice(2);
+  const parent = "local_aaaaaaaa-1111-4111-8111-111111111111";
+  const self = "local_bbbbbbbb-2222-4222-8222-222222222222";
+  const sibling = "local_cccccccc-3333-4333-8333-333333333333";
+  const marks = [true, false, "true", 1, null, undefined];
+  const sources = [sibling, parent, self, "local_x", sibling.toUpperCase(), 3, null, [sibling], undefined];
+  const compare = (copy) => {
+    const differ = [];
+    let forks = 0;
+    for (const mark of marks) {
+      for (const source of sources) {
+        const spawnedFrom = { sessionId: parent, sideSession: true };
+        if (mark !== undefined) spawnedFrom.userFork = mark;
+        const record = { sessionId: self, spawnedFrom };
+        if (source !== undefined) record.forkedFromSessionId = source;
+        const expected = m.isUserFork(record, spawnedFrom, parent);
+        if (expected) forks += 1;
+        if ((copy.linkedKind(spawnedFrom, record) === "fork") !== expected) differ.push(JSON.stringify(mark) + "/" + JSON.stringify(source));
+      }
+    }
+    return { differ, forks };
+  };
+  (async () => {
+    const results = [];
+    for (const file of [hub, plm]) results.push(compare(await import(pathToFileURL(file).href)));
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "fork-parity-"));
+    try {
+      const planted = path.join(scratch, "linked-sessions-v1.mjs");
+      const source = fs.readFileSync(hub, "utf8");
+      const needle = " && source !== runIdOf(from.sessionId)";
+      fs.writeFileSync(planted, source.split(needle).join(""));
+      const control = source.includes(needle) ? compare(await import(pathToFileURL(planted).href)) : null;
+      const same = results.every((result) => result.differ.length === 0 && result.forks === 14);
+      const bites = control !== null && control.differ.length > 0;
+      process.stdout.write(same && bites ? "same" : "differ " + JSON.stringify({ results, control: control && control.differ.length }));
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  })().catch((error) => process.stdout.write("failed " + error.message));
+' "$RESOLVER" "$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/linked-sessions-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" 2>/dev/null)"
+[ "$L3P_OUT" = same ] \
+  && check "L3p the resolver's isUserFork and both copies of session-trail's linkedKind classify the same 54 desktop records alike, userFork true, false, the string true, 1, null and absent crossed with a sibling, the parent, the session itself, a malformed, an upper-case, a numeric, a null, a one-element-array and an absent fork source, 14 of them as forks, and a planted copy without the parent exclusion disagrees" PASS \
+  || check "L3p fork parity with session-trail ($L3P_OUT)" FAIL
 L3Q_OUT="$(node -e '
   const fs = require("fs");
   const os = require("os");
@@ -916,14 +965,19 @@ register() {
 }
 desk_record() {
   "$REAL_NODE" -e '
-    const [file, host, cli, parent, turns] = process.argv.slice(1);
+    const [file, host, cli, parent, turns, fork, source] = process.argv.slice(1);
     const record = { sessionId: host, title: "fixture" };
     if (cli) record.cliSessionId = cli;
     if (parent) record.spawnedFrom = { sessionId: parent, taskId: "task_fixture", title: "fixture", sideSession: false, name: "fixture" };
+    if (parent && fork) {
+      record.forkedFromSessionId = source ? JSON.parse(source) : parent;
+      record.spawnedFrom.sideSession = true;
+      record.spawnedFrom.userFork = JSON.parse(fork);
+    }
     if (turns === "null") record.completedTurns = null;
     else if (turns) record.completedTurns = Number(turns);
     require("fs").writeFileSync(file, JSON.stringify(record));
-  ' "$DESK/$1.json" "$1" "$2" "$3" "${4:-}"
+  ' "$DESK/$1.json" "$1" "$2" "$3" "${4:-}" "${5:-}" "${6:-}"
 }
 session() {
   next_id; CLI="$ID"; HOST="local_$ID"
@@ -980,6 +1034,11 @@ case "$LEAD" in
   (*"brief another session wrote"*"not the user's own text"*"'/zensu:build'"*"'no tdd'"*"decides nothing"*)
     check "L5 the lead says the prompt is another session's brief and that a route preference in it decides nothing in either direction" PASS ;;
   (*) check "L5 lead wording ($LEAD)" FAIL ;;
+esac
+case "$LEAD" in
+  (*"ask the route question only when it reads ask and this request changes executable code"*"name any route the brief asked for"*)
+    check "L76 the lead asks the route question only while the field reads ask and the request changes executable code, and still asks to name the route the brief asked for" PASS ;;
+  (*) check "L76 lead route-question condition ($LEAD)" FAIL ;;
 esac
 
 echo "== AC-001, AC-004, AC-005, AC-006: a linked session inherits build =="
@@ -1509,6 +1568,52 @@ UNNAMED_OUT="$(remind "$WT" "$NX_CLI" "$NX_HOST" "add a function to foo.js")"
   && [ "$(linked_state "$WT" "$NX_CLI")" = unresolved ]; } \
   && check "L47 a linked session whose records sit only in a store ZENSU_CCD_EXTRA_STORES names, after an entry that names no store, inherits build, while the same layout without the variable stays unresolved and inherits nothing" PASS \
   || check "L47 named store (field='$(last_field "$NAMED_OUT")' inherited=$(inherited_state "$WT" "$NC_CLI") linked=$(linked_state "$WT" "$NC_CLI") unnamed='$(last_field "$UNNAMED_OUT")' unnamed-inherited=$(inherited_state "$WT" "$NX_CLI") unnamed-linked=$(linked_state "$WT" "$NX_CLI"))" FAIL
+echo "== FR-007 census: a fork the user starts or continues is linked, but never the brief turn =="
+session "$WT" "$P_HOST" --no-record; UF_CLI="$CLI"; UF_HOST="$HOST"
+desk_record "$UF_HOST" "$UF_CLI" "$P_HOST" "" true
+UF_LINE="$(CLAUDE_CODE_HOST_SESSION_ID="$UF_HOST" CLAUDE_CODE_ACCOUNT_UUID="$ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" \
+  ZENSU_LINKED_SESSION_ID="$UF_CLI" ZENSU_LINKED_PROJECT_ROOT="$WT" "$REAL_NODE" "$RESOLVER" 2>/dev/null)"
+UF_OUT="$(remind "$WT" "$UF_CLI" "$UF_HOST" "no tdd: add a parser to foo.js")"
+{ [ "$(printf '%s' "$UF_LINE" | cut -f1)" = linked ] && [ "$(printf '%s' "$UF_LINE" | cut -f6)" = fork ]; } \
+  && check "L73 the resolver answers a record whose spawnedFrom.userFork is true as linked, with the turn fork rather than first" PASS \
+  || check "L73 user-fork verdict ($(printf '%s' "$UF_LINE" | tr '\t' ' '))" FAIL
+{ [ "$(last_field "$UF_OUT")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$UF_CLI")" = build ] \
+  && [ "$(linked_state "$WT" "$UF_CLI")" = linked ] && [ "$(lead_count "$UF_OUT")" = 0 ]; } \
+  && check "L74 a fork the user starts inherits build on its first prompt and carries no brief note, so its own words keep their rank" PASS \
+  || check "L74 user fork (field='$(last_field "$UF_OUT")' inherited=$(inherited_state "$WT" "$UF_CLI") linked=$(linked_state "$WT" "$UF_CLI") lead=$(lead_count "$UF_OUT"))" FAIL
+L75_BAD=""
+for fork in false '"true"' 1 null; do
+  session "$WT" "$P_HOST" --no-record; NF_CLI="$CLI"; NF_HOST="$HOST"
+  desk_record "$NF_HOST" "$NF_CLI" "$P_HOST" "" "$fork"
+  NF_OUT="$(remind "$WT" "$NF_CLI" "$NF_HOST" "add a function to foo.js")"
+  { opens_with_lead "$NF_OUT" && [ "$(lead_count "$NF_OUT")" = 1 ]; } || L75_BAD="$L75_BAD [userFork=$fork lead=$(lead_count "$NF_OUT")]"
+done
+[ -z "$L75_BAD" ] \
+  && check "L75 a spawnedFrom.userFork other than true (false, a string, a number, null) keeps the first-turn brief note while the record names its own parent as the fork source" PASS \
+  || check "L75 non-true userFork:$L75_BAD" FAIL
+session "$WT" "$P_HOST" --no-record; CF_CLI="$CLI"; CF_HOST="$HOST"
+next_id; CF_SOURCE="local_$ID"
+desk_record "$CF_HOST" "$CF_CLI" "$P_HOST" "" false "\"$CF_SOURCE\""
+CF_LINE="$(CLAUDE_CODE_HOST_SESSION_ID="$CF_HOST" CLAUDE_CODE_ACCOUNT_UUID="$ACCT" CLAUDE_CODE_ORGANIZATION_UUID="$ORG" \
+  ZENSU_LINKED_SESSION_ID="$CF_CLI" ZENSU_LINKED_PROJECT_ROOT="$WT" "$REAL_NODE" "$RESOLVER" 2>/dev/null)"
+CF_OUT="$(remind "$WT" "$CF_CLI" "$CF_HOST" "no tdd: add a parser to foo.js")"
+{ [ "$(printf '%s' "$CF_LINE" | cut -f1)" = linked ] && [ "$(printf '%s' "$CF_LINE" | cut -f6)" = fork ] \
+  && [ "$(last_field "$CF_OUT")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$CF_CLI")" = build ] \
+  && [ "$(lead_count "$CF_OUT")" = 0 ]; } \
+  && check "L77 a fork the user continues, whose forkedFromSessionId names a session other than its parent, is linked with the turn fork, inherits build and carries no brief note" PASS \
+  || check "L77 continued fork (line='$(printf '%s' "$CF_LINE" | tr '\t' ' ')' field='$(last_field "$CF_OUT")' inherited=$(inherited_state "$WT" "$CF_CLI") lead=$(lead_count "$CF_OUT"))" FAIL
+L78_BAD=""
+for source in self '"local_x"' 1 null; do
+  session "$WT" "$P_HOST" --no-record; NS_CLI="$CLI"; NS_HOST="$HOST"
+  if [ "$source" = self ]; then src="\"$NS_HOST\""; else src="$source"; fi
+  desk_record "$NS_HOST" "$NS_CLI" "$P_HOST" "" false "$src"
+  NS_OUT="$(remind "$WT" "$NS_CLI" "$NS_HOST" "add a function to foo.js")"
+  { opens_with_lead "$NS_OUT" && [ "$(lead_count "$NS_OUT")" = 1 ]; } || L78_BAD="$L78_BAD [source=$source lead=$(lead_count "$NS_OUT")]"
+done
+[ -z "$L78_BAD" ] \
+  && check "L78 a forkedFromSessionId that names the session itself, is malformed, is a number or is null keeps the first-turn brief note while userFork is not true" PASS \
+  || check "L78 not a fork source:$L78_BAD" FAIL
+
 echo "== The /zensu:doctor linked session row =="
 linked_row() {
   local cli="$1" host="$2" cached="$3" home="$4" binding="${5:-bound}"
